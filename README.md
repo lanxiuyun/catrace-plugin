@@ -188,4 +188,4 @@ await plugin.events.publish({
 | sidecar 无响应 | 无 Node / PATH；RPC 未回 `response` | 查进程与协议 |
 | 模块加载失败 | bare import | 只用全局注入 |
 
-> 更完整的通用合同见宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`。AI 开发可加载本仓库 skill：`skills/develop-catrace-plugin/SKILL.md`。
+> 更完整的通用合同见宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`。AI 开发可加载本仓库根目录 skill：`SKILL.md`。
