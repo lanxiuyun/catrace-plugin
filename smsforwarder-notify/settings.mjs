@@ -83,6 +83,60 @@ const CSS = `
 }
 .sf-settings .copy-row .mono { flex: 1; min-width: 0; }
 .sf-settings .url-list { display: flex; flex-direction: column; gap: 0.375rem; }
+.sf-settings .tabs {
+  display: flex; gap: 0.25rem; flex-wrap: wrap;
+  background: #f0fdfa; border: 0.0625rem solid #ccfbf1;
+  border-radius: 0.75rem; padding: 0.25rem;
+}
+.sf-settings .tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 0.5rem 1rem; border-radius: 0.625rem;
+  font-size: 0.8125rem; font-weight: 600; color: #5b6b6a;
+  transition: background 0.15s, color 0.15s;
+}
+.sf-settings .tab:hover { color: #0d9488; }
+.sf-settings .tab.is-active { background: #14b8a6; color: #fff; }
+.sf-settings .sf-tab-panel {
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+.sf-settings .step {
+  display: flex; gap: 0.75rem; align-items: flex-start;
+  padding: 0.875rem 1rem;
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem;
+  background: #fff;
+}
+.sf-settings .step-num {
+  flex: 0 0 auto;
+  width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: #14b8a6; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.8125rem; font-weight: 700;
+}
+.sf-settings .step-body { display: flex; flex-direction: column; gap: 0.375rem; min-width: 0; }
+.sf-settings .step-title { font-size: 0.875rem; font-weight: 700; color: #134e4a; }
+.sf-settings .step-list {
+  margin: 0; padding-left: 1.25rem;
+  font-size: 0.8125rem; color: #424a53; line-height: 1.7;
+}
+.sf-settings .step-list li + li { margin-top: 0.125rem; }
+.sf-settings .faq {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  padding: 0.625rem 0; border-bottom: 0.0625rem solid #f0fdfa;
+}
+.sf-settings .faq:last-child { border-bottom: 0; }
+.sf-settings .faq-q { font-size: 0.8125rem; font-weight: 700; color: #134e4a; }
+.sf-settings .faq-a { margin: 0; font-size: 0.75rem; line-height: 1.6; color: #5b6b6a; }
+.sf-settings .steps-wrap { display: flex; flex-direction: column; gap: 0.5rem; }
+.sf-settings .dl-list { display: flex; flex-direction: column; gap: 0.375rem; }
+.sf-settings .dl-item {
+  display: flex; flex-direction: column; gap: 0.125rem;
+  padding: 0.5rem 0.625rem; border-radius: 0.5rem;
+  background: #f0fdfa; border: 0.0625rem solid #ccfbf1;
+}
+.sf-settings .dl-name { font-size: 0.8125rem; font-weight: 600; color: #134e4a; }
+.sf-settings .dl-name a { color: #0d9488; text-decoration: none; }
+.sf-settings .dl-name a:hover { text-decoration: underline; }
+.sf-settings .dl-note { margin: 0; font-size: 0.6875rem; color: #8b949e; line-height: 1.45; }
 `
 
 function ensureStyles() {
@@ -148,6 +202,103 @@ const JSON_TEMPLATE = `{
   "timestamp": "[timestamp]"
 }`
 
+const TABS = [
+  { id: 'overview', label: '概览' },
+  { id: 'settings', label: '设置' },
+  { id: 'tutorial', label: '教程' },
+]
+
+const DOWNLOAD_LINKS = [
+  {
+    name: 'GitHub Releases（官方首发）',
+    url: 'https://github.com/pppscn/SmsForwarder/releases',
+    note: '官方 APK 下载页，推荐优先使用；国内网络可能访问较慢',
+  },
+  {
+    name: 'Gitee 国内镜像',
+    url: 'https://gitee.com/pp/SmsForwarder/releases',
+    note: '国内下载更快，版本与 GitHub 同步',
+  },
+  {
+    name: '蓝奏云网盘',
+    url: 'https://wws.lanzoui.com/b025yl86h',
+    note: '访问密码：pppscn',
+  },
+  {
+    name: '项目主页（源码与 Wiki 文档）',
+    url: 'https://github.com/pppscn/SmsForwarder',
+    note: '查看使用文档、提交 Issue 或参与开发',
+  },
+]
+
+const TUTORIAL_STEPS = [
+  {
+    title: '准备条件',
+    items: [
+      '电脑已安装 Catrace，且能在命令行执行 node 命令（sidecar 依赖 Node）',
+      '手机与电脑连接同一 Wi-Fi',
+      '手机上安装 SmsForwarder（官方支持 Android 4.4–13，14 以上需实机验证；下载地址见下方）',
+    ],
+  },
+  {
+    title: '启用插件',
+    items: [
+      '在 Catrace 插件列表中找到 smsforwarder-notify 并启用',
+      '首次启用 = 信任本地代码（会运行 sidecar Node 进程）',
+      '回到本页「概览」，确认服务状态显示「运行中」',
+      'Windows 防火墙首次会弹窗询问是否允许 node 入站，选「允许访问」即可；若没弹窗且手机能连上，可跳过防火墙配置',
+    ],
+  },
+  {
+    title: '配置 SmsForwarder',
+    items: [
+      '打开 SmsForwarder，在通知监听器中开启「通知使用权」',
+      '设置里开启「启动时异步获取已安装 App 列表」，否则取不到 {{APP_NAME}}',
+      '发送通道 → 新建，类型选 Webhook / 自定义请求',
+      '请求方法选 POST，URL 填「推荐 Webhook URL」里电脑局域网 IP 那条',
+      '请求头填入下方复制的 Authorization 头',
+      '请求体粘贴下方复制的 JSON 消息模板',
+      'Content-Type 设为 application/json',
+      '「响应关键词」可填 "ok":true（可选，用于判断发送成功）',
+    ],
+  },
+  {
+    title: '验证通知链路',
+    items: [
+      '在「概览」点「发送测试 Toast」，确认电脑能弹通知',
+      '在 SmsForwarder 里对该通道发一条测试通知，应显示发送成功',
+      '手机上任意 App 来新通知时，电脑应弹出对应 Toast',
+    ],
+  },
+]
+
+const FAQ = [
+  [
+    '手机访问不到电脑',
+    '确认与电脑同一 Wi-Fi；首次启动时若防火墙弹窗选过「允许访问」则无需手动配置；若仍未放行，可在「Windows Defender 防火墙 → 高级设置 → 入站规则」手动放行 TCP 端口；同时关闭路由器「客户端隔离」，并在「设置」里核对端口、路径、Token 是否一致。',
+  ],
+  [
+    '服务显示未运行',
+    '确认插件已启用；确认电脑能执行 node 命令；点「重启服务」；查看「最近错误」摘要。',
+  ],
+  [
+    '取不到 App 名，只显示包名',
+    'SmsForwarder 需开启「启动时异步获取已安装 App 列表」；未开启时回退显示包名属正常现象。',
+  ],
+  [
+    '重复通知刷屏',
+    '在「设置」里调大「去重窗口」（默认 5 秒）。',
+  ],
+  [
+    '验证码没有复制按钮',
+    '正文或标题需包含「验证码 / 校验码 / 动态码 / OTP」等关键词，且出现独立的 4–8 位数字；开启「隐私模式」时不提供复制按钮。',
+  ],
+  [
+    '端口被占用',
+    '换一个端口（1024–65535），保存并重启服务。',
+  ],
+]
+
 export default {
   name: 'SmsforwarderNotifySettings',
   setup(_props, { expose }) {
@@ -169,6 +320,7 @@ export default {
     const enableOtpAction = ref(true)
     const status = ref(null)
     const webhookInfo = ref(null)
+    const activeTab = ref('overview')
     let saveTimer = null
 
     const headerEnabled = computed(() => enabled.value !== false)
@@ -295,12 +447,12 @@ export default {
         const result = await plugin.sidecar.request('getWebhookInfo')
         webhookInfo.value = result && typeof result === 'object' ? result : null
         if (result && typeof result.token === 'string' && result.token) {
-          token.value = result.token
-          // persist generated token
-          const cfg = currentConfig()
-          if (!cfg.token) {
-            cfg.token = result.token
-            await plugin.config.set(cfg)
+          // sidecar is source of truth for the live webhook secret
+          const prev = String(token.value || '').trim()
+          const live = result.token.trim()
+          if (prev !== live) {
+            token.value = live
+            await plugin.config.set(currentConfig())
           }
         }
         if (result) {
@@ -430,13 +582,14 @@ export default {
           const raw = await plugin.config.get()
           applyConfig(raw && typeof raw === 'object' ? raw : DEFAULT_CONFIG)
           try {
-            await refreshStatus()
-            await refreshWebhookInfo({ quiet: true })
-            // if no token yet, sidecar generates — pull & persist
-            if (!token.value && webhookInfo.value?.token) {
-              token.value = webhookInfo.value.token
-              await plugin.config.set(currentConfig())
+            // push UI/plugin.config into sidecar first so the Token field is what HTTP checks
+            if (plugin.sidecar?.request) {
+              const pushed = await plugin.sidecar.request('setConfig', currentConfig())
+              if (pushed && typeof pushed === 'object') status.value = pushed
             }
+            await refreshStatus()
+            // pull live token (sidecar may have generated one if field was empty)
+            await refreshWebhookInfo({ quiet: true })
           } catch {
             status.value = null
           }
@@ -497,316 +650,394 @@ export default {
           { default: () => label },
         )
 
-      return h('div', { class: 'sf-settings' }, [
-        h('div', { class: 'card' }, [
-          h('div', { class: 'head' }, [
-            h('h2', 'SmsForwarder 通知'),
-            h(
-              NTag,
-              {
-                size: 'small',
-                round: true,
-                bordered: false,
-                type: enabled.value ? 'success' : 'default',
+      const tabBar = h(
+        'div',
+        { class: 'tabs' },
+        TABS.map((t) =>
+          h(
+            'button',
+            {
+              key: t.id,
+              class: ['tab', { 'is-active': activeTab.value === t.id }],
+              onClick: () => {
+                activeTab.value = t.id
               },
-              { default: () => (enabled.value ? '已启用' : '已关闭') },
-            ),
-          ]),
-          h(
-            'p',
-            { class: 'desc' },
-            '本机开 HTTP Webhook，接收 Android SmsForwarder 转发的 App 通知，弹出 Catrace Toast。仅建议可信局域网使用。',
+            },
+            t.label,
           ),
+        ),
+      )
+
+      const headerCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [
+          h('h2', 'SmsForwarder 通知'),
           h(
-            'p',
-            { class: 'warn' },
-            '安全：默认监听 0.0.0.0（全部网卡）。务必使用强 Token，勿暴露到公网。Windows 防火墙需放行入站端口。',
+            NTag,
+            {
+              size: 'small',
+              round: true,
+              bordered: false,
+              type: enabled.value ? 'success' : 'default',
+            },
+            { default: () => (enabled.value ? '已启用' : '已关闭') },
           ),
         ]),
+        h(
+          'p',
+          { class: 'desc' },
+          '本机开 HTTP Webhook，接收 Android SmsForwarder 转发的 App 通知，弹出 Catrace Toast。仅建议可信局域网使用。',
+        ),
+        h(
+          'p',
+          { class: 'warn' },
+          '安全：默认监听 0.0.0.0（全部网卡）。务必使用强 Token，勿暴露到公网。首次启动防火墙弹窗选「允许访问」即可，无需手动配置；手机连不上时再放行入站端口。',
+        ),
+      ])
 
-        h('div', { class: 'card' }, [
-          h('div', { class: 'head' }, [h('h2', '服务状态')]),
-          loading.value
-            ? h('p', { class: 'desc' }, '加载中…')
-            : h(
-                'div',
-                { class: 'status' },
-                statusRows.flatMap(([k, v]) => [h('strong', k), h('span', String(v))]),
-              ),
-          h('div', { class: 'actions' }, [
-            h(
-              NButton,
-              {
-                size: 'small',
-                loading: busy.value === 'status',
-                disabled: !!busy.value && busy.value !== 'status',
-                onClick: () =>
-                  run('status', async () => {
-                    await refreshStatus()
-                    await refreshWebhookInfo({ quiet: true })
-                  }),
-              },
-              { default: () => '刷新状态' },
+      const overviewCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', '服务状态')]),
+        loading.value
+          ? h('p', { class: 'desc' }, '加载中…')
+          : h(
+              'div',
+              { class: 'status' },
+              statusRows.flatMap(([k, v]) => [h('strong', k), h('span', String(v))]),
             ),
-            h(
-              NButton,
-              {
-                size: 'small',
-                loading: busy.value === 'restart',
-                disabled: !!busy.value && busy.value !== 'restart',
-                onClick: restartServer,
-              },
-              { default: () => '重启服务' },
-            ),
-            h(
-              NButton,
-              {
-                size: 'small',
-                type: 'primary',
-                loading: busy.value === 'test',
-                disabled: !!busy.value && busy.value !== 'test',
-                onClick: sendTest,
-              },
-              { default: () => '发送测试 Toast' },
-            ),
-          ]),
-        ]),
-
-        h('div', { class: 'card' }, [
-          h('div', { class: 'head' }, [h('h2', '连接配置')]),
-          h('div', { class: 'row' }, [
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '端口'),
-              h('div', { class: 'row-inline' }, [
-                h(NInput, {
-                  class: 'num',
-                  value: String(port.value),
-                  'onUpdate:value': (v) => {
-                    port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
-                    scheduleSave()
-                  },
+        h('div', { class: 'actions' }, [
+          h(
+            NButton,
+            {
+              size: 'small',
+              loading: busy.value === 'status',
+              disabled: !!busy.value && busy.value !== 'status',
+              onClick: () =>
+                run('status', async () => {
+                  await refreshStatus()
+                  await refreshWebhookInfo({ quiet: true })
                 }),
-              ]),
-              h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '路径'),
-              h(NInput, {
-                value: path.value,
-                placeholder: '/webhook',
-                'onUpdate:value': (v) => {
-                  path.value = v
-                  scheduleSave()
-                },
-              }),
-            ]),
-          ]),
+            },
+            { default: () => '刷新状态' },
+          ),
+          h(
+            NButton,
+            {
+              size: 'small',
+              loading: busy.value === 'restart',
+              disabled: !!busy.value && busy.value !== 'restart',
+              onClick: restartServer,
+            },
+            { default: () => '重启服务' },
+          ),
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'primary',
+              loading: busy.value === 'test',
+              disabled: !!busy.value && busy.value !== 'test',
+              onClick: sendTest,
+            },
+            { default: () => '发送测试 Toast' },
+          ),
+        ]),
+      ])
+
+      const settingsCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', '连接配置')]),
+        h('div', { class: 'row' }, [
           h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, 'Token'),
+            h('div', { class: 'label' }, '端口'),
             h('div', { class: 'row-inline' }, [
               h(NInput, {
-                value: token.value,
-                type: showToken.value ? 'text' : 'password',
-                showPasswordOn: 'click',
-                placeholder: '启用插件后自动生成',
-                style: { flex: 1, minWidth: '12rem' },
+                class: 'num',
+                value: String(port.value),
                 'onUpdate:value': (v) => {
-                  token.value = v
+                  port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
                   scheduleSave()
                 },
               }),
-              h(
-                NButton,
-                {
-                  size: 'small',
-                  onClick: () => {
-                    showToken.value = !showToken.value
-                  },
-                },
-                { default: () => (showToken.value ? '隐藏' : '显示') },
-              ),
-              NPopconfirm
-                ? h(
-                    NPopconfirm,
-                    {
-                      onPositiveClick: regenerateToken,
-                    },
-                    {
-                      trigger: () =>
-                        h(
-                          NButton,
-                          {
-                            size: 'small',
-                            type: 'warning',
-                            loading: busy.value === 'regen',
-                            disabled: !!busy.value && busy.value !== 'regen',
-                          },
-                          { default: () => '重新生成' },
-                        ),
-                      default: () => '重新生成会使手机端旧 Token 立即失效，确认？',
-                    },
-                  )
-                : h(
-                    NButton,
-                    {
-                      size: 'small',
-                      type: 'warning',
-                      loading: busy.value === 'regen',
-                      onClick: regenerateToken,
-                    },
-                    { default: () => '重新生成' },
-                  ),
             ]),
-            h('p', { class: 'hint' }, 'SmsForwarder 请求头：Authorization: Bearer <token>'),
+            h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
           ]),
-          h('div', { class: 'row' }, [
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, 'Toast 停留'),
-              h('div', { class: 'row-inline' }, [
-                h(NInput, {
-                  class: 'num',
-                  value: String(cardDurationSec.value),
-                  'onUpdate:value': (v) => {
-                    cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
-                    scheduleSave()
-                  },
-                }),
-                h('span', { class: 'unit' }, '秒（0=常驻）'),
-              ]),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '去重窗口'),
-              h('div', { class: 'row-inline' }, [
-                h(NInput, {
-                  class: 'num',
-                  value: String(dedupeWindowSec.value),
-                  'onUpdate:value': (v) => {
-                    dedupeWindowSec.value = clamp(
-                      v,
-                      MIN_DEDUPE_SEC,
-                      MAX_DEDUPE_SEC,
-                      DEFAULT_DEDUPE_SEC,
-                    )
-                    scheduleSave()
-                  },
-                }),
-                h('span', { class: 'unit' }, '秒'),
-              ]),
-            ]),
-          ]),
-          h('div', { class: 'actions' }, [
-            h(
-              NButton,
-              {
-                size: 'small',
-                type: 'primary',
-                loading: busy.value === 'save',
-                onClick: () => run('save', () => persistAndSync({ quiet: false })),
-              },
-              { default: () => '保存并应用' },
-            ),
-          ]),
-        ]),
-
-        h('div', { class: 'card' }, [
-          h('div', { class: 'head' }, [h('h2', '过滤与隐私')]),
           h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名）'),
+            h('div', { class: 'label' }, '路径'),
             h(NInput, {
-              value: blacklistText.value,
-              type: 'textarea',
-              rows: 4,
-              placeholder: 'com.example.ads\n某广告 App',
+              value: path.value,
+              placeholder: '/webhook',
               'onUpdate:value': (v) => {
-                blacklistText.value = v
+                path.value = v
                 scheduleSave()
               },
             }),
           ]),
-          h('div', { class: 'row' }, [
-            h('span', { class: 'switch-pair' }, [
-              h(NSwitch, {
-                value: hideSensitiveBody.value,
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, 'Token'),
+          h('div', { class: 'row-inline' }, [
+            h(NInput, {
+              value: token.value,
+              type: showToken.value ? 'text' : 'password',
+              showPasswordOn: 'click',
+              placeholder: '启用插件后自动生成',
+              style: { flex: 1, minWidth: '12rem' },
+              'onUpdate:value': (v) => {
+                token.value = v
+                scheduleSave()
+              },
+            }),
+            h(
+              NButton,
+              {
+                size: 'small',
+                onClick: () => {
+                  showToken.value = !showToken.value
+                },
+              },
+              { default: () => (showToken.value ? '隐藏' : '显示') },
+            ),
+            NPopconfirm
+              ? h(
+                  NPopconfirm,
+                  {
+                    onPositiveClick: regenerateToken,
+                  },
+                  {
+                    trigger: () =>
+                      h(
+                        NButton,
+                        {
+                          size: 'small',
+                          type: 'warning',
+                          loading: busy.value === 'regen',
+                          disabled: !!busy.value && busy.value !== 'regen',
+                        },
+                        { default: () => '重新生成' },
+                      ),
+                    default: () => '重新生成会使手机端旧 Token 立即失效，确认？',
+                  },
+                )
+              : h(
+                  NButton,
+                  {
+                    size: 'small',
+                    type: 'warning',
+                    loading: busy.value === 'regen',
+                    onClick: regenerateToken,
+                  },
+                  { default: () => '重新生成' },
+                ),
+          ]),
+          h('p', { class: 'hint' }, 'SmsForwarder 请求头：Authorization: Bearer <token>'),
+        ]),
+        h('div', { class: 'row' }, [
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, 'Toast 停留'),
+            h('div', { class: 'row-inline' }, [
+              h(NInput, {
+                class: 'num',
+                value: String(cardDurationSec.value),
                 'onUpdate:value': (v) => {
-                  hideSensitiveBody.value = !!v
+                  cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
                   scheduleSave()
                 },
               }),
-              '隐私模式（不显示正文/验证码）',
+              h('span', { class: 'unit' }, '秒（0=常驻）'),
             ]),
           ]),
-          h('div', { class: 'row' }, [
-            h('span', { class: 'switch-pair' }, [
-              h(NSwitch, {
-                value: enableOtpAction.value,
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, '去重窗口'),
+            h('div', { class: 'row-inline' }, [
+              h(NInput, {
+                class: 'num',
+                value: String(dedupeWindowSec.value),
                 'onUpdate:value': (v) => {
-                  enableOtpAction.value = !!v
+                  dedupeWindowSec.value = clamp(
+                    v,
+                    MIN_DEDUPE_SEC,
+                    MAX_DEDUPE_SEC,
+                    DEFAULT_DEDUPE_SEC,
+                  )
                   scheduleSave()
                 },
               }),
-              '识别验证码并显示复制按钮',
+              h('span', { class: 'unit' }, '秒'),
             ]),
           ]),
         ]),
-
-        h('div', { class: 'card' }, [
-          h('div', { class: 'head' }, [h('h2', 'SmsForwarder 配置指南')]),
+        h('div', { class: 'actions' }, [
           h(
-            'p',
-            { class: 'desc' },
-            '手机与电脑同一 Wi-Fi；SmsForwarder 开启通知使用权，并开启“启动时异步获取已安装 App 列表”。通道选 Webhook / 自定义请求。',
-          ),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '推荐 Webhook URL（选本机局域网 IP）'),
-            h('div', { class: 'url-list' },
-              urls.length
-                ? urls.map((u) =>
-                    h('div', { class: 'copy-row', key: u }, [
-                      h('pre', { class: 'mono' }, u),
-                      copyBtn('复制', u, 'copy-url'),
-                    ]),
-                  )
-                : [
-                    h('div', { class: 'copy-row' }, [
-                      h('pre', { class: 'mono' }, primaryUrl),
-                      copyBtn('复制', primaryUrl, 'copy-url'),
-                    ]),
-                  ],
-            ),
-            h(
-              'p',
-              { class: 'hint' },
-              '若列表为空：先启用插件，确认服务运行中。防火墙需放行 TCP 入站端口；部分路由器开启「客户端隔离」会导致手机访问不到电脑。',
-            ),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '请求头'),
-            h('div', { class: 'copy-row' }, [
-              h('pre', { class: 'mono' }, authHeader),
-              copyBtn('复制', authHeader, 'copy-hdr'),
-            ]),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, 'JSON 消息模板'),
-            h('div', { class: 'copy-row' }, [
-              h('pre', { class: 'mono' }, template),
-              copyBtn('复制', template, 'copy-tpl'),
-            ]),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '响应关键词（可选）'),
-            h('div', { class: 'copy-row' }, [
-              h('pre', { class: 'mono' }, '"ok":true'),
-              copyBtn('复制', '"ok":true', 'copy-kw'),
-            ]),
-          ]),
-          h(
-            'p',
-            { class: 'hint' },
-            '方法选 POST；Content-Type: application/json。本插件不支持 GET。公网中继/HTTPS 不在首版范围。',
+            NButton,
+            {
+              size: 'small',
+              type: 'primary',
+              loading: busy.value === 'save',
+              onClick: () => run('save', () => persistAndSync({ quiet: false })),
+            },
+            { default: () => '保存并应用' },
           ),
         ]),
       ])
+
+      const filterCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', '过滤与隐私')]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名）'),
+          h(NInput, {
+            value: blacklistText.value,
+            type: 'textarea',
+            rows: 4,
+            placeholder: 'com.example.ads\n某广告 App',
+            'onUpdate:value': (v) => {
+              blacklistText.value = v
+              scheduleSave()
+            },
+          }),
+        ]),
+        h('div', { class: 'row' }, [
+          h('span', { class: 'switch-pair' }, [
+            h(NSwitch, {
+              value: hideSensitiveBody.value,
+              'onUpdate:value': (v) => {
+                hideSensitiveBody.value = !!v
+                scheduleSave()
+              },
+            }),
+            '隐私模式（不显示正文/验证码）',
+          ]),
+        ]),
+        h('div', { class: 'row' }, [
+          h('span', { class: 'switch-pair' }, [
+            h(NSwitch, {
+              value: enableOtpAction.value,
+              'onUpdate:value': (v) => {
+                enableOtpAction.value = !!v
+                scheduleSave()
+              },
+            }),
+            '识别验证码并显示复制按钮',
+          ]),
+        ]),
+      ])
+
+      const tutorialCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', '使用教程')]),
+        h('p', { class: 'desc' }, '五分钟上手：把 Android 通知转发成电脑上的 Toast。按顺序完成即可。'),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '下载 SmsForwarder'),
+          h(
+            'div',
+            { class: 'dl-list' },
+            DOWNLOAD_LINKS.map((d) =>
+              h('div', { class: 'dl-item', key: d.url }, [
+                h(
+                  'div',
+                  { class: 'dl-name' },
+                  h(
+                    'a',
+                    { href: d.url, target: '_blank', rel: 'noopener noreferrer' },
+                    d.name,
+                  ),
+                ),
+                h('p', { class: 'dl-note' }, d.note),
+              ]),
+            ),
+          ),
+        ]),
+        h(
+          'div',
+          { class: 'steps-wrap' },
+          TUTORIAL_STEPS.map((s, i) =>
+            h('div', { class: 'step', key: s.title }, [
+              h('span', { class: 'step-num' }, String(i + 1)),
+              h('div', { class: 'step-body' }, [
+                h('div', { class: 'step-title' }, s.title),
+                h('ul', { class: 'step-list' }, s.items.map((it) => h('li', it))),
+              ]),
+            ]),
+          ),
+        ),
+      ])
+
+      const guideCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', 'SmsForwarder 配置速查')]),
+        h(
+          'p',
+          { class: 'desc' },
+          '配置 SmsForwarder 通道时需要用到的三样东西：URL、请求头、JSON 模板。',
+        ),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '推荐 Webhook URL（选本机局域网 IP）'),
+          h(
+            'div',
+            { class: 'url-list' },
+            urls.length
+              ? urls.map((u) =>
+                  h('div', { class: 'copy-row', key: u }, [
+                    h('pre', { class: 'mono' }, u),
+                    copyBtn('复制', u, 'copy-url'),
+                  ]),
+                )
+              : [
+                  h('div', { class: 'copy-row' }, [
+                    h('pre', { class: 'mono' }, primaryUrl),
+                    copyBtn('复制', primaryUrl, 'copy-url'),
+                  ]),
+                ],
+          ),
+          h(
+            'p',
+            { class: 'hint' },
+            '若列表为空：先启用插件，确认服务运行中，再点「刷新状态」。',
+          ),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '请求头'),
+          h('div', { class: 'copy-row' }, [
+            h('pre', { class: 'mono' }, authHeader),
+            copyBtn('复制', authHeader, 'copy-hdr'),
+          ]),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, 'JSON 消息模板'),
+          h('div', { class: 'copy-row' }, [
+            h('pre', { class: 'mono' }, template),
+            copyBtn('复制', template, 'copy-tpl'),
+          ]),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '响应关键词（可选）'),
+          h('div', { class: 'copy-row' }, [
+            h('pre', { class: 'mono' }, '"ok":true'),
+            copyBtn('复制', '"ok":true', 'copy-kw'),
+          ]),
+        ]),
+        h(
+          'p',
+          { class: 'hint' },
+          '方法选 POST；Content-Type: application/json。本插件不支持 GET。公网中继/HTTPS 不在首版范围。',
+        ),
+      ])
+
+      const faqCard = h('div', { class: 'card' }, [
+        h('div', { class: 'head' }, [h('h2', '常见问题')]),
+        ...FAQ.map(([q, a]) =>
+          h('div', { class: 'faq', key: q }, [
+            h('div', { class: 'faq-q' }, q),
+            h('p', { class: 'faq-a' }, a),
+          ]),
+        ),
+      ])
+
+      let panel
+      if (activeTab.value === 'settings') {
+        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard])
+      } else if (activeTab.value === 'tutorial') {
+        panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, guideCard, faqCard])
+      } else {
+        panel = h('div', { class: 'sf-tab-panel' }, [overviewCard])
+      }
+
+      return h('div', { class: 'sf-settings' }, [headerCard, tabBar, panel])
     }
   },
 }
