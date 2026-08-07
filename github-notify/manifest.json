@@ -1,0 +1,20 @@
+{
+  "id": "github-notify",
+  "name": "GitHub 通知",
+  "version": "0.1.0",
+  "description": "轮询 GitHub Notifications，活跃时弹出 PR/Issue 等提醒卡片",
+  "main": "ui.mjs",
+  "background": "background.mjs",
+  "settings": "settings.mjs",
+  "events": [
+    "github-notify",
+    "kind:github-notify",
+    "github-notify.notification"
+  ],
+  "enabledByDefault": false,
+  "sidecar": {
+    "command": "node",
+    "args": ["runtime/main.mjs"],
+    "cwd": "."
+  }
+}

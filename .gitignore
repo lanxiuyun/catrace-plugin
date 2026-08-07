@@ -1,0 +1,9 @@
+# runtime state (sidecar/background 运行时产物，勿入库)
+**/runtime/state.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# node
+node_modules/
