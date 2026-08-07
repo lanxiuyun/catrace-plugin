@@ -11,13 +11,13 @@ Catrace 外部插件仓库。作为 git submodule 挂在宿主仓库 `Catrace/to
 
 | 包 | 角色 | 参考价值 |
 |----|------|----------|
-| `timer/` | 第一方**定时提醒**（settings + scheduling） | background 调度 + 规则 CRUD + sticky 动作回传的范本 |
 | `bt-music/` | 蓝牙耳机连接 Toast → 打开音乐程序（OS 设备变更事件） | sidecar + settings 三卡 UI + RPC 的范本 |
-| `sidecar-echo/` | 完整 sidecar demo：生命周期、JSONL publish/log、自定义 Toast UI、action round-trip | sidecar 协议端到端最小闭环 |
-| `notify-demo/` | 按间隔弹 Toast 的极简 demo | 最小 background 插件 |
 | `github-notify/` | 轮询 GitHub Notifications（Node sidecar） | sidecar 轮询 + 去重状态落盘 |
 | `linuxdo-notify/` | 轮询 linux.do 通知（Node sidecar） | 同 github-notify |
+| `notify-demo/` | 按间隔弹 Toast 的极简 demo | 最小 background 插件 |
+| `sidecar-echo/` | 完整 sidecar demo：生命周期、JSONL publish/log、自定义 Toast UI、action round-trip | sidecar 协议端到端最小闭环 |
 | `smsforwarder-notify/` | 接收 Android SmsForwarder Webhook 转发到 Toast（Node sidecar） | sidecar 起本地 HTTP 服务 |
+| `timer/` | 第一方**定时提醒**（settings + scheduling） | background 调度 + 规则 CRUD + sticky 动作回传的范本 |
 
 ## 包结构约定
 
