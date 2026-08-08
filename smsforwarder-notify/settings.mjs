@@ -528,6 +528,7 @@ export default {
           level: 'info',
           sticky,
           actions: [
+            { id: 'copy-body', label: '复制正文' },
             { id: 'copy-otp', label: '复制验证码' },
             ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
           ],
