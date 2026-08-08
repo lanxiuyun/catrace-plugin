@@ -52,7 +52,58 @@ window.addEventListener('catrace:plugin-event-resolved', (ev) => {
   if (detail.actionId === 'copy-body') {
     const content = String(body || title || '').trim()
     writeClipboard(content, 'body copied')
+    return
+  }
+
+  if (detail.actionId === 'block-app') {
+    blockApp(pl.packageName || '', pl.appName || '').catch((e) => {
+      console.warn('[smsforwarder-notify] block-app failed', e)
+      plugin.log.warn('block-app failed', { error: String(e) }).catch(() => {})
+    })
   }
 })
+
+async function blockApp(packageName, appName) {
+  const targets = []
+  if (packageName) targets.push(String(packageName).trim())
+  if (appName) targets.push(String(appName).trim())
+  const added = []
+  try {
+    const cfg =
+      plugin.config && typeof plugin.config.get === 'function'
+        ? ((await plugin.config.get()) || {})
+        : {}
+    const list = Array.isArray(cfg.appBlacklist) ? cfg.appBlacklist.slice() : []
+    for (const t of targets) {
+      if (!t) continue
+      const hit = list.some(
+        (x) =>
+          String(x || '').toLowerCase() === t.toLowerCase() ||
+          t.toLowerCase().includes(String(x || '').toLowerCase()),
+      )
+      if (!hit) {
+        list.push(t)
+        added.push(t)
+      }
+    }
+    if (!added.length) {
+      await plugin.log.info('block-app already blocked').catch(() => {})
+      return
+    }
+    cfg.appBlacklist = list.slice(0, 200)
+    if (plugin.config && typeof plugin.config.set === 'function') {
+      await plugin.config.set(cfg)
+    }
+    if (plugin.sidecar && typeof plugin.sidecar.request === 'function') {
+      const res = await plugin.sidecar.request('setConfig', cfg)
+      if (res && res.ok === false) {
+        await plugin.log.warn('block-app sidecar sync failed', { error: res.error }).catch(() => {})
+      }
+    }
+    await plugin.log.info('block-app added', { added }).catch(() => {})
+  } catch (e) {
+    throw e
+  }
+}
 
 await plugin.log.info(`${PLUGIN_ID} background loaded`)

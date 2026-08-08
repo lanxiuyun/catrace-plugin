@@ -491,6 +491,7 @@ function publishNotification(n, hash, otp) {
   if (sticky) {
     actions.push({ id: 'dismiss', label: '知道了' })
   }
+  actions.push({ id: 'block-app', label: '拉黑此应用' })
 
   const payload = {
     packageName: n.packageName,

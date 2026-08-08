@@ -531,6 +531,7 @@ export default {
             { id: 'copy-body', label: '复制正文' },
             { id: 'copy-otp', label: '复制验证码' },
             ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
+            { id: 'block-app', label: '拉黑此应用' },
           ],
           payload: {
             packageName: 'com.example.test',
@@ -893,30 +894,6 @@ export default {
               scheduleSave()
             },
           }),
-        ]),
-        h('div', { class: 'row' }, [
-          h('span', { class: 'switch-pair' }, [
-            h(NSwitch, {
-              value: hideSensitiveBody.value,
-              'onUpdate:value': (v) => {
-                hideSensitiveBody.value = !!v
-                scheduleSave()
-              },
-            }),
-            '隐私模式（不显示正文/验证码）',
-          ]),
-        ]),
-        h('div', { class: 'row' }, [
-          h('span', { class: 'switch-pair' }, [
-            h(NSwitch, {
-              value: enableOtpAction.value,
-              'onUpdate:value': (v) => {
-                enableOtpAction.value = !!v
-                scheduleSave()
-              },
-            }),
-            '识别验证码并显示复制按钮',
-          ]),
         ]),
       ])
 

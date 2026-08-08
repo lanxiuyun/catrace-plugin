@@ -185,6 +185,31 @@ const CSS = `
 }
 .sf-card .copy-btn:hover { color: #059669; }
 .sf-card .copy-btn svg { width: 0.9375rem; height: 0.9375rem; flex-shrink: 0; }
+.sf-card .foot-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.sf-card .block-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f87171;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  white-space: nowrap;
+}
+.sf-card .block-btn:hover { color: #ef4444; }
+.sf-card .block-btn svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
 .sf-card .row-foot {
   display: flex;
   align-items: center;
@@ -460,6 +485,24 @@ function IconPhone() {
   ])
 }
 
+function IconBan() {
+  return svgIcon([
+    h('circle', {
+      cx: '12',
+      cy: '12',
+      r: '8.5',
+      stroke: 'currentColor',
+      'stroke-width': '1.6',
+    }),
+    h('path', {
+      d: 'M5.6 5.6l12.8 12.8',
+      stroke: 'currentColor',
+      'stroke-width': '1.6',
+      'stroke-linecap': 'round',
+    }),
+  ])
+}
+
 export default {
   name: 'SmsforwarderNotifyCard',
   props: {
@@ -498,6 +541,7 @@ export default {
     const actions = Array.isArray(event.actions) ? event.actions.slice() : []
     const hasCopyBody = actions.some((a) => a && a.id === 'copy-body')
     const hasCopyOtp = actions.some((a) => a && a.id === 'copy-otp')
+    const hasBlock = actions.some((a) => a && a.id === 'block-app')
     // only emit ids that exist on the bus event (resolve_action validates whitelist)
     const copyActionId = otp && hasCopyOtp ? 'copy-otp' : hasCopyBody ? 'copy-body' : hasCopyOtp ? 'copy-otp' : ''
     const copyLabel = copyActionId === 'copy-otp' ? '复制验证码' : '复制正文'
@@ -572,15 +616,29 @@ export default {
               [IconCopy(), copyLabel],
             )
           : h('div', { class: 'dev' }),
-        device
-          ? h('div', { class: 'dev', title: device }, [
-              IconPhone(),
-              h('span', { class: 'dev-name' }, device),
-            ])
-          : h('div', { class: 'dev' }, [
-              IconPhone(),
-              h('span', { class: 'dev-name' }, appName || '设备'),
-            ]),
+        h('div', { class: 'foot-right' }, [
+          hasBlock
+            ? h(
+                'button',
+                {
+                  class: 'block-btn',
+                  type: 'button',
+                  title: '不再接收该应用的通知',
+                  onClick: () => this.$emit('action', 'block-app'),
+                },
+                [IconBan(), '拉黑此应用'],
+              )
+            : null,
+          device
+            ? h('div', { class: 'dev', title: device }, [
+                IconPhone(),
+                h('span', { class: 'dev-name' }, device),
+              ])
+            : h('div', { class: 'dev' }, [
+                IconPhone(),
+                h('span', { class: 'dev-name' }, appName || '设备'),
+              ]),
+        ]),
       ]),
     )
 
