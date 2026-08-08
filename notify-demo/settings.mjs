@@ -14,9 +14,9 @@ if (!plugin || !plugin.config || !plugin.events) {
   throw new Error('Catrace plugin API missing (plugin facade)')
 }
 
-const MIN_INTERVAL_SEC = 1
-const MAX_INTERVAL_SEC = 24 * 60 * 60
-const DEFAULT_INTERVAL_SEC = 30
+const MIN_INTERVAL_MS = 50
+const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000
+const DEFAULT_INTERVAL_MS = 30_000
 
 const STYLE_ID = 'catrace-plugin-notify-demo-settings-css'
 const CSS = `
@@ -42,7 +42,7 @@ const CSS = `
   gap: 0.75rem; flex-wrap: wrap;
 }
 .notify-demo-settings .row-inline { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.notify-demo-settings .num { width: 7rem; }
+.notify-demo-settings .num { width: 8.5rem; }
 .notify-demo-settings .unit { font-size: 0.75rem; color: #6b7280; font-weight: 600; }
 .notify-demo-settings .switch-pair {
   display: inline-flex; align-items: center; gap: 0.5rem;
@@ -70,7 +70,7 @@ function clamp(n, min, max, fallback) {
 function portable(cfg) {
   return {
     enabled: cfg.enabled !== false,
-    intervalSec: clamp(cfg.intervalSec, MIN_INTERVAL_SEC, MAX_INTERVAL_SEC, DEFAULT_INTERVAL_SEC),
+    intervalMs: clamp(cfg.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULT_INTERVAL_MS),
     onlyWhenActive: cfg.onlyWhenActive !== false,
     title: (cfg.title || '').trim() || '间隔通知',
     body: (cfg.body || '').trim() || '间隔通知已触发。',
@@ -87,7 +87,7 @@ export default {
     const testing = ref(false)
     const sentCount = ref(0)
     const lastSentAt = ref('')
-    const intervalSec = ref(DEFAULT_INTERVAL_SEC)
+    const intervalMs = ref(DEFAULT_INTERVAL_MS)
     const onlyWhenActive = ref(true)
     const title = ref('间隔通知')
     const body = ref('这是第 {count} 条间隔通知。')
@@ -99,7 +99,9 @@ export default {
       try {
         const raw = await plugin.config.get()
         const s = raw && typeof raw === 'object' ? raw : {}
-        intervalSec.value = clamp(s.intervalSec, MIN_INTERVAL_SEC, MAX_INTERVAL_SEC, DEFAULT_INTERVAL_SEC)
+        let loadedMs = s.intervalMs
+        if (loadedMs == null && s.intervalSec != null) loadedMs = Number(s.intervalSec) * 1000
+        intervalMs.value = clamp(loadedMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULT_INTERVAL_MS)
         onlyWhenActive.value = s.onlyWhenActive !== false && s.onlyWhenActive !== 0
         title.value = typeof s.title === 'string' && s.title.trim() ? s.title : '间隔通知'
         body.value =
@@ -116,7 +118,7 @@ export default {
     function current() {
       return portable({
         enabled: true,
-        intervalSec: intervalSec.value,
+        intervalMs: intervalMs.value,
         onlyWhenActive: onlyWhenActive.value,
         title: title.value,
         body: body.value,
@@ -153,7 +155,7 @@ export default {
           title: cfg.title,
           body: cfg.body.replace(/\{count\}/g, String(next)),
           level: 'info',
-          payload: { count: next, intervalSec: cfg.intervalSec, manual: true },
+          payload: { count: next, intervalMs: cfg.intervalMs, manual: true },
         })
         sentCount.value = next
         lastSentAt.value = new Date().toLocaleTimeString()
@@ -181,24 +183,24 @@ export default {
           h(
             'p',
             { class: 'desc' },
-            '按设定秒数自动 Toast。可只在电脑活跃时发送。正文可用 {count} 表示序号。',
+            '按设定毫秒数自动 Toast。可只在电脑活跃时发送。正文可用 {count} 表示序号。',
           ),
           h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '间隔（秒）'),
+            h('div', { class: 'label' }, '间隔（毫秒）'),
             h('div', { class: 'row-inline' }, [
               h(NInput, {
                 class: 'num',
                 size: 'small',
-                value: String(intervalSec.value),
+                value: String(intervalMs.value),
                 disabled: loading.value,
                 'onUpdate:value': (v) => {
-                  intervalSec.value = clamp(v, MIN_INTERVAL_SEC, MAX_INTERVAL_SEC, DEFAULT_INTERVAL_SEC)
+                  intervalMs.value = clamp(v, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULT_INTERVAL_MS)
                   scheduleSave()
                 },
               }),
-              h('span', { class: 'unit' }, '秒'),
+              h('span', { class: 'unit' }, 'ms'),
             ]),
-            h('p', { class: 'hint' }, `范围 ${MIN_INTERVAL_SEC}–${MAX_INTERVAL_SEC} 秒`),
+            h('p', { class: 'hint' }, `范围 ${MIN_INTERVAL_MS}–${MAX_INTERVAL_MS} 毫秒`),
           ]),
           h('div', { class: 'row' }, [
             h('div', { class: 'switch-pair' }, [

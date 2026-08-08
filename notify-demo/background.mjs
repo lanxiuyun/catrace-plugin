@@ -3,11 +3,11 @@ if (!plugin || !plugin.config || !plugin.events || !plugin.activity || !plugin.l
   throw new Error('Catrace plugin API missing (plugin facade)')
 }
 
-const MIN_INTERVAL_SEC = 1
-const MAX_INTERVAL_SEC = 24 * 60 * 60
-const DEFAULT_INTERVAL_SEC = 30
-/** Check due / config every second so interval edits apply immediately. */
-const CHECK_EVERY_MS = 1_000
+const MIN_INTERVAL_MS = 50
+const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000
+const DEFAULT_INTERVAL_MS = 30_000
+/** Check due / config at 50ms granularity so ms-level intervals apply immediately. */
+const CHECK_EVERY_MS = 50
 
 let checkTimer = null
 let sentCount = 0
@@ -24,9 +24,11 @@ function clamp(n, min, max, fallback) {
 
 function sanitizeConfig(raw) {
   const s = raw && typeof raw === 'object' ? raw : {}
+  let intervalMs = s.intervalMs
+  if (intervalMs == null && s.intervalSec != null) intervalMs = Number(s.intervalSec) * 1000
   return {
     enabled: s.enabled !== false,
-    intervalSec: clamp(s.intervalSec, MIN_INTERVAL_SEC, MAX_INTERVAL_SEC, DEFAULT_INTERVAL_SEC),
+    intervalMs: clamp(intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULT_INTERVAL_MS),
     onlyWhenActive: s.onlyWhenActive !== false && s.onlyWhenActive !== 0,
     title: typeof s.title === 'string' && s.title.trim() ? s.title.trim() : '间隔通知',
     body:
@@ -61,7 +63,7 @@ async function publishToast(cfg) {
     title: cfg.title,
     body: cfg.body.replace(/\{count\}/g, String(next)),
     level: 'info',
-    payload: { count: next, intervalSec: cfg.intervalSec },
+    payload: { count: next, intervalMs: cfg.intervalMs },
   })
 }
 
@@ -69,7 +71,7 @@ async function tick() {
   const cfg = await loadConfig()
   if (!cfg.enabled) return
 
-  const intervalMs = cfg.intervalSec * 1000
+  const intervalMs = cfg.intervalMs
   const now = Date.now()
 
   if (!bootstrapped) {
