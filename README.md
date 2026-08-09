@@ -28,7 +28,7 @@ Catrace 自带的基础插件，开箱即用。
 - 在设置里可以指定自动打开的播放器（软件名或路径）。
 - 需要本机装 Node.js。
 
-<video controls src="screenshots/蓝牙耳机通知.mp4" title="Title"></video>
+<video controls src="https://github.com/user-attachments/assets/da59bb35-3dcd-4159-af73-fad89bf3149a" title="Title"></video>
 
 ### 📱 SmsForwarder 通知（smsforwarder-notify）
 安卓手机收到的短信 / App 通知，转发到电脑桌面上弹卡片。
