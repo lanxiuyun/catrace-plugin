@@ -28,7 +28,7 @@ Catrace 自带的基础插件，开箱即用。
 - 在设置里可以指定自动打开的播放器（软件名或路径）。
 - 需要本机装 Node.js。
 
-<video controls src="https://github.com/user-attachments/assets/da59bb35-3dcd-4159-af73-fad89bf3149a" title="Title"></video>
+![蓝牙听歌](screenshots/蓝牙耳机通知.webp)
 
 ### 📱 SmsForwarder 通知（smsforwarder-notify）
 安卓手机收到的短信 / App 通知，转发到电脑桌面上弹卡片。
@@ -39,7 +39,7 @@ Catrace 自带的基础插件，开箱即用。
 - 需要本机装 Node.js。
 
 ![SmsForwarder 通知](screenshots/sms.png)
-<video controls src="https://github.com/user-attachments/assets/fd3edc59-3cc6-44a6-90a4-bad76a438192" title="接收 trae 验证码"></video>
+![接收 trae 验证码](screenshots/接收trae验证码.webp)
 
 ### 🔔 GitHub 通知（github-notify）
 GitHub 上有新通知（PR、Issue、@我、评论）时，弹卡片提醒你。
