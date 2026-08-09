@@ -9,6 +9,8 @@ const MAX_BODY_BYTES = 64 * 1024
 const RATE_LIMIT_WINDOW_MS = 60_000
 const RATE_LIMIT_MAX = 120
 const MAX_DEDUPE = 500
+const MAX_PENDING = 200
+const PENDING_POLL_MS = 3000
 // keywords near which a 4–8 digit code is treated as OTP
 const OTP_KEYWORD_RE =
   /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|提取码|兑换码|OTP|PIN|verification\s*code|security\s*code|auth(?:entication)?\s*code|one[-\s]?time\s*(?:pass)?(?:word|code)?|\bcode\b/i
@@ -47,6 +49,9 @@ let starting = false
 const rateMap = new Map()
 /** @type {Map<string, number>} hash -> expireAt */
 const dedupeMap = new Map()
+/** @type {Map<string, { n: object, hash: string, queuedAt: number }>} notifications deferred while idle */
+const pendingQueue = new Map()
+let pendingTimer = null
 
 let acceptedCount = 0
 let rejectedCount = 0
@@ -575,6 +580,71 @@ function noteError(summary) {
   lastErrorAt = Date.now()
 }
 
+function stopPendingTimer() {
+  if (pendingTimer) {
+    clearInterval(pendingTimer)
+    pendingTimer = null
+  }
+}
+
+function enqueuePending(n, hash) {
+  if (pendingQueue.has(hash)) return
+  if (pendingQueue.size >= MAX_PENDING) {
+    const oldest = pendingQueue.keys().next().value
+    pendingQueue.delete(oldest)
+  }
+  pendingQueue.set(hash, { n, hash, queuedAt: Date.now() })
+  if (!pendingTimer) {
+    pendingTimer = setInterval(() => {
+      flushPending().catch((err) => {
+        log(
+          'pending flush error',
+          { error: err instanceof Error ? err.message : String(err) },
+          'error',
+        )
+      })
+    }, PENDING_POLL_MS)
+    pendingTimer.unref?.()
+  }
+}
+
+/** Re-push notifications that arrived while the user was idle, once they are active again. */
+async function flushPending(force = false) {
+  if (!force && config.onlyPushWhenActive !== true) {
+    stopPendingTimer()
+    return
+  }
+  if (pendingQueue.size === 0) {
+    stopPendingTimer()
+    return
+  }
+  if (!force && !(await isUserActive())) return
+  const items = [...pendingQueue.values()]
+  pendingQueue.clear()
+  log('active, flushing deferred notifications', { count: items.length })
+  for (const { n, hash } of items) {
+    try {
+      const otp = extractOtp(n.title, n.body, n)
+      publishNotification(n, hash, otp)
+      acceptedCount += 1
+      lastSuccessAt = Date.now()
+      log('flushed deferred notification', {
+        packageName: n.packageName,
+        titleLen: (n.title || '').length,
+        bodyLen: (n.body || '').length,
+      })
+    } catch (err) {
+      rejectedCount += 1
+      noteError(`500 deferred publish fail: ${err instanceof Error ? err.message : String(err)}`)
+      log(
+        'deferred publish failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'error',
+      )
+    }
+  }
+}
+
 async function handleWebhook(req, res, ip) {
   if (!contentTypeIsJson(req)) {
     rejectedCount += 1
@@ -657,15 +727,18 @@ async function handleWebhook(req, res, ip) {
     return
   }
 
-  // Gate before dedupe so an idle-dropped message does not burn its dedupe
-  // slot: if the same notification re-arrives while active it may still push.
+  // Idle gate: defer (not drop) so the notification re-pushes once the user
+  // is active again. Dedupe by content so repeated syncs while idle collapse.
   if (config.onlyPushWhenActive === true && !(await isUserActive())) {
-    writeJson(res, 200, { ok: true, skipped: true, reason: 'inactive' })
-    log('skipped inactive', {
+    const hash = contentHash(n)
+    enqueuePending(n, hash)
+    writeJson(res, 200, { ok: true, queued: true, reason: 'inactive' })
+    log('queued while inactive', {
       ip,
       status: 200,
       packageName: n.packageName,
       bodyLen: (n.body || '').length,
+      queueSize: pendingQueue.size,
     })
     return
   }
@@ -929,6 +1002,7 @@ function statusPayload() {
     lastErrorSummary: lastErrorSummary || null,
     lastErrorAt: lastErrorAt || null,
     lastClientIp: lastClientIp || null,
+    pendingCount: pendingQueue.size,
     dedupeSize: dedupeMap.size,
   }
 }
@@ -974,6 +1048,11 @@ async function applyHostConfig(input) {
   }
   config = normalizeConfig(raw)
   ensureToken()
+
+  // feature turned off → release anything deferred while idle (queued push)
+  if (config.onlyPushWhenActive !== true) {
+    await flushPending(true)
+  }
 
   const bindChanged =
     prev.host !== config.host || prev.port !== config.port || prev.path !== config.path
@@ -1068,6 +1147,7 @@ async function shutdown() {
     acceptedCount,
     rejectedCount,
     dedupedCount,
+    pendingCount: pendingQueue.size,
   })
   await stopServer()
   process.exit(0)

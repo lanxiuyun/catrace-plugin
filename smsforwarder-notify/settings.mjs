@@ -617,6 +617,9 @@ export default {
             ],
             ['最近来源', st.lastClientIp || '-'],
             ['最近错误', st.lastErrorSummary || '无'],
+            ...(st.onlyPushWhenActive && st.pendingCount > 0
+              ? [['待补推', `${String(st.pendingCount)} 条（空闲时暂存，活跃后推送）`]]
+              : []),
           ]
 
       const copyBtn = (label, text, key) =>
@@ -877,7 +880,7 @@ export default {
             h(
               'p',
               { class: 'hint' },
-              '开启后，电脑处于空闲（无键鼠操作）时收到的通知不弹 Toast，回到活跃状态后才继续推送。',
+              '开启后，电脑处于空闲（无键鼠操作）时收到的通知先暂存，回到活跃状态后再补推。闲时不会丢失通知。',
             ),
           ]),
         ]),
