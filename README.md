@@ -37,6 +37,7 @@ Catrace 自带的基础插件，开箱即用。
 - 卡片上能看是谁发的、按 App 区分图标；不想要的 App 可以直接在卡片上点 **拉黑**。
 - 调节：监听端口、去重秒数、卡片停留秒数、仅活跃时提醒，空闲时的通知会暂存、活跃后再补推。
 - 需要本机装 Node.js。
+
 ![SmsForwarder 通知展示一](screenshots/sms1.png)
 ![SmsForwarder 通知展示二](screenshots/sms2.jpg)
 [text](screenshots/接收trae验证码.wmv)
