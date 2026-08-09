@@ -6,7 +6,7 @@ Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事
 - 挂载点：`tools/plugin-demo/`（git submodule 指针锁版本）
 - 插件怎么装：Catrace 里打开 **插件** 页 → 点「打开插件目录」→ 把插件目录拷进去 → 点插件的 **启用**。
 
-> **启用 = 信任**：启用一个插件，等于信任它目录里的全部本地代码（有些插件还会跑一个 Node 小子进程来干活）。所以别从网上乱拷插件，装前先看一眼它的内容心里有数。
+> **启用 = 信任**：启用一个插件，等于信任它目录里的全部本地代码（有些插件还会跑一个 Node 小子进程来干活）。所以别从网上乱拷插件，使用前请先用 Ai 检查一遍安全性。
 
 ---
 
@@ -28,6 +28,19 @@ Catrace 自带的基础插件，开箱即用。
 - 在设置里可以指定自动打开的播放器（软件名或路径）。
 - 需要本机装 Node.js。
 
+<video controls src="screenshots/蓝牙耳机通知.mp4" title="Title"></video>
+
+### 📱 SmsForwarder 通知（smsforwarder-notify）
+安卓手机收到的短信 / App 通知，转发到电脑桌面上弹卡片。
+
+- 手机装 **SmsForwarder** App，设置里填上电脑的接收地址，此后手机来通知，电脑就弹。
+- 卡片上能看是谁发的、按 App 区分图标；不想要的 App 可以直接在卡片上点 **拉黑**。
+- 调节：监听端口、去重秒数、卡片停留秒数、仅活跃时提醒，空闲时的通知会暂存、活跃后再补推。
+- 需要本机装 Node.js。
+![SmsForwarder 通知展示一](screenshots/sms1.png)
+![SmsForwarder 通知展示二](screenshots/sms2.jpg)
+[text](screenshots/接收trae验证码.wmv)
+
 ### 🔔 GitHub 通知（github-notify）
 GitHub 上有新通知（PR、Issue、@我、评论）时，弹卡片提醒你。
 
@@ -42,14 +55,6 @@ LinuxDO 论坛（linux.do）有新的回复 / @我 / 点赞时，弹卡片提醒
 - 在设置里填 LinuxDO 的 cookie（登录态），不保存到别人的机器上，只存在本机配置。
 - 需要本机装 Node.js。
 
-### 📱 SmsForwarder 通知（smsforwarder-notify）
-安卓手机收到的短信 / App 通知，转发到电脑桌面上弹卡片。
-
-- 手机装 **SmsForwarder** App，设置里填上电脑的接收地址，此后手机来通知，电脑就弹。
-- 卡片上能看是谁发的、按 App 区分图标；不想要的 App 可以直接在卡片上点 **拉黑**。
-- 调节：监听端口、去重秒数、卡片停留秒数、仅活跃时提醒，空闲时的通知会暂存、活跃后再补推。
-- 需要本机装 Node.js。
-
 ### 🧪 间隔通知（notify-demo）
 最小的演示插件：每隔几秒 / 几分钟自动弹一张卡片。
 
@@ -62,22 +67,6 @@ LinuxDO 论坛（linux.do）有新的回复 / @我 / 点赞时，弹卡片提醒
 - 读环境变量、选文件 / 选文件夹、启动本机程序、发 HTTP 请求、读写剪贴板、读写插件存储、查屏幕 / 当前窗口、弹系统通知、隐藏主窗口 1 秒、响铃……
 - 普通用户装上也能当玩具点着玩，但主要是给写插件的人做能力参考。
 - 需要本机装 Node.js。
-
----
-
-## 效果截图 / 视频
-
-把各插件跑起来的效果图或小视频放到本仓库 `screenshots/` 目录（按插件名建子目录），然后在下面的表格里补上链接即可。
-
-| 插件 | 效果图 / 视频 |
-|------|---------------|
-| timer（定时提醒） | _待补充_ |
-| bt-music（蓝牙听歌） | _待补充_ |
-| github-notify（GitHub 通知） | _待补充_ |
-| linuxdo-notify（LINUX DO 通知） | _待补充_ |
-| smsforwarder-notify（SmsForwarder 通知） | _待补充_ |
-| notify-demo（间隔通知） | _待补充_ |
-| sidecar-echo（能力演示） | _待补充_ |
 
 ---
 
