@@ -38,8 +38,7 @@ Catrace 自带的基础插件，开箱即用。
 - 调节：监听端口、去重秒数、卡片停留秒数、仅活跃时提醒，空闲时的通知会暂存、活跃后再补推。
 - 需要本机装 Node.js。
 
-![SmsForwarder 通知展示一](screenshots/sms1.png)
-![SmsForwarder 通知展示二](screenshots/sms2.jpg)
+![SmsForwarder 通知](screenshots/sms.png)
 <video controls src="https://github.com/user-attachments/assets/fd3edc59-3cc6-44a6-90a4-bad76a438192" title="接收 trae 验证码"></video>
 
 ### 🔔 GitHub 通知（github-notify）
