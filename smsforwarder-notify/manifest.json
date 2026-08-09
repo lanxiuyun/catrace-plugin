@@ -1,7 +1,7 @@
 {
   "id": "smsforwarder-notify",
   "name": "SmsForwarder 通知",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "接收 Android SmsForwarder Webhook，局域网转发 App 通知到 Catrace Toast",
   "main": "ui.mjs",
   "background": "background.mjs",

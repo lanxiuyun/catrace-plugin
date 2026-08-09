@@ -209,6 +209,13 @@ const CSS = `
   white-space: nowrap;
 }
 .sf-card .block-btn:hover { color: #ef4444; }
+.sf-card .block-btn.is-armed {
+  color: #fff;
+  background: #ef4444;
+  border-radius: 0.375rem;
+  padding: 0.1875rem 0.5rem;
+}
+.sf-card .block-btn.is-armed:hover { color: #fff; }
 .sf-card .block-btn svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
 .sf-card .row-foot {
   display: flex;
@@ -512,6 +519,27 @@ export default {
   emits: ['close', 'action'],
   created() {
     ensureStyles()
+    this.blockArmedAt = 0
+  },
+  beforeUnmount() {
+    if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
+  },
+  methods: {
+    handleBlockClick() {
+      const now = Date.now()
+      if (this.blockArmedAt && now - this.blockArmedAt < 5000) {
+        if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
+        this.blockArmedAt = 0
+        this.$emit('action', 'block-app')
+        return
+      }
+      this.blockArmedAt = now
+      if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
+      this.blockArmedTimer = setTimeout(() => {
+        this.blockArmedAt = 0
+      }, 5000)
+      this.$forceUpdate()
+    },
   },
   render() {
     const event = this.event || {}
@@ -621,12 +649,12 @@ export default {
             ? h(
                 'button',
                 {
-                  class: 'block-btn',
+                  class: ['block-btn', this.blockArmedAt ? 'is-armed' : ''],
                   type: 'button',
                   title: '不再接收该应用的通知',
-                  onClick: () => this.$emit('action', 'block-app'),
+                  onClick: () => this.handleBlockClick(),
                 },
-                [IconBan(), '拉黑此应用'],
+                [IconBan(), this.blockArmedAt ? '确认拉黑？' : '拉黑此应用'],
               )
             : null,
           device
