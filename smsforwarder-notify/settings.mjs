@@ -137,6 +137,13 @@ const CSS = `
 .sf-settings .dl-name a { color: #0d9488; text-decoration: none; }
 .sf-settings .dl-name a:hover { text-decoration: underline; }
 .sf-settings .dl-note { margin: 0; font-size: 0.6875rem; color: #8b949e; line-height: 1.45; }
+.sf-settings .step-list .step-copy {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 0.375rem;
+  margin-left: -1.25rem; min-width: 0;
+}
+.sf-settings .step-copy-label { font-size: 0.8125rem; font-weight: 600; color: #134e4a; }
+.sf-settings .step-copy-values { display: flex; flex-direction: column; gap: 0.375rem; }
 `
 
 function ensureStyles() {
@@ -230,50 +237,18 @@ const DOWNLOAD_LINKS = [
     url: 'https://github.com/pppscn/SmsForwarder',
     note: '查看使用文档、提交 Issue 或参与开发',
   },
-]
-
-const TUTORIAL_STEPS = [
   {
-    title: '准备条件',
-    items: [
-      '电脑已安装 Catrace，且能在命令行执行 node 命令（sidecar 依赖 Node）',
-      '手机与电脑连接同一 Wi-Fi',
-      '手机上安装 SmsForwarder（官方支持 Android 4.4–13，14 以上需实机验证；下载地址见下方）',
-    ],
-  },
-  {
-    title: '启用插件',
-    items: [
-      '在 Catrace 插件列表中找到 smsforwarder-notify 并启用',
-      '首次启用 = 信任本地代码（会运行 sidecar Node 进程）',
-      '回到本页「概览」，确认服务状态显示「运行中」',
-      'Windows 防火墙首次会弹窗询问是否允许 node 入站，选「允许访问」即可；若没弹窗且手机能连上，可跳过防火墙配置',
-    ],
-  },
-  {
-    title: '配置 SmsForwarder',
-    items: [
-      '打开 SmsForwarder，在通知监听器中开启「通知使用权」',
-      '设置里开启「启动时异步获取已安装 App 列表」，否则取不到 {{APP_NAME}}',
-      '发送通道 → 新建，类型选 Webhook / 自定义请求',
-      '请求方法选 POST，URL 填「推荐 Webhook URL」里电脑局域网 IP 那条',
-      '请求头填入下方复制的 Authorization 头',
-      '请求体粘贴下方复制的 JSON 消息模板',
-      'Content-Type 设为 application/json',
-      '「响应关键词」可填 "ok":true（可选，用于判断发送成功）',
-    ],
-  },
-  {
-    title: '验证通知链路',
-    items: [
-      '在「概览」点「发送测试 Toast」，确认电脑能弹通知',
-      '在 SmsForwarder 里对该通道发一条测试通知，应显示发送成功',
-      '手机上任意 App 来新通知时，电脑应弹出对应 Toast',
-    ],
+    name: '官方使用流程（必读）',
+    url: 'https://gitee.com/pp/SmsForwarder/wikis/%E3%80%90%E5%BF%85%E8%AF%BB%E3%80%91%E4%BD%BF%E7%94%A8%E6%B5%81%E7%A8%8B',
+    note: '通用设置 → 发送通道 → 转发规则 的完整图文教程',
   },
 ]
 
 const FAQ = [
+  [
+    '通道测试成功但真实通知不来',
+    '发送通道只负责投递；还须在「转发规则」里新建规则，发送通道选 catrace，打开「启用该条转发规则」。通知与短信是两套规则，要分别建。',
+  ],
   [
     '手机访问不到电脑',
     '确认与电脑同一 Wi-Fi；首次启动时若防火墙弹窗选过「允许访问」则无需手动配置；若仍未放行，可在「Windows Defender 防火墙 → 高级设置 → 入站规则」手动放行 TCP 端口；同时关闭路由器「客户端隔离」，并在「设置」里核对端口、路径、Token 是否一致。',
@@ -921,9 +896,113 @@ export default {
         ]),
       ])
 
+      const urlRows = urls.length ? urls : [primaryUrl]
+
+      const steps = [
+        {
+          title: '准备条件',
+          items: [
+            '电脑已安装 Catrace，且能在命令行执行 node 命令（sidecar 依赖 Node）',
+            '手机与电脑连接同一 Wi-Fi',
+            '手机上安装 SmsForwarder（官方支持 Android 4.4–13，14 以上需实机验证；下载地址见上方）',
+            '在 Catrace 插件列表启用 smsforwarder-notify，回到本页「概览」确认服务「运行中」',
+            'Windows 防火墙首次弹窗选「允许访问」；手机连不上时再手动放行入站端口',
+          ],
+        },
+        {
+          title: 'SmsForwarder 通用设置',
+          items: [
+            '打开 SmsForwarder → 通用设置，开启需要的转发能力（短信 / 应用通知）',
+            '按系统弹窗逐一授权；加入电池优化白名单，允许后台运行，勿强杀',
+            '转发应用通知：开启「通知使用权」',
+            '设置里开启「启动时异步获取已安装 App 列表」，否则取不到 App 名',
+          ],
+        },
+        {
+          title: '新建发送通道（Webhook）',
+          items: [
+            '发送通道 → 新建，类型选 Webhook，方法选 POST，通道名称随意（如 catrace）',
+            {
+              kind: 'copy',
+              label: 'Webhook Server：选手机能访问的电脑局域网 IP',
+              urls: urlRows,
+              emptyUrls: !urls.length,
+            },
+            {
+              kind: 'copy',
+              label: 'Headers：点 + 加一行，Key / Value 分开填',
+              headers: [
+                { key: 'Authorization', value: authHeader.replace(/^Authorization:\s*/i, '') },
+              ],
+            },
+            { kind: 'copy', label: '消息模板：整段粘贴', value: template, copyKey: 'copy-tpl' },
+            '保存后点「测试」，SmsForwarder 显示发送成功、电脑弹出 Toast 即通道 OK',
+          ],
+        },
+        {
+          title: '新建转发规则（通道建好后必做）',
+          items: [
+            '仅有发送通道不会转发；必须再配「转发规则」并绑定到刚才的通道',
+            '应用通知：转发规则 → 通知转发规则 → 新建',
+            '短信：转发规则 → 短信转发规则 → 新建（可选）',
+            '规则别名随意（如 catrace）；发送通道选刚建的 catrace',
+            '匹配字段选「全部」（先跑通全量；之后可改成包名/内容过滤）',
+            '「启用自定义模版」「启用正则替换」保持关闭（用通道里的消息模板即可）',
+            '打开「启用该条转发规则」，免打扰时段保持 00:00～00:00（相等=不启用）',
+            '保存后点「测试」；再让手机来一条真实通知/短信，电脑应弹 Toast',
+          ],
+        },
+      ]
+
+      const renderStepItem = (it) => {
+        if (!it || it.kind !== 'copy') return h('li', it)
+        if (Array.isArray(it.headers)) {
+          return h('li', { class: 'step-copy' }, [
+            h('span', { class: 'step-copy-label' }, it.label),
+            h(
+              'div',
+              { class: 'step-copy-values' },
+              it.headers.map((hdr) =>
+                h('div', { class: 'copy-row', key: hdr.key }, [
+                  h('pre', { class: 'mono' }, `${hdr.key}: ${hdr.value}`),
+                  h('div', { class: 'row-inline' }, [
+                    copyBtn('复制 Key', hdr.key, `copy-hk-${hdr.key}`),
+                    copyBtn('复制 Value', hdr.value, `copy-hv-${hdr.key}`),
+                  ]),
+                ]),
+              ),
+            ),
+          ])
+        }
+        const rows = Array.isArray(it.urls)
+          ? it.urls.map((u) =>
+              h('div', { class: 'copy-row', key: u }, [
+                h('pre', { class: 'mono' }, u),
+                copyBtn('复制', u, `copy-${u}`),
+              ]),
+            )
+          : [
+              h('div', { class: 'copy-row' }, [
+                h('pre', { class: 'mono' }, it.value),
+                copyBtn('复制', it.value, it.copyKey),
+              ]),
+            ]
+        return h('li', { class: 'step-copy' }, [
+          h('span', { class: 'step-copy-label' }, it.label),
+          h('div', { class: 'step-copy-values' }, rows),
+          it.emptyUrls
+            ? h('p', { class: 'hint' }, 'URL 列表为空：先启用插件，确认服务运行中，再点「刷新状态」。')
+            : null,
+        ])
+      }
+
       const tutorialCard = h('div', { class: 'card' }, [
         h('div', { class: 'head' }, [h('h2', '使用教程')]),
-        h('p', { class: 'desc' }, '五分钟上手：把 Android 通知转发成电脑上的 Toast。按顺序完成即可。'),
+        h(
+          'p',
+          { class: 'desc' },
+          '按官方流程：通用设置 → 发送通道 → 转发规则。通道只决定「发到哪」；规则决定「哪些通知/短信会转发」。需要填写的内容点「复制」即可。',
+        ),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, '下载 SmsForwarder'),
           h(
@@ -948,75 +1027,15 @@ export default {
         h(
           'div',
           { class: 'steps-wrap' },
-          TUTORIAL_STEPS.map((s, i) =>
+          steps.map((s, i) =>
             h('div', { class: 'step', key: s.title }, [
               h('span', { class: 'step-num' }, String(i + 1)),
               h('div', { class: 'step-body' }, [
                 h('div', { class: 'step-title' }, s.title),
-                h('ul', { class: 'step-list' }, s.items.map((it) => h('li', it))),
+                h('ul', { class: 'step-list' }, s.items.map(renderStepItem)),
               ]),
             ]),
           ),
-        ),
-      ])
-
-      const guideCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', 'SmsForwarder 配置速查')]),
-        h(
-          'p',
-          { class: 'desc' },
-          '配置 SmsForwarder 通道时需要用到的三样东西：URL、请求头、JSON 模板。',
-        ),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '推荐 Webhook URL（选本机局域网 IP）'),
-          h(
-            'div',
-            { class: 'url-list' },
-            urls.length
-              ? urls.map((u) =>
-                  h('div', { class: 'copy-row', key: u }, [
-                    h('pre', { class: 'mono' }, u),
-                    copyBtn('复制', u, 'copy-url'),
-                  ]),
-                )
-              : [
-                  h('div', { class: 'copy-row' }, [
-                    h('pre', { class: 'mono' }, primaryUrl),
-                    copyBtn('复制', primaryUrl, 'copy-url'),
-                  ]),
-                ],
-          ),
-          h(
-            'p',
-            { class: 'hint' },
-            '若列表为空：先启用插件，确认服务运行中，再点「刷新状态」。',
-          ),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '请求头'),
-          h('div', { class: 'copy-row' }, [
-            h('pre', { class: 'mono' }, authHeader),
-            copyBtn('复制', authHeader, 'copy-hdr'),
-          ]),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, 'JSON 消息模板'),
-          h('div', { class: 'copy-row' }, [
-            h('pre', { class: 'mono' }, template),
-            copyBtn('复制', template, 'copy-tpl'),
-          ]),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '响应关键词（可选）'),
-          h('div', { class: 'copy-row' }, [
-            h('pre', { class: 'mono' }, '"ok":true'),
-            copyBtn('复制', '"ok":true', 'copy-kw'),
-          ]),
-        ]),
-        h(
-          'p',
-          { class: 'hint' },
-          '方法选 POST；Content-Type: application/json。本插件不支持 GET。公网中继/HTTPS 不在首版范围。',
         ),
       ])
 
@@ -1034,7 +1053,7 @@ export default {
       if (activeTab.value === 'settings') {
         panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard])
       } else if (activeTab.value === 'tutorial') {
-        panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, guideCard, faqCard])
+        panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, faqCard])
       } else {
         panel = h('div', { class: 'sf-tab-panel' }, [overviewCard])
       }
