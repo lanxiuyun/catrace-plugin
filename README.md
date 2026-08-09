@@ -40,7 +40,7 @@ Catrace 自带的基础插件，开箱即用。
 
 ![SmsForwarder 通知展示一](screenshots/sms1.png)
 ![SmsForwarder 通知展示二](screenshots/sms2.jpg)
-[text](screenshots/接收trae验证码.wmv)
+<video controls src="screenshots/接收trae验证码.mp4" title="接收 trae 验证码"></video>
 
 ### 🔔 GitHub 通知（github-notify）
 GitHub 上有新通知（PR、Issue、@我、评论）时，弹卡片提醒你。
