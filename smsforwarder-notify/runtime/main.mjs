@@ -31,6 +31,7 @@ const DEFAULT_CONFIG = {
   appBlacklist: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
+  onlyPushWhenActive: false,
 }
 
 /** @type {typeof DEFAULT_CONFIG} */
@@ -55,9 +56,52 @@ let lastErrorSummary = ''
 let lastErrorAt = 0
 let lastClientIp = ''
 
+/** Host requestId -> pending storage.get resolvers */
+const storagePending = new Map()
+let storageReqSeq = 0
+
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
 const log = (message, data, level = 'info') =>
   send({ v: 1, op: 'log', level, message, data })
+
+function storageGet(key) {
+  return new Promise((resolve) => {
+    const requestId = `stg-${++storageReqSeq}`
+    storagePending.set(requestId, { resolve, timer: null })
+    send({ v: 1, op: 'storage.get', requestId, key })
+    const timer = setTimeout(() => {
+      if (storagePending.has(requestId)) {
+        storagePending.delete(requestId)
+        resolve(null)
+      }
+    }, 1500)
+    const pending = storagePending.get(requestId)
+    if (pending) pending.timer = timer
+  })
+}
+
+function handleHostResponse(message) {
+  const requestId = message.requestId
+  if (!requestId || !storagePending.has(requestId)) return
+  const pending = storagePending.get(requestId)
+  storagePending.delete(requestId)
+  if (pending && pending.timer) clearTimeout(pending.timer)
+  if (pending) pending.resolve(message.ok ? message.result ?? null : null)
+}
+
+/** True when the user is currently active; unknown/stale state fails open (allow push). */
+async function isUserActive() {
+  try {
+    const snap = await storageGet('activitySnapshot')
+    if (!snap || typeof snap !== 'object') return true
+    const age = Date.now() - (Number(snap.at) || 0)
+    // stale snapshot (background not updating) → fail open, don't drop notifications
+    if (!Number.isFinite(age) || age < 0 || age > 30_000) return true
+    return snap.active === true
+  } catch {
+    return true
+  }
+}
 
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
@@ -137,6 +181,7 @@ function normalizeConfig(input = {}) {
         : [...(config.appBlacklist || [])],
     hideSensitiveBody: input.hideSensitiveBody === true,
     enableOtpAction: input.enableOtpAction !== false,
+    onlyPushWhenActive: input.onlyPushWhenActive === true,
   }
   return next
 }
@@ -612,6 +657,19 @@ async function handleWebhook(req, res, ip) {
     return
   }
 
+  // Gate before dedupe so an idle-dropped message does not burn its dedupe
+  // slot: if the same notification re-arrives while active it may still push.
+  if (config.onlyPushWhenActive === true && !(await isUserActive())) {
+    writeJson(res, 200, { ok: true, skipped: true, reason: 'inactive' })
+    log('skipped inactive', {
+      ip,
+      status: 200,
+      packageName: n.packageName,
+      bodyLen: (n.body || '').length,
+    })
+    return
+  }
+
   const hash = contentHash(n)
   if (isDuplicate(hash)) {
     dedupedCount += 1
@@ -861,6 +919,7 @@ function statusPayload() {
     appBlacklist: [...(config.appBlacklist || [])],
     hideSensitiveBody: config.hideSensitiveBody === true,
     enableOtpAction: config.enableOtpAction !== false,
+    onlyPushWhenActive: config.onlyPushWhenActive === true,
     ipv4,
     webhookUrls: urls,
     acceptedCount,
@@ -1073,5 +1132,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       actionId: message.actionId,
       resolutionKind: message.resolutionKind,
     })
+    return
+  }
+
+  if (message.op === 'response') {
+    handleHostResponse(message)
   }
 })

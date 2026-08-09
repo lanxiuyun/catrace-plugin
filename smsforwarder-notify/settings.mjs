@@ -189,6 +189,7 @@ const DEFAULT_CONFIG = {
   appBlacklist: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
+  onlyPushWhenActive: false,
 }
 
 const JSON_TEMPLATE = `{
@@ -318,6 +319,7 @@ export default {
     const blacklistText = ref('')
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
+    const onlyPushWhenActive = ref(false)
     const status = ref(null)
     const webhookInfo = ref(null)
     const activeTab = ref('overview')
@@ -342,6 +344,7 @@ export default {
         appBlacklist: textToBlacklist(blacklistText.value),
         hideSensitiveBody: hideSensitiveBody.value === true,
         enableOtpAction: enableOtpAction.value !== false,
+        onlyPushWhenActive: onlyPushWhenActive.value === true,
       }
     }
 
@@ -361,6 +364,7 @@ export default {
       blacklistText.value = blacklistToText(cfg.appBlacklist)
       hideSensitiveBody.value = cfg.hideSensitiveBody === true
       enableOtpAction.value = cfg.enableOtpAction !== false
+      onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
     }
 
     async function run(key, task) {
@@ -881,7 +885,27 @@ export default {
       ])
 
       const filterCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '过滤与隐私')]),
+        h('div', { class: 'head' }, [h('h2', '过滤与推送')]),
+        h('div', { class: 'row' }, [
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, '仅电脑活跃时推送'),
+            h('div', { class: 'row-inline' }, [
+              h(NSwitch, {
+                value: onlyPushWhenActive.value,
+                'onUpdate:value': (v) => {
+                  onlyPushWhenActive.value = v === true
+                  scheduleSave()
+                },
+              }),
+              h('span', { class: 'switch-pair' }, onlyPushWhenActive.value ? '已开启' : '已关闭'),
+            ]),
+            h(
+              'p',
+              { class: 'hint' },
+              '开启后，电脑处于空闲（无键鼠操作）时收到的通知不弹 Toast，回到活跃状态后才继续推送。',
+            ),
+          ]),
+        ]),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名）'),
           h(NInput, {

@@ -4,6 +4,33 @@ if (!plugin || !plugin.config || !plugin.events || !plugin.log) {
 }
 
 const PLUGIN_ID = 'smsforwarder-notify'
+const ACTIVITY_KEY = 'activitySnapshot'
+const ACTIVITY_POLL_MS = 5000
+
+let activityTimer = null
+
+async function refreshActivitySnapshot() {
+  try {
+    if (!plugin.activity || typeof plugin.activity.get !== 'function') return
+    const snap = await plugin.activity.get()
+    const payload = {
+      active: Boolean(snap && snap.active),
+      at: Date.now(),
+    }
+    if (plugin.storage && typeof plugin.storage.set === 'function') {
+      await plugin.storage.set(ACTIVITY_KEY, payload)
+    }
+  } catch (e) {
+    console.warn('[smsforwarder-notify] activity snapshot failed', e)
+    plugin.log?.warn?.('activity snapshot failed', { error: String(e) }).catch(() => {})
+  }
+}
+
+function startActivityPoller() {
+  if (activityTimer) return
+  void refreshActivitySnapshot()
+  activityTimer = setInterval(refreshActivitySnapshot, ACTIVITY_POLL_MS)
+}
 
 function pickOtp(text) {
   const near =
@@ -106,4 +133,5 @@ async function blockApp(packageName, appName) {
   }
 }
 
+startActivityPoller()
 await plugin.log.info(`${PLUGIN_ID} background loaded`)
