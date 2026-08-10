@@ -1,8 +1,8 @@
 {
   "id": "github-notify",
   "name": "GitHub 通知",
-  "version": "0.1.0",
-  "description": "轮询 GitHub Notifications，活跃时弹出 PR/Issue 等提醒卡片",
+  "version": "0.1.1",
+  "description": "拉取 GitHub 未读通知，启动时推送所有未通知过的通知",
   "main": "ui.mjs",
   "background": "background.mjs",
   "settings": "settings.mjs",
