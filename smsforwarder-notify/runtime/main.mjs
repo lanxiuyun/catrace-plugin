@@ -9,8 +9,18 @@ const MAX_BODY_BYTES = 64 * 1024
 const RATE_LIMIT_WINDOW_MS = 60_000
 const RATE_LIMIT_MAX = 120
 const MAX_DEDUPE = 500
-const OTP_KEYWORD_RE = /验证码|校验码|动态码|verification code|security code|OTP/i
-const OTP_CODE_RE = /(?<!\d)\d{4,8}(?!\d)/g
+const MAX_PENDING = 200
+const PENDING_POLL_MS = 3000
+// keywords near which a 4–8 digit code is treated as OTP
+const OTP_KEYWORD_RE =
+  /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|提取码|兑换码|OTP|PIN|verification\s*code|security\s*code|auth(?:entication)?\s*code|one[-\s]?time\s*(?:pass)?(?:word|code)?|\bcode\b/i
+// plain ASCII digits, optional spaces/dashes between (e.g. 123 456 / 123-456)
+const OTP_CODE_RE = /(?<!\d)(?:\d[ \t-]*){3,7}\d(?!\d)/g
+// fullwidth digits ０-９
+const OTP_FULLWIDTH_RE = /(?<![0-9０-９])[０-９]{4,8}(?![0-9０-９])/g
+// packages that are SMS / messaging — extract more aggressively
+const SMS_PACKAGE_RE =
+  /mms|sms|messaging|telephony|contacts|samsung\.android\.messaging|miui\.sms|oppo\.sms|coloros\.mms|transsion\.smartmessage|google\.android\.apps\.messaging/i
 
 const DEFAULT_CONFIG = {
   enabled: true,
@@ -23,6 +33,7 @@ const DEFAULT_CONFIG = {
   appBlacklist: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
+  onlyPushWhenActive: false,
 }
 
 /** @type {typeof DEFAULT_CONFIG} */
@@ -38,6 +49,9 @@ let starting = false
 const rateMap = new Map()
 /** @type {Map<string, number>} hash -> expireAt */
 const dedupeMap = new Map()
+/** @type {Map<string, { n: object, hash: string, queuedAt: number }>} notifications deferred while idle */
+const pendingQueue = new Map()
+let pendingTimer = null
 
 let acceptedCount = 0
 let rejectedCount = 0
@@ -47,9 +61,52 @@ let lastErrorSummary = ''
 let lastErrorAt = 0
 let lastClientIp = ''
 
+/** Host requestId -> pending storage.get resolvers */
+const storagePending = new Map()
+let storageReqSeq = 0
+
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
 const log = (message, data, level = 'info') =>
   send({ v: 1, op: 'log', level, message, data })
+
+function storageGet(key) {
+  return new Promise((resolve) => {
+    const requestId = `stg-${++storageReqSeq}`
+    storagePending.set(requestId, { resolve, timer: null })
+    send({ v: 1, op: 'storage.get', requestId, key })
+    const timer = setTimeout(() => {
+      if (storagePending.has(requestId)) {
+        storagePending.delete(requestId)
+        resolve(null)
+      }
+    }, 1500)
+    const pending = storagePending.get(requestId)
+    if (pending) pending.timer = timer
+  })
+}
+
+function handleHostResponse(message) {
+  const requestId = message.requestId
+  if (!requestId || !storagePending.has(requestId)) return
+  const pending = storagePending.get(requestId)
+  storagePending.delete(requestId)
+  if (pending && pending.timer) clearTimeout(pending.timer)
+  if (pending) pending.resolve(message.ok ? message.result ?? null : null)
+}
+
+/** True when the user is currently active; unknown/stale state fails open (allow push). */
+async function isUserActive() {
+  try {
+    const snap = await storageGet('activitySnapshot')
+    if (!snap || typeof snap !== 'object') return true
+    const age = Date.now() - (Number(snap.at) || 0)
+    // stale snapshot (background not updating) → fail open, don't drop notifications
+    if (!Number.isFinite(age) || age < 0 || age > 30_000) return true
+    return snap.active === true
+  } catch {
+    return true
+  }
+}
 
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
@@ -129,6 +186,7 @@ function normalizeConfig(input = {}) {
         : [...(config.appBlacklist || [])],
     hideSensitiveBody: input.hideSensitiveBody === true,
     enableOtpAction: input.enableOtpAction !== false,
+    onlyPushWhenActive: input.onlyPushWhenActive === true,
   }
   return next
 }
@@ -259,16 +317,61 @@ function writeJson(res, status, obj) {
 
 function normalizePayload(raw) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-  const packageName = clampStr(src.packageName ?? src.package_name ?? src.pkg, 255, 'unknown') || 'unknown'
-  let appName = clampStr(src.appName ?? src.app_name ?? src.app, 100, '')
+  // SmsForwarder / misc clients may use many aliases; fold them
+  const packageName =
+    clampStr(
+      src.packageName ?? src.package_name ?? src.pkg ?? src.PACKAGE_NAME,
+      255,
+      'unknown',
+    ) || 'unknown'
+  let appName = clampStr(
+    src.appName ?? src.app_name ?? src.app ?? src.APP_NAME,
+    100,
+    '',
+  )
   if (!appName) appName = packageName
-  let title = clampStr(src.title ?? src.Title, 300, '')
+
+  let title = clampStr(src.title ?? src.Title ?? src.TITLE ?? src.subject, 300, '')
+  let body = clampStr(
+    src.body ??
+      src.msg ??
+      src.message ??
+      src.MSG ??
+      src.content ??
+      src.text ??
+      src.sms ??
+      src.desc ??
+      src.description,
+    4000,
+    '',
+  )
+
+  // some clients put the whole SMS only in title, or only in a nested field
+  if (!body && typeof src.data === 'string') body = clampStr(src.data, 4000, '')
+  if (!body && src.data && typeof src.data === 'object') {
+    body = clampStr(src.data.body ?? src.data.msg ?? src.data.message, 4000, '')
+    if (!title) title = clampStr(src.data.title, 300, '')
+  }
+
+  // if title holds the long text and body is empty, swap for display/OTP
+  if (!body && title && title.length > 20) {
+    body = title
+    title = appName
+  }
+  // if body empty but title looks like SMS content with digits, keep title as body too
+  if (!body && title) body = title
+
   if (!title) title = appName
-  const body = clampStr(src.body ?? src.msg ?? src.message ?? src.MSG ?? src.content, 4000, '')
-  const receivedAt = clampStr(src.receivedAt ?? src.receive_time ?? src.RECEIVE_TIME, 64, '')
-  const device = clampStr(src.device ?? src.device_mark, 100, '')
+
+  const receivedAt = clampStr(
+    src.receivedAt ?? src.receive_time ?? src.RECEIVE_TIME ?? src.time ?? src.date,
+    64,
+    '',
+  )
+  const device = clampStr(src.device ?? src.device_mark ?? src.from, 100, '')
   const uid = clampStr(src.uid ?? src.UID, 128, '')
   const timestamp = src.timestamp
+  // keep raw-ish preview fields for OTP (never log full body)
   return { packageName, appName, title, body, receivedAt, device, uid, timestamp }
 }
 
@@ -285,14 +388,96 @@ function isBlacklisted(n) {
   return false
 }
 
-function extractOtp(title, body) {
-  const text = `${title || ''}\n${body || ''}`
-  if (!OTP_KEYWORD_RE.test(text)) return ''
-  const matches = text.match(OTP_CODE_RE)
-  if (!matches || !matches.length) return ''
-  // prefer 6-digit if present
-  const six = matches.find((m) => m.length === 6)
-  return six || matches[0]
+function toHalfWidthDigits(s) {
+  return String(s || '').replace(/[０-９]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30),
+  )
+}
+
+function normalizeOtpCandidate(raw) {
+  const digits = toHalfWidthDigits(raw).replace(/\D/g, '')
+  if (digits.length < 4 || digits.length > 8) return ''
+  if (/^0+$/.test(digits)) return ''
+  // bare year
+  if (/^(19|20)\d{2}$/.test(digits)) return ''
+  return digits
+}
+
+function isSmsLikePackage(packageName, appName) {
+  const s = `${packageName || ''} ${appName || ''}`
+  return SMS_PACKAGE_RE.test(s) || /短信|信息|讯息|SMS|MMS/i.test(s)
+}
+
+function extractOtp(title, body, meta = {}) {
+  const text = toHalfWidthDigits(`${title || ''}\n${body || ''}`)
+  if (!text.trim()) return ''
+
+  const hasKeyword = OTP_KEYWORD_RE.test(text)
+  const smsLike = isSmsLikePackage(meta.packageName, meta.appName)
+  const candidates = []
+
+  // 1) code immediately after a keyword (最高置信)
+  const nearAfter =
+    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|口令|密码|OTP|PIN|code|Code|CODE)[^\d０-９]{0,16}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
+  let m
+  while ((m = nearAfter.exec(text)) !== null) {
+    const c = normalizeOtpCandidate(m[1])
+    if (c) candidates.push({ code: c, rank: 4 })
+  }
+
+  // 1b) code BEFORE keyword: 582913（登录验证码） / 123456是您的验证码
+  const nearBefore =
+    /([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])[^\d０-９]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP|code)/gi
+  while ((m = nearBefore.exec(text)) !== null) {
+    const c = normalizeOtpCandidate(m[1])
+    if (c) candidates.push({ code: c, rank: 4 })
+  }
+
+  // 1c) 码为 / 码是 / 为 … 码
+  const cnBare =
+    /(?:码为|码是|码：|码:|密码为|密码是)[^\d０-９]{0,8}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
+  while ((m = cnBare.exec(text)) !== null) {
+    const c = normalizeOtpCandidate(m[1])
+    if (c) candidates.push({ code: c, rank: 3 })
+  }
+
+  // 2) any 4–8 digit run when keyword present
+  if (hasKeyword || candidates.length) {
+    const ascii = text.match(OTP_CODE_RE) || []
+    for (const raw of ascii) {
+      const c = normalizeOtpCandidate(raw)
+      if (c) candidates.push({ code: c, rank: 2 })
+    }
+    const fw = text.match(OTP_FULLWIDTH_RE) || []
+    for (const raw of fw) {
+      const c = normalizeOtpCandidate(raw)
+      if (c) candidates.push({ code: c, rank: 2 })
+    }
+  }
+
+  // 3) SMS package or short message: single clear 4–8 digit token
+  if (!candidates.length) {
+    const compact = text.replace(/\s+/g, ' ').trim()
+    const only = compact.match(OTP_CODE_RE) || []
+    const norms = [...new Set(only.map(normalizeOtpCandidate).filter(Boolean))]
+    // drop phone-like 11-digit already excluded by 4-8; prefer 6-digit among few
+    if (norms.length === 1 && (smsLike || compact.length <= 120)) {
+      candidates.push({ code: norms[0], rank: 1 })
+    } else if (smsLike && norms.length >= 1 && norms.length <= 3) {
+      const six = norms.find((x) => x.length === 6)
+      candidates.push({ code: six || norms[0], rank: 1 })
+    }
+  }
+
+  if (!candidates.length) return ''
+
+  candidates.sort((a, b) => {
+    if (b.rank !== a.rank) return b.rank - a.rank
+    if (a.code.length === 6 && b.code.length !== 6) return -1
+    if (b.code.length === 6 && a.code.length !== 6) return 1
+    return Math.abs(a.code.length - 6) - Math.abs(b.code.length - 6)
+  })
+  return candidates[0].code
 }
 
 function contentHash(n) {
@@ -331,23 +516,32 @@ function isDuplicate(hash) {
 
 function toastBody(n) {
   const raw = String(n.body || '')
-  if (raw.length <= 500) return raw
-  return `${raw.slice(0, 499)}…`
+  // toast card can scroll/wrap; keep generous limit
+  if (raw.length <= 2000) return raw
+  return `${raw.slice(0, 1999)}…`
 }
 
 function publishNotification(n, hash, otp) {
   const cardSec = clampInt(config.cardDurationSec, 0, 600, 10)
   const sticky = cardSec <= 0
   const hideBody = config.hideSensitiveBody === true
-  const title = `${n.appName} · ${n.title}`
+  // card UI shows sender (title) + app avatar; event.title is hub/fallback label
+  const sender = String(n.title || '').trim()
+  const app = String(n.appName || '').trim()
+  const head = sender || app || '通知'
   const body = hideBody ? '' : toastBody(n)
   const actions = []
-  if (!hideBody && config.enableOtpAction !== false && otp) {
-    actions.push({ id: 'copy-otp', label: '复制验证码' })
+  // must be on event.actions — bus.resolve_action rejects unknown ids
+  if (!hideBody) {
+    actions.push({ id: 'copy-body', label: '复制正文' })
+    if (config.enableOtpAction !== false && otp) {
+      actions.push({ id: 'copy-otp', label: '复制验证码' })
+    }
   }
   if (sticky) {
     actions.push({ id: 'dismiss', label: '知道了' })
   }
+  actions.push({ id: 'block-app', label: '拉黑此应用' })
 
   const payload = {
     packageName: n.packageName,
@@ -370,8 +564,8 @@ function publishNotification(n, hash, otp) {
     event: {
       eventType: 'smsforwarder-notify.notification',
       kind: 'smsforwarder-notify',
-      title,
-      body: hideBody ? `${n.appName} 发来通知` : body,
+      title: head,
+      body: hideBody ? `${app || '应用'} 发来通知` : body,
       level: 'info',
       sticky,
       actions,
@@ -384,6 +578,71 @@ function publishNotification(n, hash, otp) {
 function noteError(summary) {
   lastErrorSummary = String(summary || '').slice(0, 200)
   lastErrorAt = Date.now()
+}
+
+function stopPendingTimer() {
+  if (pendingTimer) {
+    clearInterval(pendingTimer)
+    pendingTimer = null
+  }
+}
+
+function enqueuePending(n, hash) {
+  if (pendingQueue.has(hash)) return
+  if (pendingQueue.size >= MAX_PENDING) {
+    const oldest = pendingQueue.keys().next().value
+    pendingQueue.delete(oldest)
+  }
+  pendingQueue.set(hash, { n, hash, queuedAt: Date.now() })
+  if (!pendingTimer) {
+    pendingTimer = setInterval(() => {
+      flushPending().catch((err) => {
+        log(
+          'pending flush error',
+          { error: err instanceof Error ? err.message : String(err) },
+          'error',
+        )
+      })
+    }, PENDING_POLL_MS)
+    pendingTimer.unref?.()
+  }
+}
+
+/** Re-push notifications that arrived while the user was idle, once they are active again. */
+async function flushPending(force = false) {
+  if (!force && config.onlyPushWhenActive !== true) {
+    stopPendingTimer()
+    return
+  }
+  if (pendingQueue.size === 0) {
+    stopPendingTimer()
+    return
+  }
+  if (!force && !(await isUserActive())) return
+  const items = [...pendingQueue.values()]
+  pendingQueue.clear()
+  log('active, flushing deferred notifications', { count: items.length })
+  for (const { n, hash } of items) {
+    try {
+      const otp = extractOtp(n.title, n.body, n)
+      publishNotification(n, hash, otp)
+      acceptedCount += 1
+      lastSuccessAt = Date.now()
+      log('flushed deferred notification', {
+        packageName: n.packageName,
+        titleLen: (n.title || '').length,
+        bodyLen: (n.body || '').length,
+      })
+    } catch (err) {
+      rejectedCount += 1
+      noteError(`500 deferred publish fail: ${err instanceof Error ? err.message : String(err)}`)
+      log(
+        'deferred publish failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'error',
+      )
+    }
+  }
 }
 
 async function handleWebhook(req, res, ip) {
@@ -441,6 +700,20 @@ async function handleWebhook(req, res, ip) {
     return
   }
 
+  // debug shape only — keys + lengths, never full secrets
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const shape = {}
+    for (const k of Object.keys(raw).slice(0, 40)) {
+      const v = raw[k]
+      if (v == null) shape[k] = null
+      else if (typeof v === 'string') shape[k] = `str:${v.length}`
+      else if (typeof v === 'number' || typeof v === 'boolean') shape[k] = typeof v
+      else if (typeof v === 'object') shape[k] = Array.isArray(v) ? `arr:${v.length}` : 'obj'
+      else shape[k] = typeof v
+    }
+    log('webhook fields', { ip, keys: Object.keys(raw).slice(0, 40), shape })
+  }
+
   const n = normalizePayload(raw)
   if (isBlacklisted(n)) {
     rejectedCount += 1
@@ -450,6 +723,22 @@ async function handleWebhook(req, res, ip) {
       status: 200,
       packageName: n.packageName,
       bodyLen: (n.body || '').length,
+    })
+    return
+  }
+
+  // Idle gate: defer (not drop) so the notification re-pushes once the user
+  // is active again. Dedupe by content so repeated syncs while idle collapse.
+  if (config.onlyPushWhenActive === true && !(await isUserActive())) {
+    const hash = contentHash(n)
+    enqueuePending(n, hash)
+    writeJson(res, 200, { ok: true, queued: true, reason: 'inactive' })
+    log('queued while inactive', {
+      ip,
+      status: 200,
+      packageName: n.packageName,
+      bodyLen: (n.body || '').length,
+      queueSize: pendingQueue.size,
     })
     return
   }
@@ -467,19 +756,27 @@ async function handleWebhook(req, res, ip) {
     return
   }
 
-  const otp = extractOtp(n.title, n.body)
+  const otp = extractOtp(n.title, n.body, n)
   try {
     publishNotification(n, hash, otp)
     acceptedCount += 1
     lastSuccessAt = Date.now()
     lastClientIp = ip
     writeJson(res, 200, { ok: true })
+    const merged = `${n.title || ''}\n${n.body || ''}`
     log('accepted', {
       ip,
       status: 200,
       packageName: n.packageName,
+      titleLen: (n.title || '').length,
       bodyLen: (n.body || '').length,
+      hasKeyword: OTP_KEYWORD_RE.test(merged),
+      digitRuns: (merged.match(/(?<!\d)\d{4,8}(?!\d)/g) || []).length,
       hasOtp: Boolean(otp),
+      otpLen: otp ? String(otp).length : 0,
+      actionCount: !config.hideSensitiveBody && config.enableOtpAction !== false && otp ? 1 : 0,
+      hideSensitiveBody: config.hideSensitiveBody === true,
+      enableOtpAction: config.enableOtpAction !== false,
     })
   } catch (err) {
     rejectedCount += 1
@@ -595,59 +892,80 @@ function startServer() {
     const prevServer = server
     const prevMeta = listenMeta
 
-    const next = http.createServer(requestListener)
-    next.on('error', (err) => {
-      log('http server error', { error: err instanceof Error ? err.message : String(err) }, 'error')
-      noteError(`server error: ${err instanceof Error ? err.message : String(err)}`)
-    })
+    const MAX_ATTEMPTS = 8
+    const BACKOFF_MS = 500
+    let lastErr = null
+    let attempt = 0
 
-    try {
-      await new Promise((resolve, reject) => {
-        const onErr = (err) => {
-          next.off('listening', onListen)
-          reject(err)
-        }
-        const onListen = () => {
-          next.off('error', onErr)
-          resolve()
-        }
-        next.once('error', onErr)
-        next.once('listening', onListen)
-        next.listen(port, host)
+    while (attempt < MAX_ATTEMPTS) {
+      attempt += 1
+      const next = http.createServer(requestListener)
+      next.on('error', (err) => {
+        log('http server error', { error: err instanceof Error ? err.message : String(err) }, 'error')
+        noteError(`server error: ${err instanceof Error ? err.message : String(err)}`)
       })
-    } catch (err) {
+
+      let bound = false
       try {
-        next.close()
-      } catch {
-        /* ignore */
+        await new Promise((resolve, reject) => {
+          const onErr = (err) => {
+            next.off('listening', onListen)
+            reject(err)
+          }
+          const onListen = () => {
+            next.off('error', onErr)
+            resolve()
+          }
+          next.once('error', onErr)
+          next.once('listening', onListen)
+          next.listen(port, host)
+        })
+        bound = true
+      } catch (err) {
+        lastErr = err
+        try {
+          next.close()
+        } catch {
+          /* ignore */
+        }
+        const isBusy = Boolean(err && err.code === 'EADDRINUSE')
+        // previous sidecar may still be releasing the port after a reload
+        if (isBusy && attempt < MAX_ATTEMPTS) {
+          log('listen busy, retry', { host, port, attempt }, 'warn')
+          await new Promise((r) => setTimeout(r, BACKOFF_MS))
+          continue
+        }
+        break
       }
-      const msg = err instanceof Error ? err.message : String(err)
-      noteError(`listen failed: ${msg}`)
-      log('listen failed, keep previous', { error: msg, host, port }, 'error')
-      // keep old if any
-      if (prevServer && prevServer.listening) {
-        server = prevServer
-        listenMeta = prevMeta
+
+      // swap: close old after new is up
+      server = next
+      listenMeta = { host, port, path: config.path }
+      config.path = path
+      config.host = host
+      config.port = port
+
+      if (prevServer && prevServer !== next) {
+        await new Promise((resolve) => {
+          prevServer.close(() => resolve())
+          setTimeout(resolve, 1000).unref?.()
+        })
       }
-      return { ok: false, error: msg, ...statusPayload() }
+
+      log('http listening', { host, port, path: config.path, bound: true })
+      return { ok: true, ...statusPayload() }
     }
 
-    // swap: close old after new is up
-    server = next
-    listenMeta = { host, port, path: config.path }
-    config.path = path
-    config.host = host
-    config.port = port
-
-    if (prevServer && prevServer !== next) {
-      await new Promise((resolve) => {
-        prevServer.close(() => resolve())
-        setTimeout(resolve, 1000).unref?.()
-      })
+    const msg =
+      lastErr instanceof Error ? lastErr.message : String(lastErr || 'listen failed')
+    noteError(`listen failed: ${msg}`)
+    log('listen failed, keep previous', { error: msg, host, port, attempts: attempt }, 'error')
+    // keep old if any
+    if (prevServer && prevServer.listening) {
+      server = prevServer
+      listenMeta = prevMeta
     }
-
-    log('http listening', { host, port, path: config.path })
-    return { ok: true, ...statusPayload() }
+    return { ok: false, error: msg, ...statusPayload() }
   })().finally(() => {
     starting = false
   })
@@ -674,6 +992,7 @@ function statusPayload() {
     appBlacklist: [...(config.appBlacklist || [])],
     hideSensitiveBody: config.hideSensitiveBody === true,
     enableOtpAction: config.enableOtpAction !== false,
+    onlyPushWhenActive: config.onlyPushWhenActive === true,
     ipv4,
     webhookUrls: urls,
     acceptedCount,
@@ -683,6 +1002,7 @@ function statusPayload() {
     lastErrorSummary: lastErrorSummary || null,
     lastErrorAt: lastErrorAt || null,
     lastClientIp: lastClientIp || null,
+    pendingCount: pendingQueue.size,
     dedupeSize: dedupeMap.size,
   }
 }
@@ -709,18 +1029,34 @@ function webhookInfoPayload() {
   }
 }
 
+function unwrapConfig(input) {
+  if (!input || typeof input !== 'object') return {}
+  // host may send flat config or { config: {...} }
+  if (input.config && typeof input.config === 'object' && !Array.isArray(input.config)) {
+    return input.config
+  }
+  return input
+}
+
 async function applyHostConfig(input) {
+  const raw = unwrapConfig(input)
   const prev = {
     host: config.host,
     port: config.port,
     path: config.path,
     token: config.token,
   }
-  config = normalizeConfig(input || {})
+  config = normalizeConfig(raw)
   ensureToken()
+
+  // feature turned off → release anything deferred while idle (queued push)
+  if (config.onlyPushWhenActive !== true) {
+    await flushPending(true)
+  }
 
   const bindChanged =
     prev.host !== config.host || prev.port !== config.port || prev.path !== config.path
+  const tokenChanged = prev.token !== config.token
 
   log('config applied', {
     enabled: config.enabled,
@@ -728,6 +1064,10 @@ async function applyHostConfig(input) {
     port: config.port,
     path: config.path,
     hasToken: Boolean(config.token),
+    tokenLength: config.token ? config.token.length : 0,
+    tokenChanged,
+    // fingerprint only — never log the secret
+    tokenFp: config.token ? config.token.slice(0, 4) + '…' + config.token.slice(-4) : null,
     cardDurationSec: config.cardDurationSec,
     dedupeWindowSec: config.dedupeWindowSec,
     blacklist: (config.appBlacklist || []).length,
@@ -738,13 +1078,14 @@ async function applyHostConfig(input) {
 
   if (config.enabled === false) {
     await stopServer()
-    return statusPayload()
+    return { ok: true, ...statusPayload(), token: config.token }
   }
 
   if (bindChanged || !server || !server.listening) {
-    return startServer()
+    const started = await startServer()
+    return { ...started, token: config.token }
   }
-  return { ok: true, ...statusPayload() }
+  return { ok: true, ...statusPayload(), token: config.token }
 }
 
 function handleRequest(message) {
@@ -763,7 +1104,10 @@ function handleRequest(message) {
         return applyHostConfig(params)
       case 'regenerateToken': {
         config.token = generateToken()
-        log('token regenerated', { length: config.token.length })
+        log('token regenerated', {
+          length: config.token.length,
+          tokenFp: config.token.slice(0, 4) + '…' + config.token.slice(-4),
+        })
         return webhookInfoPayload()
       }
       case 'restartServer':
@@ -780,7 +1124,7 @@ function handleRequest(message) {
           uid: `test-${Date.now()}`,
         }
         const hash = contentHash({ ...n, body: `${n.body}:${Date.now()}` })
-        const otp = extractOtp(n.title, n.body)
+        const otp = extractOtp(n.title, n.body, n)
         publishNotification(n, hash, otp)
         acceptedCount += 1
         lastSuccessAt = Date.now()
@@ -803,6 +1147,7 @@ async function shutdown() {
     acceptedCount,
     rejectedCount,
     dedupedCount,
+    pendingCount: pendingQueue.size,
   })
   await stopServer()
   process.exit(0)
@@ -837,10 +1182,22 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     return
   }
 
-  if (message.op === 'config' && message.config && typeof message.config === 'object') {
-    applyHostConfig(message.config).catch((err) => {
-      log('config apply failed', { error: err instanceof Error ? err.message : String(err) }, 'error')
-    })
+  if (message.op === 'config') {
+    const cfg =
+      message.config && typeof message.config === 'object'
+        ? message.config
+        : message.params && typeof message.params === 'object'
+          ? message.params
+          : null
+    if (cfg) {
+      applyHostConfig(cfg).catch((err) => {
+        log(
+          'config apply failed',
+          { error: err instanceof Error ? err.message : String(err) },
+          'error',
+        )
+      })
+    }
     return
   }
 
@@ -855,5 +1212,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       actionId: message.actionId,
       resolutionKind: message.resolutionKind,
     })
+    return
+  }
+
+  if (message.op === 'response') {
+    handleHostResponse(message)
   }
 })

@@ -213,13 +213,11 @@ export default {
           message.success(
             result?.newCount
               ? `拉取完成，新增 ${result.newCount} 条（已推送）`
-              : result?.seeded
-                ? '已建立基线（不弹历史）'
-                : result?.skipped
-                  ? '已跳过（检查 Token / 开关）'
-                  : result?.notModified
-                    ? 'GitHub 返回 304（无变更）'
-                    : '拉取完成，无新通知',
+              : result?.skipped
+                ? '已跳过（检查 Token / 开关）'
+                : result?.notModified
+                  ? 'GitHub 返回 304（无变更）'
+                  : '拉取完成，无新通知',
           )
         }
       })
@@ -366,7 +364,7 @@ export default {
           h(
             'p',
             { class: 'desc' },
-            '用 Personal Access Token 轮询 GitHub Notifications API。首次仅建立基线不弹历史；之后新通知在活跃时弹出卡片。',
+            '用 Personal Access Token 拉取 GitHub 未读通知。启动或拉取时，凡本机未见过的通知 id 一律推送（已通知 id 保存在本机）；之后按间隔轮询新变更。',
           ),
           h('div', { class: 'field' }, [
             h('div', { class: 'label' }, 'GitHub PAT'),

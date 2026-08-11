@@ -1,5 +1,6 @@
 # runtime state (sidecar/background 运行时产物，勿入库)
 **/runtime/state.json
+127.0.0.1
 
 # OS junk
 .DS_Store

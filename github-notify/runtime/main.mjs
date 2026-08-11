@@ -462,18 +462,21 @@ async function pollOnce({ forceSeed = false, forceFull = false } = {}) {
         return { ok: true, notModified: true, newCount: 0, consecutive304 }
       }
 
-      // Baseline: mark everything currently unread as seen, no toast
-      if (!seeded || forceSeed) {
+      // Manual re-baseline (settings button): silently mark everything seen, no toast.
+      if (forceSeed) {
         for (const item of result.items) markSeen(item)
         seeded = true
         saveState()
-        log('baseline seeded', { count: result.items.length })
+        log('baseline reseeded', { count: result.items.length })
         return { ok: true, seeded: true, newCount: 0, fetched: result.items.length }
       }
 
+      // Catch-up publish: every notification whose id is not in the locally
+      // saved seen map gets pushed (including on startup) — saved ids persist
+      // so already-notified ones are never re-pushed.
       const fresh = result.items.filter((item) => isFresh(item))
       if (!fresh.length) {
-        // Still refresh stamps for items we already know (updated_at catch-up without toast? no)
+        seeded = true
         saveState()
         return { ok: true, newCount: 0, fetched: result.items.length }
       }
@@ -491,6 +494,7 @@ async function pollOnce({ forceSeed = false, forceFull = false } = {}) {
         await publishItem(item)
         markSeen(item)
       }
+      seeded = true
       saveState()
       log('published notifications', {
         count: fresh.length,
@@ -522,6 +526,7 @@ function schedule() {
 }
 
 function applyHostConfig(input) {
+  const hadToken = Boolean(config.token)
   config = normalizeConfig(input || {})
   log('config applied', {
     hasToken: Boolean(config.token),
@@ -532,6 +537,12 @@ function applyHostConfig(input) {
     activityActive: hostActivityActive,
   })
   schedule()
+  // Startup: the moment a token arrives, run an immediate full fetch so the
+  // every-startup catch-up push happens without waiting for the first tick.
+  if (!hadToken && config.token && config.enabled !== false) {
+    log('token received, immediate full poll', {})
+    pollOnce({ forceFull: true }).catch(() => {})
+  }
 }
 
 function handleRequest(message) {

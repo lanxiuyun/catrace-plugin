@@ -24,7 +24,7 @@ description: >
 - `bt-music/` — sidecar（OS 设备事件）+ settings 三卡 + `plugin.sidecar.request` RPC
 - `sidecar-echo/` — sidecar JSONL 端到端最小闭环
 - `github-notify/runtime/main.mjs` — sidecar config/state 落盘、shutdown、去重
-- 本仓库 `README.md`「契约速查」；完整通用合同在宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`
+- 本仓库 `develop.md`「契约速查」与「常见问题」；完整通用合同在宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`
 
 ---
 
@@ -153,7 +153,7 @@ await plugin.events.publish({
 1. 递增 `manifest.version`。
 2. 要随宿主 release 打包 → 宿主 `tauri.conf.json` `bundle.resources` 补一行（当前只打 `timer`/`bt-music`/`sidecar-echo`）。
 3. commit 推本仓库 `main`；宿主 `git add tools/plugin-demo` 更新 submodule 指针。
-4. 更新 `README.md` 插件索引。
+4. 更新 `README.md` 插件列表与 `develop.md` 插件索引。
 
 ---
 
