@@ -917,22 +917,22 @@ export default {
           h(
             'p',
             { class: 'hint' },
-            '此名单只过滤普通 App 通知。com.android.mms 是 Android 锁屏短信统称，填在这里永远不会过滤短信。',
+            '这里用于屏蔽普通 App 通知，不会影响手机锁屏时收到的短信。',
           ),
         ]),
         h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '已拉黑的锁屏短信发送者（只读）'),
+          h('div', { class: 'label' }, '已屏蔽的短信发送者'),
           h(
             'pre',
             { class: 'mono' },
             mmsTitleBlacklist.value.length
               ? mmsTitleBlacklist.value.join('\n')
-              : '暂无。只能从短信卡片点击「拉黑此应用」添加。',
+              : '暂无。可在短信卡片上点击「屏蔽此发送者」。',
           ),
           h(
             'p',
             { class: 'hint' },
-            '仅当 packageName 为 com.android.mms 且 title 与已拉黑发送者完全相等时过滤。不能手动输入，避免误设导致重要短信不显示。',
+            '屏蔽后，不再显示该发送者的短信。为避免误操作，只能从短信卡片添加。',
           ),
           mmsTitleBlacklist.value.length
             ? h(
@@ -946,7 +946,7 @@ export default {
                     scheduleSave()
                   },
                 },
-                { default: () => '清空锁屏短信发送者黑名单' },
+                { default: () => '取消全部短信屏蔽' },
               )
             : null,
         ]),

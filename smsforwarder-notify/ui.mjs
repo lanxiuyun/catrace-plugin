@@ -652,18 +652,18 @@ export default {
                 {
                   class: ['block-btn', this.blockArmedAt ? 'is-armed' : ''],
                   type: 'button',
-                  title: isLockscreenSms ? `不再接收发送者「${sender}」的锁屏短信` : '不再接收该应用的通知',
+                  title: isLockscreenSms ? `不再显示发送者「${sender}」的短信` : '不再显示该应用的通知',
                   onClick: () => this.handleBlockClick(),
                 },
                 [
                   IconBan(),
                   this.blockArmedAt
                     ? isLockscreenSms
-                      ? `确认拉黑「${sender}」？`
-                      : '确认拉黑？'
+                      ? `确认屏蔽「${sender}」？`
+                      : '确认屏蔽？'
                     : isLockscreenSms
-                      ? '拉黑此发送者'
-                      : '拉黑此应用',
+                      ? '屏蔽此发送者'
+                      : '屏蔽此应用',
                 ],
               )
             : null,
