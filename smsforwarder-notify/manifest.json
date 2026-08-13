@@ -1,7 +1,7 @@
 {
   "id": "smsforwarder-notify",
   "name": "SmsForwarder 通知",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "安卓手机收到短信 / App 通知时，自动转发到电脑桌面弹卡片提醒你",
   "main": "ui.mjs",
   "background": "background.mjs",

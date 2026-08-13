@@ -22,6 +22,14 @@ const OTP_FULLWIDTH_RE = /(?<![0-9０-９])[０-９]{4,8}(?![0-9０-９])/g
 const SMS_PACKAGE_RE =
   /mms|sms|messaging|telephony|contacts|samsung\.android\.messaging|miui\.sms|oppo\.sms|coloros\.mms|transsion\.smartmessage|google\.android\.apps\.messaging/i
 
+// Packages Android may re-label notifications with while the screen is locked.
+// Every lock-screen SMS shares the same package (com.android.mms) no matter the
+// real source app, so blacklist entries must never match it directly — that
+// would silently drop ALL lock-screen SMS. Such notifications are filtered by
+// their title (sender / chat name) instead; a literal "com.android.mms" entry
+// therefore stays inert, which is what users expect after adding it by mistake.
+const LOCKSCREEN_PACKAGES = new Set(['com.android.mms'])
+
 const DEFAULT_CONFIG = {
   enabled: true,
   host: '0.0.0.0',
@@ -135,19 +143,28 @@ function normalizePath(raw) {
   return p
 }
 
+/** Stable sort for blacklist entries: digits/letters first, then CJK by pinyin. */
+function sortBlacklist(list) {
+  return [...list].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { sensitivity: 'base' }))
+}
+
 function normalizeBlacklist(input) {
   if (Array.isArray(input)) {
-    return input
-      .map((v) => String(v || '').trim())
-      .filter(Boolean)
-      .slice(0, 200)
+    return sortBlacklist(
+      input
+        .map((v) => String(v || '').trim())
+        .filter(Boolean)
+        .slice(0, 200),
+    )
   }
   if (typeof input === 'string') {
-    return input
-      .split(/\r?\n|,/)
-      .map((v) => v.trim())
-      .filter(Boolean)
-      .slice(0, 200)
+    return sortBlacklist(
+      input
+        .split(/\r?\n|,/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .slice(0, 200),
+    )
   }
   return []
 }
@@ -379,6 +396,19 @@ function isBlacklisted(n) {
   const list = config.appBlacklist || []
   if (!list.length) return false
   const pkg = String(n.packageName || '').toLowerCase()
+  if (LOCKSCREEN_PACKAGES.has(pkg)) {
+    // lock-screen: every SMS carries the same package, so package/app matching is
+    // meaningless (a literal "com.android.mms" entry must stay inert). Match the
+    // sender (title) instead — e.g. "10086" or a bank name — to drop only that source.
+    const title = String(n.title || '').toLowerCase()
+    if (!title) return false
+    for (const item of list) {
+      const k = String(item || '').toLowerCase()
+      if (!k) continue
+      if (title === k || title.includes(k)) return true
+    }
+    return false
+  }
   const app = String(n.appName || '').toLowerCase()
   for (const item of list) {
     const k = String(item || '').toLowerCase()

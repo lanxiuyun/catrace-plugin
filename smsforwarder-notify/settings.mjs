@@ -172,17 +172,24 @@ function normalizePath(raw) {
   return p
 }
 
+/** Stable sort for blacklist entries: digits/letters first, then CJK by pinyin. */
+function sortBlacklist(list) {
+  return [...list].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { sensitivity: 'base' }))
+}
+
 function blacklistToText(list) {
-  if (Array.isArray(list)) return list.join('\n')
+  if (Array.isArray(list)) return sortBlacklist(list).join('\n')
   return String(list || '')
 }
 
 function textToBlacklist(text) {
-  return String(text || '')
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 200)
+  return sortBlacklist(
+    String(text || '')
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 200),
+  )
 }
 
 const DEFAULT_CONFIG = {
@@ -885,7 +892,7 @@ export default {
           ]),
         ]),
         h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名）'),
+          h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名，自动排序）'),
           h(NInput, {
             value: blacklistText.value,
             type: 'textarea',
@@ -895,7 +902,15 @@ export default {
               blacklistText.value = v
               scheduleSave()
             },
+            onBlur: () => {
+              blacklistText.value = textToBlacklist(blacklistText.value).join('\n')
+            },
           }),
+          h(
+            'p',
+            { class: 'hint' },
+            '包名 com.android.mms 是 Android 锁屏短信的统称：把 com.android.mms 加进来不会生效，因为锁屏短信需按发送者（标题，如 10086）过滤——点卡片上的「拉黑此应用」会自动按发送者拉黑。',
+          ),
         ]),
       ])
 

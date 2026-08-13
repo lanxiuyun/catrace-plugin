@@ -83,17 +83,27 @@ window.addEventListener('catrace:plugin-event-resolved', (ev) => {
   }
 
   if (detail.actionId === 'block-app') {
-    blockApp(pl.packageName || '', pl.appName || '').catch((e) => {
+    blockApp(pl.packageName || '', pl.appName || '', pl.title || '').catch((e) => {
       console.warn('[smsforwarder-notify] block-app failed', e)
       plugin.log.warn('block-app failed', { error: String(e) }).catch(() => {})
     })
   }
 })
 
-async function blockApp(packageName, appName) {
+// Android lock-screen notifications all carry the SMS package (com.android.mms);
+// blocking it would silently kill every lock-screen SMS, so block the sender
+// (title) instead of the package when the notification arrived with that label.
+const LOCKSCREEN_PACKAGES = new Set(['com.android.mms'])
+
+async function blockApp(packageName, appName, title) {
+  const pkg = String(packageName || '').trim()
   const targets = []
-  if (packageName) targets.push(String(packageName).trim())
+  if (pkg && !LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())) targets.push(pkg)
   if (appName) targets.push(String(appName).trim())
+  if (pkg && LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())) {
+    const sender = String(title || '').trim()
+    if (sender) targets.push(sender)
+  }
   const added = []
   try {
     const cfg =
