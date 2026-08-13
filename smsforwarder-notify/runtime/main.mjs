@@ -579,7 +579,7 @@ function publishNotification(n, hash, otp) {
   actions.push({
     id: 'block-app',
     label: LOCKSCREEN_PACKAGES.has(String(n.packageName || '').toLowerCase())
-      ? '屏蔽此发送者'
+      ? '屏蔽这个标题'
       : '屏蔽此应用',
   })
 

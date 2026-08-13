@@ -921,18 +921,18 @@ export default {
           ),
         ]),
         h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '已屏蔽的短信发送者'),
+          h('div', { class: 'label' }, '已屏蔽的通知标题'),
           h(
             'pre',
             { class: 'mono' },
             mmsTitleBlacklist.value.length
               ? mmsTitleBlacklist.value.join('\n')
-              : '暂无。可在短信卡片上点击「屏蔽此发送者」。',
+              : '暂无。可在通知卡片上点击「屏蔽这个标题」。',
           ),
           h(
             'p',
             { class: 'hint' },
-            '屏蔽后，不再显示该发送者的短信。为避免误操作，只能从短信卡片添加。',
+            '以后遇到相同标题的通知，将不再显示。为避免误操作，只能从通知卡片添加。',
           ),
           mmsTitleBlacklist.value.length
             ? h(
@@ -946,7 +946,7 @@ export default {
                     scheduleSave()
                   },
                 },
-                { default: () => '取消全部短信屏蔽' },
+                { default: () => '取消全部标题屏蔽' },
               )
             : null,
         ]),
