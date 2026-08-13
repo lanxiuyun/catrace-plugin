@@ -97,37 +97,48 @@ const LOCKSCREEN_PACKAGES = new Set(['com.android.mms'])
 
 async function blockApp(packageName, appName, title) {
   const pkg = String(packageName || '').trim()
+  const isLockscreenSms = pkg && LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())
   const targets = []
-  if (pkg && !LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())) targets.push(pkg)
-  if (appName) targets.push(String(appName).trim())
-  if (pkg && LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())) {
-    const sender = String(title || '').trim()
-    if (sender) targets.push(sender)
-  }
+  if (!isLockscreenSms && pkg) targets.push(pkg)
+  if (!isLockscreenSms && appName) targets.push(String(appName).trim())
+  const mmsSender = isLockscreenSms ? String(title || '').trim() : ''
   const added = []
   try {
     const cfg =
       plugin.config && typeof plugin.config.get === 'function'
         ? ((await plugin.config.get()) || {})
         : {}
-    const list = Array.isArray(cfg.appBlacklist) ? cfg.appBlacklist.slice() : []
-    for (const t of targets) {
-      if (!t) continue
-      const hit = list.some(
-        (x) =>
-          String(x || '').toLowerCase() === t.toLowerCase() ||
-          t.toLowerCase().includes(String(x || '').toLowerCase()),
-      )
-      if (!hit) {
-        list.push(t)
-        added.push(t)
+    if (isLockscreenSms) {
+      if (!mmsSender) {
+        await plugin.log.warn('block-app missing mms title').catch(() => {})
+        return
       }
+      const list = Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist.slice() : []
+      if (!list.some((x) => String(x || '').toLowerCase() === mmsSender.toLowerCase())) {
+        list.push(mmsSender)
+        added.push(mmsSender)
+      }
+      cfg.mmsTitleBlacklist = list.slice(0, 200)
+    } else {
+      const list = Array.isArray(cfg.appBlacklist) ? cfg.appBlacklist.slice() : []
+      for (const t of targets) {
+        if (!t) continue
+        const hit = list.some(
+          (x) =>
+            String(x || '').toLowerCase() === t.toLowerCase() ||
+            t.toLowerCase().includes(String(x || '').toLowerCase()),
+        )
+        if (!hit) {
+          list.push(t)
+          added.push(t)
+        }
+      }
+      cfg.appBlacklist = list.slice(0, 200)
     }
     if (!added.length) {
       await plugin.log.info('block-app already blocked').catch(() => {})
       return
     }
-    cfg.appBlacklist = list.slice(0, 200)
     if (plugin.config && typeof plugin.config.set === 'function') {
       await plugin.config.set(cfg)
     }

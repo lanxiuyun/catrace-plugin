@@ -546,6 +546,7 @@ export default {
     const payload = event.payload || {}
     const appName = payload.appName || ''
     const pkg = payload.packageName || ''
+    const isLockscreenSms = String(pkg).toLowerCase() === 'com.android.mms'
     // sender = notification title (contact / chat name); fallback app
     const sender =
       String(payload.title || '').trim() ||
@@ -651,10 +652,19 @@ export default {
                 {
                   class: ['block-btn', this.blockArmedAt ? 'is-armed' : ''],
                   type: 'button',
-                  title: '不再接收该应用的通知',
+                  title: isLockscreenSms ? `不再接收发送者「${sender}」的锁屏短信` : '不再接收该应用的通知',
                   onClick: () => this.handleBlockClick(),
                 },
-                [IconBan(), this.blockArmedAt ? '确认拉黑？' : '拉黑此应用'],
+                [
+                  IconBan(),
+                  this.blockArmedAt
+                    ? isLockscreenSms
+                      ? `确认拉黑「${sender}」？`
+                      : '确认拉黑？'
+                    : isLockscreenSms
+                      ? '拉黑此发送者'
+                      : '拉黑此应用',
+                ],
               )
             : null,
           device

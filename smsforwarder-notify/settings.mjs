@@ -201,6 +201,7 @@ const DEFAULT_CONFIG = {
   cardDurationSec: DEFAULT_CARD_SEC,
   dedupeWindowSec: DEFAULT_DEDUPE_SEC,
   appBlacklist: [],
+  mmsTitleBlacklist: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
   onlyPushWhenActive: false,
@@ -299,6 +300,7 @@ export default {
     const cardDurationSec = ref(DEFAULT_CARD_SEC)
     const dedupeWindowSec = ref(DEFAULT_DEDUPE_SEC)
     const blacklistText = ref('')
+    const mmsTitleBlacklist = ref([])
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
@@ -324,6 +326,9 @@ export default {
           DEFAULT_DEDUPE_SEC,
         ),
         appBlacklist: textToBlacklist(blacklistText.value),
+        mmsTitleBlacklist: sortBlacklist(
+          Array.isArray(mmsTitleBlacklist.value) ? mmsTitleBlacklist.value : [],
+        ),
         hideSensitiveBody: hideSensitiveBody.value === true,
         enableOtpAction: enableOtpAction.value !== false,
         onlyPushWhenActive: onlyPushWhenActive.value === true,
@@ -344,6 +349,9 @@ export default {
         DEFAULT_DEDUPE_SEC,
       )
       blacklistText.value = blacklistToText(cfg.appBlacklist)
+      mmsTitleBlacklist.value = sortBlacklist(
+        Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
+      )
       hideSensitiveBody.value = cfg.hideSensitiveBody === true
       enableOtpAction.value = cfg.enableOtpAction !== false
       onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
@@ -909,8 +917,38 @@ export default {
           h(
             'p',
             { class: 'hint' },
-            '包名 com.android.mms 是 Android 锁屏短信的统称：把 com.android.mms 加进来不会生效，因为锁屏短信需按发送者（标题，如 10086）过滤——点卡片上的「拉黑此应用」会自动按发送者拉黑。',
+            '此名单只过滤普通 App 通知。com.android.mms 是 Android 锁屏短信统称，填在这里永远不会过滤短信。',
           ),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '已拉黑的锁屏短信发送者（只读）'),
+          h(
+            'pre',
+            { class: 'mono' },
+            mmsTitleBlacklist.value.length
+              ? mmsTitleBlacklist.value.join('\n')
+              : '暂无。只能从短信卡片点击「拉黑此应用」添加。',
+          ),
+          h(
+            'p',
+            { class: 'hint' },
+            '仅当 packageName 为 com.android.mms 且 title 与已拉黑发送者完全相等时过滤。不能手动输入，避免误设导致重要短信不显示。',
+          ),
+          mmsTitleBlacklist.value.length
+            ? h(
+                NButton,
+                {
+                  size: 'small',
+                  secondary: true,
+                  type: 'warning',
+                  onClick: () => {
+                    mmsTitleBlacklist.value = []
+                    scheduleSave()
+                  },
+                },
+                { default: () => '清空锁屏短信发送者黑名单' },
+              )
+            : null,
         ]),
       ])
 

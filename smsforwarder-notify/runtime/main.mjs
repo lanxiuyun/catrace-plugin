@@ -39,13 +39,14 @@ const DEFAULT_CONFIG = {
   cardDurationSec: 10,
   dedupeWindowSec: 5,
   appBlacklist: [],
+  mmsTitleBlacklist: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
   onlyPushWhenActive: false,
 }
 
 /** @type {typeof DEFAULT_CONFIG} */
-let config = { ...DEFAULT_CONFIG, appBlacklist: [] }
+let config = { ...DEFAULT_CONFIG, appBlacklist: [], mmsTitleBlacklist: [] }
 
 /** @type {http.Server | null} */
 let server = null
@@ -201,6 +202,10 @@ function normalizeConfig(input = {}) {
       input.appBlacklist !== undefined
         ? normalizeBlacklist(input.appBlacklist)
         : [...(config.appBlacklist || [])],
+    mmsTitleBlacklist:
+      input.mmsTitleBlacklist !== undefined
+        ? normalizeBlacklist(input.mmsTitleBlacklist)
+        : [...(config.mmsTitleBlacklist || [])],
     hideSensitiveBody: input.hideSensitiveBody === true,
     enableOtpAction: input.enableOtpAction !== false,
     onlyPushWhenActive: input.onlyPushWhenActive === true,
@@ -393,22 +398,22 @@ function normalizePayload(raw) {
 }
 
 function isBlacklisted(n) {
-  const list = config.appBlacklist || []
-  if (!list.length) return false
   const pkg = String(n.packageName || '').toLowerCase()
   if (LOCKSCREEN_PACKAGES.has(pkg)) {
-    // lock-screen: every SMS carries the same package, so package/app matching is
-    // meaningless (a literal "com.android.mms" entry must stay inert). Match the
-    // sender (title) instead — e.g. "10086" or a bank name — to drop only that source.
+    // Only titles added by the card's explicit block action may suppress a
+    // lock-screen SMS. App-blacklist typos (including com.android.mms) can
+    // never hide one. Exact title match avoids broad/partial false positives.
     const title = String(n.title || '').toLowerCase()
     if (!title) return false
-    for (const item of list) {
+    for (const item of config.mmsTitleBlacklist || []) {
       const k = String(item || '').toLowerCase()
-      if (!k) continue
-      if (title === k || title.includes(k)) return true
+      if (k && title === k) return true
     }
     return false
   }
+
+  const list = config.appBlacklist || []
+  if (!list.length) return false
   const app = String(n.appName || '').toLowerCase()
   for (const item of list) {
     const k = String(item || '').toLowerCase()
@@ -571,7 +576,12 @@ function publishNotification(n, hash, otp) {
   if (sticky) {
     actions.push({ id: 'dismiss', label: '知道了' })
   }
-  actions.push({ id: 'block-app', label: '拉黑此应用' })
+  actions.push({
+    id: 'block-app',
+    label: LOCKSCREEN_PACKAGES.has(String(n.packageName || '').toLowerCase())
+      ? '拉黑此发送者'
+      : '拉黑此应用',
+  })
 
   const payload = {
     packageName: n.packageName,
@@ -1020,6 +1030,7 @@ function statusPayload() {
     cardDurationSec: config.cardDurationSec,
     dedupeWindowSec: config.dedupeWindowSec,
     appBlacklist: [...(config.appBlacklist || [])],
+    mmsTitleBlacklist: [...(config.mmsTitleBlacklist || [])],
     hideSensitiveBody: config.hideSensitiveBody === true,
     enableOtpAction: config.enableOtpAction !== false,
     onlyPushWhenActive: config.onlyPushWhenActive === true,
@@ -1101,6 +1112,7 @@ async function applyHostConfig(input) {
     cardDurationSec: config.cardDurationSec,
     dedupeWindowSec: config.dedupeWindowSec,
     blacklist: (config.appBlacklist || []).length,
+    mmsTitleBlacklist: (config.mmsTitleBlacklist || []).length,
     hideSensitiveBody: config.hideSensitiveBody,
     enableOtpAction: config.enableOtpAction,
     bindChanged,
