@@ -659,7 +659,7 @@ export default {
                   IconBan(),
                   this.blockArmedAt
                     ? isLockscreenSms
-                      ? `确认屏蔽「${sender}」？`
+                      ? '确认屏蔽标题？'
                       : '确认屏蔽？'
                     : isLockscreenSms
                       ? '屏蔽这个标题'
