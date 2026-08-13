@@ -148,6 +148,12 @@ const CSS = `
   display: flex; flex-wrap: wrap; gap: 0.375rem;
 }
 .sf-settings .mms-search { max-width: 20rem; }
+.sf-settings .mms-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.sf-settings .mms-tags { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.sf-settings .mms-tag { cursor: pointer; user-select: none; transition: box-shadow 0.15s, opacity 0.15s; }
+.sf-settings .mms-tag:hover { opacity: 0.85; }
+.sf-settings .mms-tag.is-selected { box-shadow: 0 0 0 0.125rem #d97706 inset; }
+.sf-settings .mms-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
 `
 
 function ensureStyles() {
@@ -306,6 +312,7 @@ export default {
     const blacklistText = ref('')
     const mmsTitleBlacklist = ref([])
     const mmsTitleQuery = ref('')
+    const mmsSelected = ref(new Set())
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
@@ -323,8 +330,29 @@ export default {
       return list.filter((t) => String(t).toLowerCase().includes(q))
     })
 
-    function removeMmsTitle(t) {
-      mmsTitleBlacklist.value = mmsTitleBlacklist.value.filter((x) => x !== t)
+    const mmsSelectedCount = computed(() => mmsSelected.value.size)
+
+    function toggleMmsTitle(t) {
+      const next = new Set(mmsSelected.value)
+      if (next.has(t)) next.delete(t)
+      else next.add(t)
+      mmsSelected.value = next
+    }
+
+    function selectAllShown() {
+      mmsSelected.value = new Set(shownMmsTitles.value)
+    }
+
+    function clearMmsSelection() {
+      mmsSelected.value = new Set()
+    }
+
+    function removeSelectedMmsTitles() {
+      const sel = mmsSelected.value
+      if (!sel.size) return
+      const next = mmsTitleBlacklist.value.filter((t) => !sel.has(t))
+      mmsTitleBlacklist.value = next
+      mmsSelected.value = new Set()
       scheduleSave()
     }
 
@@ -369,6 +397,8 @@ export default {
       mmsTitleBlacklist.value = sortBlacklist(
         Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
       )
+      mmsSelected.value = new Set()
+      mmsTitleQuery.value = ''
       hideSensitiveBody.value = cfg.hideSensitiveBody === true
       enableOtpAction.value = cfg.enableOtpAction !== false
       onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
@@ -940,41 +970,72 @@ export default {
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, '已屏蔽的通知标题'),
           mmsTitleBlacklist.value.length
-            ? h(NInput, {
-                class: 'mms-search',
-                value: mmsTitleQuery.value,
-                size: 'small',
-                clearable: true,
-                placeholder: '查找标题',
-                'onUpdate:value': (v) => {
-                  mmsTitleQuery.value = v
-                },
-              })
+            ? h('div', { class: 'mms-toolbar' }, [
+                h(NInput, {
+                  class: 'mms-search',
+                  value: mmsTitleQuery.value,
+                  size: 'small',
+                  clearable: true,
+                  placeholder: '查找标题',
+                  'onUpdate:value': (v) => {
+                    mmsTitleQuery.value = v
+                  },
+                }),
+                h(
+                  NButton,
+                  {
+                    size: 'small',
+                    secondary: true,
+                    disabled: !shownMmsTitles.value.length,
+                    onClick: selectAllShown,
+                  },
+                  { default: () => '全选当前' },
+                ),
+                h(
+                  NButton,
+                  {
+                    size: 'small',
+                    secondary: true,
+                    disabled: !mmsSelectedCount.value,
+                    onClick: clearMmsSelection,
+                  },
+                  { default: () => '取消选择' },
+                ),
+                mmsSelectedCount.value
+                  ? h(
+                      NButton,
+                      {
+                        size: 'small',
+                        type: 'error',
+                        secondary: true,
+                        onClick: removeSelectedMmsTitles,
+                      },
+                      { default: () => `删除选中 (${mmsSelectedCount.value})` },
+                    )
+                  : null,
+              ])
             : null,
           mmsTitleBlacklist.value.length
             ? h(
                 'div',
-                { class: 'tag-wrap' },
+                { class: 'mms-tags' },
                 shownMmsTitles.value.map((t) =>
                   h(
                     NTag,
                     {
                       key: t,
-                      closable: true,
                       size: 'small',
                       round: true,
                       bordered: false,
-                      type: 'warning',
-                      onClose: (e) => {
-                        e.preventDefault()
-                        removeMmsTitle(t)
-                      },
+                      type: mmsSelected.value.has(t) ? 'error' : 'warning',
+                      class: ['mms-tag', { 'is-selected': mmsSelected.value.has(t) }],
+                      onClick: () => toggleMmsTitle(t),
                     },
                     { default: () => t },
                   ),
                 ).concat(
                   shownMmsTitles.value.length === 0 && mmsTitleQuery.value.trim()
-                    ? [h('p', { class: 'hint' }, '没有匹配的标题')]
+                    ? [h('p', { class: 'mms-empty' }, '没有匹配的标题')]
                     : [],
                 ),
               )
@@ -984,22 +1045,6 @@ export default {
             { class: 'hint' },
             '以后遇到相同标题的通知，将不再显示。为避免误操作，只能从通知卡片添加。',
           ),
-          mmsTitleBlacklist.value.length
-            ? h(
-                NButton,
-                {
-                  size: 'small',
-                  secondary: true,
-                  type: 'warning',
-                  onClick: () => {
-                    mmsTitleBlacklist.value = []
-                    mmsTitleQuery.value = ''
-                    scheduleSave()
-                  },
-                },
-                { default: () => '清除全部标题屏蔽' },
-              )
-            : null,
         ]),
       ])
 
