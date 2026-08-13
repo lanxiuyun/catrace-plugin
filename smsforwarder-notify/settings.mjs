@@ -144,6 +144,10 @@ const CSS = `
 }
 .sf-settings .step-copy-label { font-size: 0.8125rem; font-weight: 600; color: #134e4a; }
 .sf-settings .step-copy-values { display: flex; flex-direction: column; gap: 0.375rem; }
+.sf-settings .tag-wrap {
+  display: flex; flex-wrap: wrap; gap: 0.375rem;
+}
+.sf-settings .mms-search { max-width: 20rem; }
 `
 
 function ensureStyles() {
@@ -301,6 +305,7 @@ export default {
     const dedupeWindowSec = ref(DEFAULT_DEDUPE_SEC)
     const blacklistText = ref('')
     const mmsTitleBlacklist = ref([])
+    const mmsTitleQuery = ref('')
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
@@ -310,6 +315,18 @@ export default {
     let saveTimer = null
 
     const headerEnabled = computed(() => enabled.value !== false)
+
+    const shownMmsTitles = computed(() => {
+      const q = mmsTitleQuery.value.trim().toLowerCase()
+      const list = sortBlacklist(mmsTitleBlacklist.value)
+      if (!q) return list
+      return list.filter((t) => String(t).toLowerCase().includes(q))
+    })
+
+    function removeMmsTitle(t) {
+      mmsTitleBlacklist.value = mmsTitleBlacklist.value.filter((x) => x !== t)
+      scheduleSave()
+    }
 
     function currentConfig() {
       return {
@@ -922,13 +939,46 @@ export default {
         ]),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, '已屏蔽的通知标题'),
-          h(
-            'pre',
-            { class: 'mono' },
-            mmsTitleBlacklist.value.length
-              ? mmsTitleBlacklist.value.join('\n')
-              : '暂无。可在通知卡片上点击「屏蔽这个标题」。',
-          ),
+          mmsTitleBlacklist.value.length
+            ? h(NInput, {
+                class: 'mms-search',
+                value: mmsTitleQuery.value,
+                size: 'small',
+                clearable: true,
+                placeholder: '查找标题',
+                'onUpdate:value': (v) => {
+                  mmsTitleQuery.value = v
+                },
+              })
+            : null,
+          mmsTitleBlacklist.value.length
+            ? h(
+                'div',
+                { class: 'tag-wrap' },
+                shownMmsTitles.value.map((t) =>
+                  h(
+                    NTag,
+                    {
+                      key: t,
+                      closable: true,
+                      size: 'small',
+                      round: true,
+                      bordered: false,
+                      type: 'warning',
+                      onClose: (e) => {
+                        e.preventDefault()
+                        removeMmsTitle(t)
+                      },
+                    },
+                    { default: () => t },
+                  ),
+                ).concat(
+                  shownMmsTitles.value.length === 0 && mmsTitleQuery.value.trim()
+                    ? [h('p', { class: 'hint' }, '没有匹配的标题')]
+                    : [],
+                ),
+              )
+            : h('pre', { class: 'mono' }, '暂无。可在通知卡片上点击「屏蔽这个标题」。'),
           h(
             'p',
             { class: 'hint' },
@@ -943,10 +993,11 @@ export default {
                   type: 'warning',
                   onClick: () => {
                     mmsTitleBlacklist.value = []
+                    mmsTitleQuery.value = ''
                     scheduleSave()
                   },
                 },
-                { default: () => '取消全部标题屏蔽' },
+                { default: () => '清除全部标题屏蔽' },
               )
             : null,
         ]),
