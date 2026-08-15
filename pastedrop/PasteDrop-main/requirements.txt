@@ -1,0 +1,4 @@
+loguru
+Pillow
+pywin32
+PyInstaller

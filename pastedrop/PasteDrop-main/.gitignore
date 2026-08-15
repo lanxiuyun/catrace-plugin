@@ -1,0 +1,9 @@
+*.png
+*.exe
+release
+
+127.0.0.1
+__pycache__/
+*.pyc
+build/
+dist/
