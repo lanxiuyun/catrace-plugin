@@ -7,5 +7,5 @@
   "background": "background.mjs",
   "settings": "settings.mjs",
   "events": ["notify-demo", "kind:notify-demo", "notify-demo.send"],
-  "enabledByDefault": true
+  "enabledByDefault": false
 }
