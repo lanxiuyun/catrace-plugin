@@ -1,7 +1,7 @@
 /** smsforwarder-notify settings — webhook / filter / status / guide. */
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted } = vue
+const { h, ref, computed, onMounted, onBeforeUnmount } = vue
 const { NButton, NInput, NSwitch, NTag, NPopconfirm, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
@@ -561,6 +561,10 @@ export default {
           }
         }
         const sticky = cfg.cardDurationSec <= 0
+        const now = Date.now()
+        const lagMs = 5 * 60 * 1000
+        const phoneIso = new Date(now - lagMs).toISOString()
+        const pcIso = new Date(now).toISOString()
         await plugin.events.publish({
           eventType: 'smsforwarder-notify.notification',
           kind: 'smsforwarder-notify',
@@ -579,12 +583,16 @@ export default {
             appName: '测试 App',
             title: '测试通知',
             body: '这是一条 SmsForwarder 测试消息，验证码 123456',
-            receivedAt: new Date().toLocaleString(),
+            // phone 5 min earlier; PC receive / toast now → 延迟 ~5 分
+            receivedAt: phoneIso,
+            webhookAt: pcIso,
+            publishedAt: pcIso,
+            shownAt: pcIso,
             otp: '123456',
             auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000,
             card_duration_sec: cfg.cardDurationSec,
           },
-          dedupeKey: `smsforwarder-notify:test:${Date.now()}`,
+          dedupeKey: `smsforwarder-notify:test:${now}`,
         })
         message.success('已发送测试通知')
       })
@@ -618,7 +626,38 @@ export default {
       }
     }
 
+    /** Reload blacklist / switches when toast block-app (or other window) writes config. */
+    async function reloadConfigFromStore() {
+      try {
+        const raw = await plugin.config.get()
+        if (!raw || typeof raw !== 'object') return
+        // Keep local edits if user is mid-type: only refresh lists + toggles that
+        // toast actions mutate; full applyConfig would stomp port/token drafts.
+        const cfg = raw
+        blacklistText.value = blacklistToText(cfg.appBlacklist)
+        mmsTitleBlacklist.value = sortBlacklist(
+          Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
+        )
+        // Drop selections that no longer exist
+        if (mmsSelected.value.size) {
+          const set = new Set(mmsTitleBlacklist.value)
+          mmsSelected.value = new Set([...mmsSelected.value].filter((t) => set.has(t)))
+        }
+      } catch (e) {
+        console.warn('[smsforwarder-notify] reload config failed', e)
+      }
+    }
+
+    function onPluginConfigChanged(ev) {
+      const id = ev && ev.detail && ev.detail.pluginId
+      if (id && id !== PLUGIN_ID) return
+      void reloadConfigFromStore()
+    }
+
     onMounted(() => {
+      if (typeof window !== 'undefined') {
+        window.addEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
+      }
       run('boot', async () => {
         loading.value = true
         try {
@@ -641,6 +680,14 @@ export default {
         }
       })
     })
+
+    if (typeof onBeforeUnmount === 'function') {
+      onBeforeUnmount(() => {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
+        }
+      })
+    }
 
     expose({
       headerEnabled,
@@ -942,7 +989,7 @@ export default {
             h(
               'p',
               { class: 'hint' },
-              '开启后，电脑处于空闲（无键鼠操作）时收到的通知先暂存，回到活跃状态后再补推。闲时不会丢失通知。',
+              '电脑空闲（无键鼠）时先暂存，回到活跃后再补推；不会丢通知。',
             ),
           ]),
         ]),
@@ -1043,7 +1090,7 @@ export default {
           h(
             'p',
             { class: 'hint' },
-            '以后遇到相同标题的通知，将不再显示。为避免误操作，只能从通知卡片添加。',
+            '在 Toast 上点「屏蔽这个标题」会记到这里；只拦标题完全相同的通知（多用于锁屏短信）。点标签可选中后批量删除。',
           ),
         ]),
       ])

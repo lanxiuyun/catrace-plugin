@@ -5,7 +5,7 @@ if (typeof h !== 'function') {
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v3'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v23'
 const CSS = `
 .sf-card {
   display: flex;
@@ -89,12 +89,118 @@ const CSS = `
   line-height: 1;
   letter-spacing: 0.01em;
 }
+/* Default: clock + lag badge. Hover badge: chain tip. */
+.sf-card .time-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3125rem;
+  margin: 0.125rem 0 0;
+  min-height: 0.75rem;
+}
 .sf-card .clock {
-  margin: 0.1875rem 0 0;
+  margin: 0;
   font-size: 0.75rem;
   color: #9ca3af;
-  line-height: 1.2;
+  line-height: 1;
+  height: 0.75rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sf-card .lag-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  height: 1.0625rem;
+  box-sizing: border-box;
+  padding: 0 0.4375rem;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+  border: 1px solid #fde68a;
+}
+.sf-card .lag-badge .lag-ico {
+  width: 0.6875rem;
+  height: 0.6875rem;
+  flex-shrink: 0;
+}
+.sf-card .lag-badge .lag-chev {
+  width: 0.5625rem;
+  height: 0.5625rem;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.sf-card .lag-pop {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 0.25rem);
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(18rem, 90vw);
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: #1f2937;
+  color: #f9fafb;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.2),
+    0 8px 24px rgba(15, 23, 42, 0.45),
+    0 2px 6px rgba(15, 23, 42, 0.3);
+  pointer-events: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sf-card .lag-badge:hover .lag-pop {
+  display: inline-flex;
+}
+.sf-card .lag-pop .t {
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sf-card .lag-pop .lab {
+  color: #e5e7eb;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sf-card .lag-pop .arr {
+  color: #9ca3af;
+  font-size: 0.625rem;
+  flex-shrink: 0;
+}
+.sf-card .lag-pop .pill {
+  display: inline-flex;
+  align-items: center;
+  height: 1rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+.sf-card .lag-pop .pill.is-slow {
+  background: rgba(251, 146, 60, 0.35);
+  color: #fed7aa;
+  border: 1px solid rgba(251, 146, 60, 0.5);
+}
+.sf-card .lag-pop .pill.is-ok {
+  background: rgba(16, 185, 129, 0.35);
+  color: #a7f3d0;
+  border: 1px solid rgba(16, 185, 129, 0.5);
 }
 .sf-card .ops {
   display: flex;
@@ -291,6 +397,26 @@ function ensureStyles() {
   for (const id of [
     'catrace-plugin-smsforwarder-notify-css',
     'catrace-plugin-smsforwarder-notify-css-v2',
+    'catrace-plugin-smsforwarder-notify-css-v3',
+    'catrace-plugin-smsforwarder-notify-css-v4',
+    'catrace-plugin-smsforwarder-notify-css-v5',
+    'catrace-plugin-smsforwarder-notify-css-v6',
+    'catrace-plugin-smsforwarder-notify-css-v7',
+    'catrace-plugin-smsforwarder-notify-css-v8',
+    'catrace-plugin-smsforwarder-notify-css-v9',
+    'catrace-plugin-smsforwarder-notify-css-v10',
+    'catrace-plugin-smsforwarder-notify-css-v11',
+    'catrace-plugin-smsforwarder-notify-css-v12',
+    'catrace-plugin-smsforwarder-notify-css-v13',
+    'catrace-plugin-smsforwarder-notify-css-v14',
+    'catrace-plugin-smsforwarder-notify-css-v15',
+    'catrace-plugin-smsforwarder-notify-css-v16',
+    'catrace-plugin-smsforwarder-notify-css-v17',
+    'catrace-plugin-smsforwarder-notify-css-v18',
+    'catrace-plugin-smsforwarder-notify-css-v19',
+    'catrace-plugin-smsforwarder-notify-css-v20',
+    'catrace-plugin-smsforwarder-notify-css-v21',
+    'catrace-plugin-smsforwarder-notify-css-v22',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -323,6 +449,157 @@ function formatClock(raw) {
     return `${m[1].padStart(2, '0')}:${m[2]}:${(m[3] || '00').padStart(2, '0')}`
   }
   return s
+}
+
+function parseTimeMs(raw) {
+  if (raw == null || raw === '') return NaN
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw
+  }
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? NaN : d.getTime()
+}
+
+function gapMs(fromMs, toMs) {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return NaN
+  return Math.max(0, toMs - fromMs)
+}
+
+/** Badge: 23秒 / 1分5秒 / 5分 */
+function formatDurationZh(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const sec = Math.round(ms / 1000)
+  if (sec < 1) return ''
+  if (sec < 60) return `${sec}秒`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return s === 0 ? `${m}分` : `${m}分${s}秒`
+}
+
+/** Pill: 即时 | +23s | +1m5s */
+function formatPillLag(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return { text: '即时', slow: false }
+  const sec = Math.round(ms / 1000)
+  if (sec < 2) return { text: '即时', slow: false }
+  if (sec < 60) return { text: `+${sec}s`, slow: true }
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  if (m < 60) return { text: s === 0 ? `+${m}m` : `+${m}m${s}s`, slow: true }
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return { text: rm === 0 ? `+${h}h` : `+${h}h${rm}m`, slow: true }
+}
+
+/**
+ * Default: "16:29:05 发送" + badge "延迟 5分"
+ * Hover badge: "16:29:05 手机 → +5m 电脑 → 即时 弹出"
+ */
+function buildTimeMeta(payload) {
+  const receivedAt = payload.receivedAt
+  const webhookAt = payload.webhookAt
+  const publishedAt = payload.publishedAt || payload.shownAt
+  const deferred = payload.deferred === true
+
+  const tMsg = parseTimeMs(receivedAt)
+  const tWh = parseTimeMs(webhookAt)
+  const tPub = parseTimeMs(publishedAt)
+
+  const msgL = formatClock(receivedAt)
+  const pubL = formatClock(publishedAt) || formatClock(webhookAt)
+  if (!msgL && !pubL) return null
+
+  const pathMs = gapMs(tMsg, Number.isFinite(tWh) ? tWh : tPub)
+  const hostMs = Number.isFinite(tWh) && Number.isFinite(tPub) ? gapMs(tWh, tPub) : 0
+  const totalMs = gapMs(Number.isFinite(tMsg) ? tMsg : tWh, Number.isFinite(tPub) ? tPub : tWh)
+
+  const pathPill = formatPillLag(pathMs)
+  let hostPill = formatPillLag(Number.isFinite(hostMs) ? hostMs : 0)
+  if (deferred && !hostPill.slow) hostPill = { text: '补推', slow: true }
+
+  const showLag = deferred || (Number.isFinite(totalMs) && totalMs >= 10000)
+
+  return {
+    clock: msgL || pubL || '',
+    clockSuffix: '',
+    showLag,
+    lagLabel: showLag && Number.isFinite(totalMs) ? `延迟 ${formatDurationZh(totalMs)}` : '',
+    pathPill,
+    hostPill,
+  }
+}
+
+function IconWarn() {
+  return h(
+    'svg',
+    {
+      class: 'lag-ico',
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      xmlns: 'http://www.w3.org/2000/svg',
+      'aria-hidden': 'true',
+    },
+    [
+      h('path', {
+        d: 'M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z',
+        stroke: 'currentColor',
+        'stroke-width': '1.8',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+      }),
+    ],
+  )
+}
+
+function IconChevron() {
+  return h(
+    'svg',
+    {
+      class: 'lag-chev',
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      xmlns: 'http://www.w3.org/2000/svg',
+      'aria-hidden': 'true',
+    },
+    [
+      h('path', {
+        d: 'M6 9l6 6 6-6',
+        stroke: 'currentColor',
+        'stroke-width': '2',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+      }),
+    ],
+  )
+}
+
+function pillNode(p) {
+  if (!p) return null
+  return h('span', { class: ['pill', p.slow ? 'is-slow' : 'is-ok'] }, p.text)
+}
+
+function renderTimeRow(meta) {
+  if (!meta || !meta.clock) return null
+  const kids = [h('p', { class: 'clock' }, `${meta.clock}${meta.clockSuffix || ''}`)]
+  if (meta.showLag && meta.lagLabel) {
+    kids.push(
+      h('span', { class: 'lag-badge' }, [
+        IconWarn(),
+        meta.lagLabel,
+        IconChevron(),
+        h('div', { class: 'lag-pop', role: 'tooltip' }, [
+          h('span', { class: 't' }, meta.clock),
+          h('span', { class: 'lab' }, '手机'),
+          h('span', { class: 'arr' }, '→'),
+          pillNode(meta.pathPill),
+          h('span', { class: 'lab' }, '电脑'),
+          h('span', { class: 'arr' }, '→'),
+          pillNode(meta.hostPill),
+          h('span', { class: 'lab' }, '弹出'),
+        ]),
+      ]),
+    )
+  }
+  return h('div', { class: 'time-row' }, kids)
 }
 
 function hashHue(str) {
@@ -552,7 +829,7 @@ export default {
       String(payload.title || '').trim() ||
       String(appName || '').trim() ||
       '通知'
-    const when = formatClock(payload.receivedAt)
+    const timeMeta = buildTimeMeta(payload)
     const device = String(payload.device || '').trim()
     const bodyText = String(event.body || payload.body || '')
 
@@ -594,7 +871,7 @@ export default {
               h('h2', { class: 'sender', title: sender }, sender),
               h('span', { class: 'tag' }, 'SMS'),
             ]),
-            when ? h('p', { class: 'clock' }, when) : null,
+            renderTimeRow(timeMeta),
           ]),
         ]),
         h('div', { class: 'ops' }, [

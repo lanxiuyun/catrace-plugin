@@ -117,6 +117,16 @@ async function isUserActive() {
   }
 }
 
+function toIsoNow() {
+  return new Date().toISOString()
+}
+
+function toIsoFromMs(ms) {
+  const n = Number(ms)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return new Date(n).toISOString()
+}
+
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
   if (ok) message.result = result ?? null
@@ -556,7 +566,13 @@ function toastBody(n) {
   return `${raw.slice(0, 1999)}…`
 }
 
-function publishNotification(n, hash, otp) {
+/**
+ * @param {object} n
+ * @param {string} hash
+ * @param {string} otp
+ * @param {{ queuedAt?: number } | undefined} meta — set when re-pushing after idle defer
+ */
+function publishNotification(n, hash, otp, meta = {}) {
   const cardSec = clampInt(config.cardDurationSec, 0, 600, 10)
   const sticky = cardSec <= 0
   const hideBody = config.hideSensitiveBody === true
@@ -583,15 +599,31 @@ function publishNotification(n, hash, otp) {
       : '屏蔽此应用',
   })
 
+  // Timing chain (all ISO, host clock except receivedAt from phone):
+  // receivedAt → webhookAt → queuedAt? → publishedAt(shownAt)
+  const publishedAt = toIsoNow()
+  const webhookAt = n.webhookAt || publishedAt
   const payload = {
     packageName: n.packageName,
     appName: n.appName,
     title: n.title,
-    receivedAt: n.receivedAt || new Date().toISOString(),
+    receivedAt: n.receivedAt || webhookAt,
+    webhookAt,
+    publishedAt,
+    // alias kept for older UI
+    shownAt: publishedAt,
     device: n.device || '',
     uid: n.uid || '',
     auto_hide_ms: sticky ? 0 : cardSec * 1000,
     card_duration_sec: cardSec,
+  }
+  if (n.phoneTimestamp != null && n.phoneTimestamp !== '') {
+    payload.phoneTimestamp = n.phoneTimestamp
+  }
+  const queuedAt = Number(meta && meta.queuedAt)
+  if (Number.isFinite(queuedAt) && queuedAt > 0) {
+    payload.deferred = true
+    payload.queuedAt = toIsoFromMs(queuedAt)
   }
   if (!hideBody) {
     payload.body = n.body
@@ -662,16 +694,20 @@ async function flushPending(force = false) {
   const items = [...pendingQueue.values()]
   pendingQueue.clear()
   log('active, flushing deferred notifications', { count: items.length })
-  for (const { n, hash } of items) {
+  for (const { n, hash, queuedAt } of items) {
     try {
       const otp = extractOtp(n.title, n.body, n)
-      publishNotification(n, hash, otp)
+      publishNotification(n, hash, otp, { queuedAt })
       acceptedCount += 1
       lastSuccessAt = Date.now()
       log('flushed deferred notification', {
         packageName: n.packageName,
         titleLen: (n.title || '').length,
         bodyLen: (n.body || '').length,
+        receivedAt: n.receivedAt || null,
+        webhookAt: n.webhookAt || null,
+        queuedAt: Number.isFinite(queuedAt) ? toIsoFromMs(queuedAt) : null,
+        queuedMs: Number.isFinite(queuedAt) ? Date.now() - queuedAt : null,
       })
     } catch (err) {
       rejectedCount += 1
@@ -755,6 +791,12 @@ async function handleWebhook(req, res, ip) {
   }
 
   const n = normalizePayload(raw)
+  // host wall clock when HTTP body fully received (before idle gate / publish)
+  n.webhookAt = toIsoNow()
+  // keep raw phone-side timestamp field if present (may be epoch or string)
+  if (raw && typeof raw === 'object' && raw.timestamp != null) {
+    n.phoneTimestamp = raw.timestamp
+  }
   if (isBlacklisted(n)) {
     rejectedCount += 1
     writeJson(res, 200, { ok: true, skipped: true, reason: 'blacklist' })
@@ -763,6 +805,7 @@ async function handleWebhook(req, res, ip) {
       status: 200,
       packageName: n.packageName,
       bodyLen: (n.body || '').length,
+      webhookAt: n.webhookAt,
     })
     return
   }
@@ -779,6 +822,8 @@ async function handleWebhook(req, res, ip) {
       packageName: n.packageName,
       bodyLen: (n.body || '').length,
       queueSize: pendingQueue.size,
+      receivedAt: n.receivedAt || null,
+      webhookAt: n.webhookAt,
     })
     return
   }
@@ -792,6 +837,7 @@ async function handleWebhook(req, res, ip) {
       status: 200,
       packageName: n.packageName,
       bodyLen: (n.body || '').length,
+      webhookAt: n.webhookAt,
     })
     return
   }
@@ -817,6 +863,8 @@ async function handleWebhook(req, res, ip) {
       actionCount: !config.hideSensitiveBody && config.enableOtpAction !== false && otp ? 1 : 0,
       hideSensitiveBody: config.hideSensitiveBody === true,
       enableOtpAction: config.enableOtpAction !== false,
+      receivedAt: n.receivedAt || null,
+      webhookAt: n.webhookAt,
     })
   } catch (err) {
     rejectedCount += 1
@@ -1156,21 +1204,28 @@ function handleRequest(message) {
         await stopServer()
         return startServer()
       case 'sendTest': {
+        // Simulate phone→PC lag so delay badge / hover chain is easy to verify.
+        const lagMs = 5 * 60 * 1000
+        const now = Date.now()
+        const phoneAt = new Date(now - lagMs)
         const n = {
           packageName: 'com.example.test',
           appName: params.appName || '测试 App',
           title: params.title || '测试通知',
           body: params.body || '这是一条 SmsForwarder 测试消息，验证码 123456',
-          receivedAt: new Date().toLocaleString(),
+          // phone-side receive time (5 min earlier)
+          receivedAt: phoneAt.toISOString(),
+          // PC webhook "arrived" now → total lag ≈ 5 min
+          webhookAt: new Date(now).toISOString(),
           device: 'local-test',
-          uid: `test-${Date.now()}`,
+          uid: `test-${now}`,
         }
-        const hash = contentHash({ ...n, body: `${n.body}:${Date.now()}` })
+        const hash = contentHash({ ...n, body: `${n.body}:${now}` })
         const otp = extractOtp(n.title, n.body, n)
         publishNotification(n, hash, otp)
         acceptedCount += 1
-        lastSuccessAt = Date.now()
-        return { ok: true, otp: otp || null }
+        lastSuccessAt = now
+        return { ok: true, otp: otp || null, lagMs }
       }
       default:
         throw new Error(`unknown method: ${method}`)
