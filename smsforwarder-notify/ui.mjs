@@ -1,11 +1,14 @@
 /** smsforwarder-notify toast — match SMS sync card (avatar / sender / badge / device). */
 const { h } = globalThis.__CATRACE_VUE__ || {}
+const vueWatch = globalThis.__CATRACE_VUE__ && globalThis.__CATRACE_VUE__.watch
 if (typeof h !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v23'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v29'
+const THREAD_ROW_EST = 56
+const THREAD_OVERSCAN = 6
 const CSS = `
 .sf-card {
   display: flex;
@@ -259,6 +262,131 @@ const CSS = `
   max-height: 10.5rem;
   overflow-y: auto;
 }
+.sf-card .thread-shell {
+  position: relative;
+  margin: 0.5rem 0 0;
+}
+.sf-card .thread {
+  margin: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0.125rem 0.25rem 0.125rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.sf-card .jump-new {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 3;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: #10b981;
+  box-shadow: 0 0.25rem 0.75rem rgba(16, 185, 129, 0.35);
+  border-radius: 999px;
+  padding: 0.375rem 0.625rem;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+.sf-card .jump-new.is-arrow {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: #0f766e;
+  background: #fff;
+  border: 1px solid #99f6e4;
+  box-shadow: 0 0.25rem 0.75rem rgba(15, 118, 110, 0.16);
+}
+.sf-card .jump-new.is-arrow:hover { background: #f0fdfa; }
+.sf-card .jump-new:hover { background: #059669; }
+.sf-card .jump-new svg { width: 0.875rem; height: 0.875rem; display: block; }
+.sf-card .thread-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+}
+.sf-card .thread-more {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  text-align: center;
+  padding: 0.25rem 0;
+}
+.sf-card .thread::-webkit-scrollbar { width: 0.375rem; }
+.sf-card .thread::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+.sf-card .bubble-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.sf-card .bubble-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.sf-card .bubble-copy {
+  flex-shrink: 0;
+  opacity: 0;
+  border: none;
+  background: transparent;
+  padding: 0.1875rem;
+  margin: 0.125rem 0 0;
+  color: #10b981;
+  cursor: pointer;
+  border-radius: 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.sf-card .bubble-row:hover .bubble-copy,
+.sf-card .bubble-copy:focus-visible {
+  opacity: 1;
+}
+.sf-card .bubble-copy:hover { background: #ecfdf5; color: #059669; }
+.sf-card .bubble-copy.is-ok { opacity: 1; color: #047857; }
+.sf-card .bubble-copy svg { width: 0.8125rem; height: 0.8125rem; display: block; }
+.sf-card .bubble-name {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0 0.125rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sf-card .bubble {
+  max-width: 100%;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.25rem 0.75rem 0.75rem 0.75rem;
+  background: #f3f4f6;
+  color: #1f2937;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sf-card .bubble.is-otp {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
 .sf-card .otp-chip {
   margin-top: 0.5rem;
   align-self: flex-start;
@@ -294,9 +422,11 @@ const CSS = `
 .sf-card .foot-right {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
   min-width: 0;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .sf-card .block-btn {
   border: none;
@@ -417,6 +547,12 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-css-v20',
     'catrace-plugin-smsforwarder-notify-css-v21',
     'catrace-plugin-smsforwarder-notify-css-v22',
+    'catrace-plugin-smsforwarder-notify-css-v23',
+    'catrace-plugin-smsforwarder-notify-css-v24',
+    'catrace-plugin-smsforwarder-notify-css-v25',
+    'catrace-plugin-smsforwarder-notify-css-v26',
+    'catrace-plugin-smsforwarder-notify-css-v27',
+    'catrace-plugin-smsforwarder-notify-css-v28',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -769,6 +905,18 @@ function IconPhone() {
   ])
 }
 
+function IconChevronDown() {
+  return svgIcon([
+    h('path', {
+      d: 'M6 9l6 6 6-6',
+      stroke: 'currentColor',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    }),
+  ])
+}
+
 function IconBan() {
   return svgIcon([
     h('circle', {
@@ -797,23 +945,194 @@ export default {
   created() {
     ensureStyles()
     this.blockArmedAt = 0
+    this.blockArmedKind = ''
+    this.copiedId = ''
+    this.copiedTimer = null
+    this.stickToBottom = true
+    this.unseenCount = 0
+    this.messages = []
+    this.total = 0
+    this.hasMore = false
+    this.loadingMore = false
+    this.threadKey = ''
+    this.scrollTop = 0
+    this.needScrollBottom = false
+    this.syncFromPayload((this.event && this.event.payload) || {}, { initial: true })
+  },
+  mounted() {
+    if (typeof vueWatch === 'function') {
+      this._unwatchEvent = vueWatch(
+        () => this.event,
+        (ev) => this.syncFromPayload((ev && ev.payload) || {}),
+        { deep: true },
+      )
+    }
+  },
+  updated() {
+    if (!this.needScrollBottom) return
+    this.needScrollBottom = false
+    const el = this.$refs && this.$refs.thread
+    if (el) el.scrollTop = el.scrollHeight
   },
   beforeUnmount() {
     if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
+    if (this.copiedTimer) clearTimeout(this.copiedTimer)
+    if (typeof this._unwatchEvent === 'function') this._unwatchEvent()
   },
   methods: {
-    handleBlockClick() {
+    storeKeyFromThread(key) {
+      const digest = String(key || '').split(':').pop() || ''
+      return `chat_${digest.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}`
+    },
+    pluginApi() {
+      return typeof plugin !== 'undefined' ? plugin : null
+    },
+    syncFromPayload(pl, opts = {}) {
+      const incoming = Array.isArray(pl.messages)
+        ? pl.messages.filter((m) => m && (m.text || m.speaker))
+        : []
+      const key = String(pl.threadKey || '')
+      if (key && key !== this.threadKey) {
+        this.messages = incoming.slice()
+        this.threadKey = key
+        this.stickToBottom = true
+        this.unseenCount = 0
+        this.needScrollBottom = true
+      } else if (incoming.length) {
+        const seen = new Set(this.messages.map((m) => m && m.id))
+        let added = 0
+        for (const m of incoming) {
+          if (m && m.id && !seen.has(m.id)) {
+            this.messages.push(m)
+            seen.add(m.id)
+            added += 1
+          }
+        }
+        if (added) {
+          if (this.stickToBottom) {
+            this.unseenCount = 0
+            this.needScrollBottom = true
+          } else {
+            this.unseenCount += added
+          }
+        }
+      } else if (opts.initial && this.stickToBottom) {
+        this.needScrollBottom = true
+      }
+      this.total = Number(pl.threadCount) || this.messages.length
+      this.hasMore = pl.hasMore === true || this.messages.length < this.total
+    },
+    visibleSlice() {
+      const all = this.messages
+      const viewH = 256
+      const start = Math.max(0, Math.floor(this.scrollTop / THREAD_ROW_EST) - THREAD_OVERSCAN)
+      const count = Math.ceil(viewH / THREAD_ROW_EST) + THREAD_OVERSCAN * 2
+      const end = Math.min(all.length, start + count)
+      return {
+        start,
+        end,
+        padTop: start * THREAD_ROW_EST,
+        padBottom: Math.max(0, (all.length - end) * THREAD_ROW_EST),
+        rows: all.slice(start, end),
+      }
+    },
+    async loadOlder() {
+      if (this.loadingMore || !this.hasMore || !this.threadKey) return
+      const api = this.pluginApi()
+      if (!api || !api.storage || typeof api.storage.get !== 'function') return
+      const first = this.messages[0]
+      const beforeId = first && first.id
+      this.loadingMore = true
+      const el = this.$refs && this.$refs.thread
+      const prevH = el ? el.scrollHeight : 0
+      const prevTop = el ? el.scrollTop : 0
+      try {
+        const stored = await api.storage.get(this.storeKeyFromThread(this.threadKey))
+        const all = stored && Array.isArray(stored.messages) ? stored.messages.filter((m) => m && (m.text || m.speaker)) : []
+        const idx = beforeId ? all.findIndex((m) => m && m.id === beforeId) : all.length
+        const end = idx < 0 ? all.length : idx
+        const start = Math.max(0, end - 40)
+        const older = all.slice(start, end)
+        if (older.length) {
+          const seen = new Set(this.messages.map((m) => m && m.id))
+          const prepend = []
+          for (const m of older) {
+            if (m && m.id && !seen.has(m.id)) {
+              prepend.push(m)
+              seen.add(m.id)
+            }
+          }
+          if (prepend.length) this.messages = prepend.concat(this.messages)
+        }
+        this.total = all.length || this.messages.length
+        this.hasMore = start > 0
+        this.$nextTick(() => {
+          const node = this.$refs && this.$refs.thread
+          if (node && prevH) node.scrollTop = node.scrollHeight - prevH + prevTop
+        })
+      } catch (e) {
+        console.warn('[smsforwarder-notify] load older failed', e)
+      } finally {
+        this.loadingMore = false
+        this.$forceUpdate()
+      }
+    },
+    onThreadScroll(e) {
+      const el = e && e.target
+      if (!el) return
+      this.scrollTop = el.scrollTop
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+      const atBottom = gap < 8
+      this.stickToBottom = atBottom
+      if (atBottom) this.unseenCount = 0
+      if (el.scrollTop < 48) this.loadOlder()
+      this.$forceUpdate()
+    },
+    jumpToLatest() {
+      this.stickToBottom = true
+      this.unseenCount = 0
+      this.needScrollBottom = true
+      const el = this.$refs && this.$refs.thread
+      if (el) el.scrollTop = el.scrollHeight
+      this.$forceUpdate()
+    },
+    async copyBubble(text, id) {
+      const value = String(text || '').trim()
+      if (!value) return
+      try {
+        const api = this.pluginApi()
+        if (api && api.clipboard && typeof api.clipboard.writeText === 'function') {
+          await api.clipboard.writeText(value)
+        } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(value)
+        }
+        this.copiedId = id
+        if (this.copiedTimer) clearTimeout(this.copiedTimer)
+        this.copiedTimer = setTimeout(() => {
+          this.copiedId = ''
+          this.$forceUpdate()
+        }, 1200)
+        this.$forceUpdate()
+      } catch (e) {
+        console.warn('[smsforwarder-notify] copy bubble failed', e)
+      }
+    },
+    handleBlockClick(kind) {
       const now = Date.now()
-      if (this.blockArmedAt && now - this.blockArmedAt < 5000) {
+      if (this.blockArmedKind === kind && this.blockArmedAt && now - this.blockArmedAt < 5000) {
         if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
         this.blockArmedAt = 0
-        this.$emit('action', 'block-app')
+        this.blockArmedKind = ''
+        this.$emit('action', kind)
         return
       }
       this.blockArmedAt = now
+      this.blockArmedKind = kind
       if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
       this.blockArmedTimer = setTimeout(() => {
         this.blockArmedAt = 0
+        this.blockArmedKind = ''
+        this.$forceUpdate()
       }, 5000)
       this.$forceUpdate()
     },
@@ -831,10 +1150,13 @@ export default {
       '通知'
     const timeMeta = buildTimeMeta(payload)
     const device = String(payload.device || '').trim()
-    const bodyText = String(event.body || payload.body || '')
+    const noticeKind = String(payload.noticeKind || '')
+    const messages = Array.isArray(this.messages) ? this.messages : []
+    const isChat = noticeKind === 'chat' || messages.length > 0
+    const bodyText = isChat ? '' : String(event.body || payload.body || '')
 
     let otp = payload.otp ? String(payload.otp) : ''
-    if (!otp) {
+    if (!otp && noticeKind !== 'chat') {
       otp =
         pickOtpFromText(
           payload.title || event.title,
@@ -845,14 +1167,16 @@ export default {
     }
 
     const actions = Array.isArray(event.actions) ? event.actions.slice() : []
-    const hasCopyBody = actions.some((a) => a && a.id === 'copy-body')
     const hasCopyOtp = actions.some((a) => a && a.id === 'copy-otp')
     const hasBlock = actions.some((a) => a && a.id === 'block-app')
-    // only emit ids that exist on the bus event (resolve_action validates whitelist)
-    const copyActionId = otp && hasCopyOtp ? 'copy-otp' : hasCopyBody ? 'copy-body' : hasCopyOtp ? 'copy-otp' : ''
-    const copyLabel = copyActionId === 'copy-otp' ? '复制验证码' : '复制正文'
-    const dismiss = actions.find((a) => a && a.id === 'dismiss')
+    const hasBlockTitle = actions.some((a) => a && a.id === 'block-title')
+    const copyActionId = otp && hasCopyOtp ? 'copy-otp' : ''
     const av = avatarProps(appName, pkg)
+    const tagLabel = noticeKind === 'otp'
+      ? '验证码'
+      : isChat
+        ? `${this.total || messages.length}条`
+        : 'SMS'
 
     const children = [
       h('div', { class: 'row-top' }, [
@@ -869,7 +1193,7 @@ export default {
           h('div', { class: 'meta-col' }, [
             h('div', { class: 'name-line' }, [
               h('h2', { class: 'sender', title: sender }, sender),
-              h('span', { class: 'tag' }, 'SMS'),
+              h('span', { class: 'tag' }, tagLabel),
             ]),
             renderTimeRow(timeMeta),
           ]),
@@ -896,16 +1220,82 @@ export default {
     if (!event.sticky) {
       children.push(
         h('div', {
+          key: payload.publishedAt || payload.threadCount || 'bar',
           class: ['bar', this.isHovered ? 'paused' : ''],
         }),
       )
     }
 
-    if (bodyText) {
+    if (isChat && messages.length) {
+      const slice = this.visibleSlice()
+      const threadKids = []
+      if (this.hasMore || this.loadingMore) {
+        threadKids.push(
+          h('div', { class: 'thread-more' }, this.loadingMore ? '加载更早的消息…' : '向上滚动加载更早'),
+        )
+      }
+      threadKids.push(h('div', { style: { height: `${slice.padTop}px`, flexShrink: 0 } }))
+      slice.rows.forEach((m, i) => {
+        const abs = slice.start + i
+        const text = String(m.text || '').trim()
+        const name = String(m.speaker || '').trim()
+        const prev = abs > 0 ? messages[abs - 1] : null
+        const showName = Boolean(name && (!prev || String(prev.speaker || '') !== name))
+        const id = String(m.id || `${abs}-${text.slice(0, 12)}`)
+        threadKids.push(
+          h('div', { class: 'bubble-row', key: id }, [
+            showName ? h('div', { class: 'bubble-name', title: name }, name) : null,
+            text
+              ? h('div', { class: 'bubble-wrap' }, [
+                  h('div', { class: 'bubble' }, text),
+                  h(
+                    'button',
+                    {
+                      class: ['bubble-copy', this.copiedId === id ? 'is-ok' : ''],
+                      type: 'button',
+                      title: this.copiedId === id ? '已复制' : '复制这条',
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        this.copyBubble(text, id)
+                      },
+                    },
+                    [IconCopy()],
+                  ),
+                ])
+              : null,
+          ]),
+        )
+      })
+      threadKids.push(h('div', { style: { height: `${slice.padBottom}px`, flexShrink: 0 } }))
+      children.push(
+        h('div', { class: 'thread-shell' }, [
+          h(
+            'div',
+            { class: 'thread', ref: 'thread', onScroll: (e) => this.onThreadScroll(e) },
+            [h('div', { class: 'thread-inner' }, threadKids)],
+          ),
+          !this.stickToBottom
+            ? h(
+                'button',
+                {
+                  class: ['jump-new', this.unseenCount > 0 ? '' : 'is-arrow'],
+                  type: 'button',
+                  title: this.unseenCount > 0 ? `有 ${this.unseenCount} 条新消息` : '回到最新',
+                  onClick: (e) => {
+                    e.stopPropagation()
+                    this.jumpToLatest()
+                  },
+                },
+                this.unseenCount > 0 ? `新消息 ${this.unseenCount}+` : [IconChevronDown()],
+              )
+            : null,
+        ]),
+      )
+    } else if (bodyText) {
       children.push(h('p', { class: 'msg' }, bodyText))
     }
 
-    if (otp) {
+    if (otp && !isChat) {
       children.push(h('div', { class: 'otp-chip' }, otp))
     }
 
@@ -919,25 +1309,50 @@ export default {
                 type: 'button',
                 onClick: () => this.$emit('action', copyActionId),
               },
-              [IconCopy(), copyLabel],
+              [IconCopy(), '复制验证码'],
             )
           : h('div', { class: 'dev' }),
         h('div', { class: 'foot-right' }, [
+          hasBlockTitle
+            ? h(
+                'button',
+                {
+                  class: [
+                    'block-btn',
+                    this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
+                  ],
+                  type: 'button',
+                  title: `不再显示标题含「${sender}」的通知`,
+                  onClick: () => this.handleBlockClick('block-title'),
+                },
+                [
+                  IconBan(),
+                  this.blockArmedKind === 'block-title' && this.blockArmedAt
+                    ? '确认屏蔽标题？'
+                    : '屏蔽这个标题',
+                ],
+              )
+            : null,
           hasBlock
             ? h(
                 'button',
                 {
-                  class: ['block-btn', this.blockArmedAt ? 'is-armed' : ''],
+                  class: [
+                    'block-btn',
+                    this.blockArmedKind === 'block-app' && this.blockArmedAt ? 'is-armed' : '',
+                  ],
                   type: 'button',
-                  title: isLockscreenSms ? `不再显示标题为「${sender}」的通知` : '不再显示该应用的通知',
-                  onClick: () => this.handleBlockClick(),
+                  title: isLockscreenSms
+                    ? `不再显示标题为「${sender}」的通知`
+                    : '不再显示该应用的通知',
+                  onClick: () => this.handleBlockClick('block-app'),
                 },
                 [
                   IconBan(),
-                  this.blockArmedAt
+                  this.blockArmedKind === 'block-app' && this.blockArmedAt
                     ? isLockscreenSms
                       ? '确认屏蔽标题？'
-                      : '确认屏蔽？'
+                      : '确认屏蔽应用？'
                     : isLockscreenSms
                       ? '屏蔽这个标题'
                       : '屏蔽此应用',

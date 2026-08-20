@@ -2,12 +2,12 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, computed, onMounted, onBeforeUnmount } = vue
-const { NButton, NInput, NSwitch, NTag, NPopconfirm, useMessage } = naive
+const { NButton, NInput, NSwitch, NTag, NPopconfirm, NSelect, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
-if (!NButton || !NInput || !NSwitch || !NTag || !useMessage) {
+if (!NButton || !NInput || !NSwitch || !NTag || !NSelect || !useMessage) {
   throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
 }
 if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v2'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -154,15 +154,39 @@ const CSS = `
 .sf-settings .mms-tag:hover { opacity: 0.85; }
 .sf-settings .mms-tag.is-selected { box-shadow: 0 0 0 0.125rem #d97706 inset; }
 .sf-settings .mms-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
+.sf-settings .filter-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.sf-settings .filter-row {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.75rem;
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem;
+  background: #f0fdfa;
+}
+.sf-settings .filter-row.is-off { opacity: 0.55; }
+.sf-settings .filter-top {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.sf-settings .filter-fields {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(7rem, 1fr);
+  gap: 0.5rem;
+}
+.sf-settings .filter-fields .n-select { min-width: 0; width: 100%; }
+.sf-settings .filter-value { min-width: 0; }
+.sf-settings .filter-app { min-width: 0; }
+.sf-settings .filter-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
 `
 
 function ensureStyles() {
   if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
+  const old = document.getElementById('catrace-plugin-smsforwarder-notify-settings-css')
+  if (old) old.remove()
+  let el = document.getElementById(STYLE_ID)
+  if (!el) {
+    el = document.createElement('style')
+    el.id = STYLE_ID
+    document.head.appendChild(el)
+  }
   el.textContent = CSS
-  document.head.appendChild(el)
 }
 
 function clamp(n, min, max, fallback) {
@@ -212,9 +236,12 @@ const DEFAULT_CONFIG = {
   dedupeWindowSec: DEFAULT_DEDUPE_SEC,
   appBlacklist: [],
   mmsTitleBlacklist: [],
+  filters: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
   onlyPushWhenActive: false,
+  mergeChatThreads: true,
+  chatApps: ['QQ', '微信', 'WeChat', 'TIM', 'Telegram', 'Discord', 'WhatsApp', 'com.tencent.mobileqq', 'com.tencent.mm'],
 }
 
 const JSON_TEMPLATE = `{
@@ -233,6 +260,63 @@ const TABS = [
   { id: 'settings', label: '设置' },
   { id: 'tutorial', label: '教程' },
 ]
+
+const MAX_FILTERS = 50
+const FILTER_FIELD_OPTIONS = [
+  { label: '标题', value: 'title' },
+  { label: '正文', value: 'body' },
+  { label: '应用名', value: 'app' },
+  { label: '包名', value: 'package' },
+  { label: '任意字段', value: 'any' },
+]
+const FILTER_MATCH_OPTIONS = [
+  { label: '包含', value: 'contains' },
+  { label: '等于', value: 'equals' },
+  { label: '开头是', value: 'startsWith' },
+  { label: '正则', value: 'regex' },
+]
+const FILTER_FIELDS = new Set(FILTER_FIELD_OPTIONS.map((o) => o.value))
+const FILTER_MATCHES = new Set(FILTER_MATCH_OPTIONS.map((o) => o.value))
+
+function newFilterId() {
+  return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeFilter(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const field = FILTER_FIELDS.has(raw.field) ? raw.field : 'title'
+  const match = FILTER_MATCHES.has(raw.match) ? raw.match : 'contains'
+  const value = String(raw.value || '').trim().slice(0, match === 'regex' ? 80 : 200)
+  const id = String(raw.id || '').trim().slice(0, 64) || newFilterId()
+  const appContains = String(raw.appContains || raw.app || '').trim().slice(0, 100)
+  return {
+    id,
+    enabled: raw.enabled !== false,
+    field,
+    match,
+    value,
+    appContains,
+  }
+}
+
+function normalizeFilters(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  const seen = new Set()
+  for (const raw of input) {
+    if (out.length >= MAX_FILTERS) break
+    const f = normalizeFilter(raw)
+    if (!f) continue
+    if (seen.has(f.id)) f.id = newFilterId()
+    seen.add(f.id)
+    out.push(f)
+  }
+  return out
+}
+
+function persistableFilters(list) {
+  return normalizeFilters(list)
+}
 
 const DOWNLOAD_LINKS = [
   {
@@ -281,11 +365,11 @@ const FAQ = [
   ],
   [
     '重复通知刷屏',
-    '在「设置」里调大「去重窗口」（默认 5 秒）。',
+    '在「设置」里调大「去重窗口」（默认 5 秒）。只想拦某个 QQ 群，不要整应用拉黑：在卡片上点「屏蔽这个标题」，或在过滤器里用标题「包含」群名。',
   ],
   [
     '验证码没有复制按钮',
-    '正文或标题需包含「验证码 / 校验码 / 动态码 / OTP」等关键词，且出现独立的 4–8 位数字；开启「隐私模式」时不提供复制按钮。',
+    '正文或标题需包含「验证码 / 校验码 / 动态码 / OTP」等关键词，且出现独立的 4–8 位数字。',
   ],
   [
     '端口被占用',
@@ -313,9 +397,12 @@ export default {
     const mmsTitleBlacklist = ref([])
     const mmsTitleQuery = ref('')
     const mmsSelected = ref(new Set())
+    const filters = ref([])
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
+    const mergeChatThreads = ref(true)
+    const chatAppsText = ref(blacklistToText(DEFAULT_CONFIG.chatApps))
     const status = ref(null)
     const webhookInfo = ref(null)
     const activeTab = ref('overview')
@@ -374,9 +461,12 @@ export default {
         mmsTitleBlacklist: sortBlacklist(
           Array.isArray(mmsTitleBlacklist.value) ? mmsTitleBlacklist.value : [],
         ),
-        hideSensitiveBody: hideSensitiveBody.value === true,
+        filters: persistableFilters(filters.value),
+        hideSensitiveBody: false,
         enableOtpAction: enableOtpAction.value !== false,
         onlyPushWhenActive: onlyPushWhenActive.value === true,
+        mergeChatThreads: mergeChatThreads.value !== false,
+        chatApps: textToBlacklist(chatAppsText.value),
       }
     }
 
@@ -399,9 +489,14 @@ export default {
       )
       mmsSelected.value = new Set()
       mmsTitleQuery.value = ''
-      hideSensitiveBody.value = cfg.hideSensitiveBody === true
+      filters.value = normalizeFilters(cfg.filters)
+      hideSensitiveBody.value = false
       enableOtpAction.value = cfg.enableOtpAction !== false
       onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
+      mergeChatThreads.value = cfg.mergeChatThreads !== false
+      chatAppsText.value = blacklistToText(
+        Array.isArray(cfg.chatApps) && cfg.chatApps.length ? cfg.chatApps : DEFAULT_CONFIG.chatApps,
+      )
     }
 
     async function run(key, task) {
@@ -545,6 +640,22 @@ export default {
       })
     }
 
+    async function clearChatHistory() {
+      await run('clear-chat', async () => {
+        if (plugin.sidecar?.request) {
+          await plugin.sidecar.request('clearChatHistory', {})
+        }
+        if (plugin.storage && typeof plugin.storage.remove === 'function') {
+          try {
+            await plugin.storage.remove('chatThreads')
+          } catch {
+            /* sidecar already cleared */
+          }
+        }
+        message.success('对话历史已清空')
+      })
+    }
+
     async function sendTest() {
       await run('test', async () => {
         const cfg = currentConfig()
@@ -573,10 +684,10 @@ export default {
           level: 'info',
           sticky,
           actions: [
-            { id: 'copy-body', label: '复制正文' },
             { id: 'copy-otp', label: '复制验证码' },
             ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
-            { id: 'block-app', label: '拉黑此应用' },
+            { id: 'block-title', label: '屏蔽这个标题' },
+            { id: 'block-app', label: '屏蔽此应用' },
           ],
           payload: {
             packageName: 'com.example.test',
@@ -589,6 +700,7 @@ export default {
             publishedAt: pcIso,
             shownAt: pcIso,
             otp: '123456',
+            noticeKind: 'otp',
             auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000,
             card_duration_sec: cfg.cardDurationSec,
           },
@@ -638,6 +750,7 @@ export default {
         mmsTitleBlacklist.value = sortBlacklist(
           Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
         )
+        filters.value = normalizeFilters(cfg.filters)
         // Drop selections that no longer exist
         if (mmsSelected.value.size) {
           const set = new Set(mmsTitleBlacklist.value)
@@ -992,6 +1105,66 @@ export default {
               '电脑空闲（无键鼠）时先暂存，回到活跃后再补推；不会丢通知。',
             ),
           ]),
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, '相同会话合并成气泡'),
+            h('div', { class: 'row-inline' }, [
+              h(NSwitch, {
+                value: mergeChatThreads.value,
+                'onUpdate:value': (v) => {
+                  mergeChatThreads.value = v !== false
+                  scheduleSave()
+                },
+              }),
+              h('span', { class: 'switch-pair' }, mergeChatThreads.value ? '已开启' : '已关闭'),
+            ]),
+            h(
+              'p',
+              { class: 'hint' },
+              '聊天类通知合成可滚动对话小窗。历史按会话存在本机，不设过期；卡片只先画最近一屏，往上滚再加载更早的。',
+            ),
+            h(NInput, {
+              value: chatAppsText.value,
+              type: 'textarea',
+              rows: 3,
+              placeholder: 'QQ\n微信\ncom.tencent.mobileqq',
+              'onUpdate:value': (v) => {
+                chatAppsText.value = v
+                scheduleSave()
+              },
+              onBlur: () => {
+                chatAppsText.value = textToBlacklist(chatAppsText.value).join('\n')
+              },
+            }),
+            h('p', { class: 'hint' }, '一行一个应用名或包名。命中的才走对话小窗；验证码仍单独弹短卡。'),
+            NPopconfirm
+              ? h(
+                  NPopconfirm,
+                  { onPositiveClick: clearChatHistory },
+                  {
+                    trigger: () =>
+                      h(
+                        NButton,
+                        {
+                          size: 'tiny',
+                          tertiary: true,
+                          loading: busy.value === 'clear-chat',
+                        },
+                        { default: () => '清空对话历史' },
+                      ),
+                    default: () => '清空本机保存的全部会话气泡？',
+                  },
+                )
+              : h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    tertiary: true,
+                    loading: busy.value === 'clear-chat',
+                    onClick: clearChatHistory,
+                  },
+                  { default: () => '清空对话历史' },
+                ),
+          ]),
         ]),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名，自动排序）'),
@@ -1011,7 +1184,133 @@ export default {
           h(
             'p',
             { class: 'hint' },
-            '这里用于屏蔽普通 App 通知，不会影响手机锁屏时收到的短信。',
+            '这里用于整应用屏蔽。只想拦某个群 / 某条标题，用下面的过滤器，或在卡片上点「屏蔽这个标题」。不会影响锁屏短信。',
+          ),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'head' }, [
+            h('div', { class: 'label' }, '过滤器（命中则不弹）'),
+            h(
+              NButton,
+              {
+                size: 'small',
+                secondary: true,
+                disabled: filters.value.length >= MAX_FILTERS,
+                onClick: () => {
+                  if (filters.value.length >= MAX_FILTERS) return
+                  filters.value = [
+                    ...filters.value,
+                    {
+                      id: newFilterId(),
+                      enabled: true,
+                      field: 'title',
+                      match: 'contains',
+                      value: '',
+                      appContains: '',
+                    },
+                  ]
+                },
+              },
+              { default: () => '添加规则' },
+            ),
+          ]),
+          filters.value.length
+            ? h(
+                'div',
+                { class: 'filter-list' },
+                filters.value.map((f, idx) =>
+                  h('div', { class: ['filter-row', { 'is-off': f.enabled === false }], key: f.id }, [
+                    h('div', { class: 'filter-top' }, [
+                      h(NSwitch, {
+                        size: 'small',
+                        value: f.enabled !== false,
+                        'onUpdate:value': (v) => {
+                          const next = filters.value.slice()
+                          next[idx] = { ...next[idx], enabled: v === true }
+                          filters.value = next
+                          scheduleSave()
+                        },
+                      }),
+                      h('span', { class: 'switch-pair' }, f.enabled === false ? '已关闭' : '已开启'),
+                      h('div', { style: { flex: 1 } }),
+                      h(
+                        NButton,
+                        {
+                          size: 'tiny',
+                          type: 'error',
+                          tertiary: true,
+                          onClick: () => {
+                            filters.value = filters.value.filter((_, i) => i !== idx)
+                            scheduleSave()
+                          },
+                        },
+                        { default: () => '删除' },
+                      ),
+                    ]),
+                    h('div', { class: 'filter-fields' }, [
+                      h(NSelect, {
+                        value: f.field,
+                        options: FILTER_FIELD_OPTIONS,
+                        size: 'small',
+                        'onUpdate:value': (v) => {
+                          const next = filters.value.slice()
+                          next[idx] = { ...next[idx], field: FILTER_FIELDS.has(v) ? v : 'title' }
+                          filters.value = next
+                          scheduleSave()
+                        },
+                      }),
+                      h(NSelect, {
+                        value: f.match,
+                        options: FILTER_MATCH_OPTIONS,
+                        size: 'small',
+                        'onUpdate:value': (v) => {
+                          const next = filters.value.slice()
+                          next[idx] = {
+                            ...next[idx],
+                            match: FILTER_MATCHES.has(v) ? v : 'contains',
+                          }
+                          filters.value = next
+                          scheduleSave()
+                        },
+                      }),
+                    ]),
+                    h(NInput, {
+                      class: 'filter-value',
+                      size: 'small',
+                      value: f.value,
+                      placeholder:
+                        f.match === 'regex'
+                          ? '正则，例如 DSH Desktop.*交流群'
+                          : f.field === 'title'
+                            ? '例如：DSH Desktop 交流群'
+                            : '匹配内容',
+                      'onUpdate:value': (v) => {
+                        const next = filters.value.slice()
+                        next[idx] = { ...next[idx], value: v }
+                        filters.value = next
+                        scheduleSave()
+                      },
+                    }),
+                    h(NInput, {
+                      class: 'filter-app',
+                      size: 'small',
+                      value: f.appContains,
+                      placeholder: '限定应用（可选，如 QQ / com.tencent.mobileqq）',
+                      'onUpdate:value': (v) => {
+                        const next = filters.value.slice()
+                        next[idx] = { ...next[idx], appContains: v }
+                        filters.value = next
+                        scheduleSave()
+                      },
+                    }),
+                  ]),
+                ),
+              )
+            : h('p', { class: 'filter-empty' }, '暂无规则。可手动添加，或在 Toast 上点「屏蔽这个标题」。'),
+          h(
+            'p',
+            { class: 'hint' },
+            '标题默认用「包含」：QQ 群名后面的「(36条…)」也会命中。可选填限定应用，避免同名标题误伤别的 App。',
           ),
         ]),
         h('div', { class: 'field' }, [

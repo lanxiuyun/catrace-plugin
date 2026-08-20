@@ -87,6 +87,14 @@ window.addEventListener('catrace:plugin-event-resolved', (ev) => {
       console.warn('[smsforwarder-notify] block-app failed', e)
       plugin.log.warn('block-app failed', { error: String(e) }).catch(() => {})
     })
+    return
+  }
+
+  if (detail.actionId === 'block-title') {
+    blockTitle(pl.packageName || '', pl.appName || '', pl.title || '').catch((e) => {
+      console.warn('[smsforwarder-notify] block-title failed', e)
+      plugin.log.warn('block-title failed', { error: String(e) }).catch(() => {})
+    })
   }
 })
 
@@ -94,6 +102,73 @@ window.addEventListener('catrace:plugin-event-resolved', (ev) => {
 // blocking it would silently kill every lock-screen SMS, so block the sender
 // (title) instead of the package when the notification arrived with that label.
 const LOCKSCREEN_PACKAGES = new Set(['com.android.mms'])
+
+/** Strip QQ/WeChat unread suffixes so "群名(36条未读)" still matches next time. */
+function stripTitleNoise(title) {
+  let s = String(title || '').trim()
+  s = s.replace(/[（(]\s*\d+\s*条[^）)]*[）)]?\s*$/u, '')
+  s = s.replace(/[（(]\s*\d+\s*[）)]\s*$/u, '')
+  s = s.replace(/[.…]+$/u, '')
+  return s.trim()
+}
+
+function newFilterId() {
+  return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+async function readConfig() {
+  if (plugin.config && typeof plugin.config.get === 'function') {
+    const cfg = await plugin.config.get()
+    return cfg && typeof cfg === 'object' ? cfg : {}
+  }
+  return {}
+}
+
+async function writeConfig(cfg) {
+  if (plugin.config && typeof plugin.config.set === 'function') {
+    await plugin.config.set(cfg)
+  }
+  if (plugin.sidecar && typeof plugin.sidecar.request === 'function') {
+    const res = await plugin.sidecar.request('setConfig', cfg)
+    if (res && res.ok === false) {
+      await plugin.log.warn('config sidecar sync failed', { error: res.error }).catch(() => {})
+    }
+  }
+}
+
+async function blockTitle(packageName, appName, title) {
+  const rawTitle = String(title || '').trim()
+  const value = stripTitleNoise(rawTitle) || rawTitle
+  if (!value) {
+    await plugin.log.warn('block-title missing title').catch(() => {})
+    return
+  }
+  const cfg = await readConfig()
+  const list = Array.isArray(cfg.filters) ? cfg.filters.slice() : []
+  const appContains = String(appName || '').trim() || String(packageName || '').trim()
+  const dup = list.some((f) => {
+    if (!f || f.field !== 'title') return false
+    const sameVal = String(f.value || '').toLowerCase() === value.toLowerCase()
+    const sameApp =
+      String(f.appContains || '').toLowerCase() === String(appContains || '').toLowerCase()
+    return sameVal && sameApp && (f.match === 'contains' || f.match === 'equals')
+  })
+  if (dup) {
+    await plugin.log.info('block-title already filtered').catch(() => {})
+    return
+  }
+  list.push({
+    id: newFilterId(),
+    enabled: true,
+    field: 'title',
+    match: 'contains',
+    value,
+    appContains,
+  })
+  cfg.filters = list.slice(0, 50)
+  await writeConfig(cfg)
+  await plugin.log.info('block-title added', { value, appContains }).catch(() => {})
+}
 
 async function blockApp(packageName, appName, title) {
   const pkg = String(packageName || '').trim()
@@ -104,10 +179,7 @@ async function blockApp(packageName, appName, title) {
   const mmsSender = isLockscreenSms ? String(title || '').trim() : ''
   const added = []
   try {
-    const cfg =
-      plugin.config && typeof plugin.config.get === 'function'
-        ? ((await plugin.config.get()) || {})
-        : {}
+    const cfg = await readConfig()
     if (isLockscreenSms) {
       if (!mmsSender) {
         await plugin.log.warn('block-app missing mms title').catch(() => {})
@@ -139,15 +211,7 @@ async function blockApp(packageName, appName, title) {
       await plugin.log.info('block-app already blocked').catch(() => {})
       return
     }
-    if (plugin.config && typeof plugin.config.set === 'function') {
-      await plugin.config.set(cfg)
-    }
-    if (plugin.sidecar && typeof plugin.sidecar.request === 'function') {
-      const res = await plugin.sidecar.request('setConfig', cfg)
-      if (res && res.ok === false) {
-        await plugin.log.warn('block-app sidecar sync failed', { error: res.error }).catch(() => {})
-      }
-    }
+    await writeConfig(cfg)
     await plugin.log.info('block-app added', { added }).catch(() => {})
   } catch (e) {
     throw e

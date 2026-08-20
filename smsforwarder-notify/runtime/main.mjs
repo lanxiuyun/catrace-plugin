@@ -10,7 +10,31 @@ const RATE_LIMIT_WINDOW_MS = 60_000
 const RATE_LIMIT_MAX = 120
 const MAX_DEDUPE = 500
 const MAX_PENDING = 200
+const MAX_FILTERS = 50
+const MAX_THREAD_MESSAGES = 10000
+const MAX_THREADS = 500
+const TOAST_PAGE_SIZE = 40
 const PENDING_POLL_MS = 3000
+const THREAD_INDEX_KEY = 'chatIndex'
+const LEGACY_THREAD_STORE_KEY = 'chatThreads'
+const DEFAULT_CHAT_APPS = [
+  'QQ',
+  '微信',
+  'WeChat',
+  'TIM',
+  'Telegram',
+  'Discord',
+  'WhatsApp',
+  'com.tencent.mobileqq',
+  'com.tencent.mm',
+  'com.tencent.tim',
+  'org.telegram.messenger',
+  'org.telegram.messenger.web',
+  'com.discord',
+  'com.whatsapp',
+]
+const FILTER_FIELDS = new Set(['title', 'body', 'app', 'package', 'any'])
+const FILTER_MATCHES = new Set(['contains', 'equals', 'startsWith', 'regex'])
 // keywords near which a 4–8 digit code is treated as OTP
 const OTP_KEYWORD_RE =
   /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|提取码|兑换码|OTP|PIN|verification\s*code|security\s*code|auth(?:entication)?\s*code|one[-\s]?time\s*(?:pass)?(?:word|code)?|\bcode\b/i
@@ -40,13 +64,22 @@ const DEFAULT_CONFIG = {
   dedupeWindowSec: 5,
   appBlacklist: [],
   mmsTitleBlacklist: [],
+  filters: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
   onlyPushWhenActive: false,
+  mergeChatThreads: true,
+  chatApps: [...DEFAULT_CHAT_APPS],
 }
 
 /** @type {typeof DEFAULT_CONFIG} */
-let config = { ...DEFAULT_CONFIG, appBlacklist: [], mmsTitleBlacklist: [] }
+let config = {
+  ...DEFAULT_CONFIG,
+  appBlacklist: [],
+  mmsTitleBlacklist: [],
+  filters: [],
+  chatApps: [...DEFAULT_CHAT_APPS],
+}
 
 /** @type {http.Server | null} */
 let server = null
@@ -61,6 +94,8 @@ const dedupeMap = new Map()
 /** @type {Map<string, { n: object, hash: string, queuedAt: number }>} notifications deferred while idle */
 const pendingQueue = new Map()
 let pendingTimer = null
+/** @type {Map<string, { key: string, messages: object[], lastAt: number }>} live toast chat threads */
+const threadSessions = new Map()
 
 let acceptedCount = 0
 let rejectedCount = 0
@@ -88,7 +123,23 @@ function storageGet(key) {
         storagePending.delete(requestId)
         resolve(null)
       }
-    }, 1500)
+    }, 2500)
+    const pending = storagePending.get(requestId)
+    if (pending) pending.timer = timer
+  })
+}
+
+function storageSet(key, value) {
+  return new Promise((resolve) => {
+    const requestId = `stg-${++storageReqSeq}`
+    storagePending.set(requestId, { resolve, timer: null })
+    send({ v: 1, op: 'storage.set', requestId, key, value })
+    const timer = setTimeout(() => {
+      if (storagePending.has(requestId)) {
+        storagePending.delete(requestId)
+        resolve(false)
+      }
+    }, 2500)
     const pending = storagePending.get(requestId)
     if (pending) pending.timer = timer
   })
@@ -180,6 +231,51 @@ function normalizeBlacklist(input) {
   return []
 }
 
+/** Strip QQ/WeChat unread suffixes so "群名(36条未读)" still matches next time. */
+function stripTitleNoise(title) {
+  let s = String(title || '').trim()
+  s = s.replace(/[（(]\s*\d+\s*条[^）)]*[）)]?\s*$/u, '')
+  s = s.replace(/[（(]\s*\d+\s*[）)]\s*$/u, '')
+  s = s.replace(/[.…]+$/u, '')
+  return s.trim()
+}
+
+function newFilterId() {
+  return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeFilter(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const field = FILTER_FIELDS.has(raw.field) ? raw.field : 'title'
+  const match = FILTER_MATCHES.has(raw.match) ? raw.match : 'contains'
+  const value = clampStr(raw.value, match === 'regex' ? 80 : 200, '').trim()
+  const id = clampStr(raw.id, 64, '').trim() || newFilterId()
+  const appContains = clampStr(raw.appContains ?? raw.app, 100, '').trim()
+  return {
+    id,
+    enabled: raw.enabled !== false,
+    field,
+    match,
+    value,
+    appContains,
+  }
+}
+
+function normalizeFilters(input) {
+  if (!Array.isArray(input)) return [...(config.filters || [])]
+  const out = []
+  const seen = new Set()
+  for (const raw of input) {
+    if (out.length >= MAX_FILTERS) break
+    const f = normalizeFilter(raw)
+    if (!f) continue
+    if (seen.has(f.id)) f.id = newFilterId()
+    seen.add(f.id)
+    out.push(f)
+  }
+  return out
+}
+
 function normalizeConfig(input = {}) {
   const next = {
     enabled: input.enabled !== false,
@@ -216,9 +312,16 @@ function normalizeConfig(input = {}) {
       input.mmsTitleBlacklist !== undefined
         ? normalizeBlacklist(input.mmsTitleBlacklist)
         : [...(config.mmsTitleBlacklist || [])],
-    hideSensitiveBody: input.hideSensitiveBody === true,
+    filters:
+      input.filters !== undefined ? normalizeFilters(input.filters) : [...(config.filters || [])],
+    hideSensitiveBody: false,
     enableOtpAction: input.enableOtpAction !== false,
     onlyPushWhenActive: input.onlyPushWhenActive === true,
+    mergeChatThreads: input.mergeChatThreads !== false,
+    chatApps:
+      input.chatApps !== undefined
+        ? normalizeBlacklist(input.chatApps)
+        : [...(config.chatApps || DEFAULT_CHAT_APPS)],
   }
   return next
 }
@@ -433,6 +536,63 @@ function isBlacklisted(n) {
   return false
 }
 
+function filterFieldTexts(n, field) {
+  const rawTitle = String(n.title || '')
+  const stripped = stripTitleNoise(rawTitle) || rawTitle
+  const pkg = String(n.packageName || '')
+  const app = String(n.appName || '')
+  const body = String(n.body || '')
+  switch (field) {
+    case 'title':
+      return stripped && stripped !== rawTitle ? [rawTitle, stripped] : [rawTitle]
+    case 'body':
+      return [body]
+    case 'app':
+      return [app]
+    case 'package':
+      return [pkg]
+    case 'any': {
+      const texts = [`${pkg}\n${app}\n${rawTitle}\n${body}`]
+      if (stripped && stripped !== rawTitle) texts.push(`${pkg}\n${app}\n${stripped}\n${body}`)
+      return texts
+    }
+    default:
+      return ['']
+  }
+}
+
+function matchFilterValue(text, match, value) {
+  const t = String(text || '')
+  const v = String(value || '')
+  if (!v) return false
+  if (match === 'equals') return t.toLowerCase() === v.toLowerCase()
+  if (match === 'startsWith') return t.toLowerCase().startsWith(v.toLowerCase())
+  if (match === 'contains') return t.toLowerCase().includes(v.toLowerCase())
+  if (match === 'regex') {
+    try {
+      return new RegExp(v, 'i').test(t)
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+function matchesFilter(n) {
+  const list = config.filters || []
+  if (!list.length) return false
+  for (const f of list) {
+    if (!f || f.enabled === false || !f.value) continue
+    if (f.appContains) {
+      const hay = `${n.appName || ''} ${n.packageName || ''}`.toLowerCase()
+      if (!hay.includes(String(f.appContains).toLowerCase())) continue
+    }
+    const texts = filterFieldTexts(n, f.field)
+    if (texts.some((text) => matchFilterValue(text, f.match, f.value))) return true
+  }
+  return false
+}
+
 function toHalfWidthDigits(s) {
   return String(s || '').replace(/[０-９]/g, (ch) =>
     String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30),
@@ -559,6 +719,320 @@ function isDuplicate(hash) {
   return false
 }
 
+function matchesChatApp(n) {
+  const list = config.chatApps && config.chatApps.length ? config.chatApps : DEFAULT_CHAT_APPS
+  const pkg = String(n.packageName || '').toLowerCase()
+  const app = String(n.appName || '').toLowerCase()
+  for (const item of list) {
+    const k = String(item || '').toLowerCase().trim()
+    if (!k) continue
+    if (pkg === k || app === k || pkg.includes(k) || app.includes(k)) return true
+  }
+  return false
+}
+
+function shouldMergeChat(n) {
+  if (config.mergeChatThreads === false) return false
+  const pkg = String(n.packageName || '').trim()
+  const title = (stripTitleNoise(n.title) || String(n.title || '')).trim()
+  return Boolean(pkg && title && matchesChatApp(n))
+}
+
+function classifyNotice(n, otp) {
+  if (otp && config.enableOtpAction !== false) return 'otp'
+  if (shouldMergeChat(n)) return 'chat'
+  return 'notice'
+}
+
+function threadIds(n) {
+  const pkg = String(n.packageName || 'unknown').toLowerCase()
+  const title = (stripTitleNoise(n.title) || String(n.title || '')).trim().toLowerCase()
+  const device = String(n.device || '').trim().toLowerCase()
+  const h = crypto.createHash('sha256')
+  h.update(pkg)
+  h.update('\0')
+  h.update(title)
+  h.update('\0')
+  h.update(device)
+  const digest = h.digest('hex').slice(0, 20)
+  return {
+    dedupeKey: `smsforwarder-notify:thread:${digest}`,
+    storeKey: `chat_${digest}`,
+    digest,
+  }
+}
+
+function parseSpeaker(body) {
+  const raw = String(body || '')
+  const m = raw.match(/^(.{1,24}?)[:：]\s*([\s\S]+)$/)
+  if (!m) return { speaker: '', text: raw }
+  const name = m[1].trim()
+  if (!name || name.includes('\n') || /https?:\/\//i.test(name)) return { speaker: '', text: raw }
+  if (/^\d{1,2}:\d{2}/.test(name)) return { speaker: '', text: raw }
+  return { speaker: name, text: String(m[2] || '').trim() }
+}
+
+function storageKeyForDigest(digest) {
+  return `chat_${String(digest || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}`
+}
+
+function normalizeStoredMessage(m) {
+  if (!m || typeof m !== 'object') return null
+  const text = String(m.text || '')
+  const speaker = String(m.speaker || '')
+  if (!text && !speaker) return null
+  return {
+    id: String(m.id || ''),
+    speaker,
+    text,
+    receivedAt: m.receivedAt || '',
+    otp: m.otp ? String(m.otp) : '',
+  }
+}
+
+function sliceTail(messages, count) {
+  const list = Array.isArray(messages) ? messages : []
+  if (list.length <= count) return list.slice()
+  return list.slice(list.length - count)
+}
+
+let persistTimer = null
+/** @type {Promise<void> | null} */
+let threadsLoadPromise = null
+/** @type {Map<string, { key: string, storeKey: string, lastAt: number, packageName: string, appName: string, title: string, device: string, count: number }>} */
+const threadIndex = new Map()
+const dirtyThreadKeys = new Set()
+let indexDirty = false
+
+function schedulePersistThreads() {
+  if (persistTimer) return
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    persistThreads().catch((err) => {
+      log(
+        'persist threads failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'warn',
+      )
+    })
+  }, 250)
+  persistTimer.unref?.()
+}
+
+async function persistThreads() {
+  const keys = [...dirtyThreadKeys]
+  dirtyThreadKeys.clear()
+  for (const key of keys) {
+    const session = threadSessions.get(key)
+    const meta = threadIndex.get(key)
+    if (!session || !meta) continue
+    await storageSet(meta.storeKey, {
+      v: 1,
+      key,
+      messages: Array.isArray(session.messages)
+        ? session.messages.slice(-MAX_THREAD_MESSAGES)
+        : [],
+      lastAt: session.lastAt || 0,
+      packageName: session.packageName || '',
+      appName: session.appName || '',
+      title: session.title || '',
+      device: session.device || '',
+    })
+  }
+  if (indexDirty || keys.length) {
+    indexDirty = false
+    await storageSet(THREAD_INDEX_KEY, {
+      v: 2,
+      threads: [...threadIndex.values()].map((t) => ({
+        key: t.key,
+        storeKey: t.storeKey,
+        lastAt: t.lastAt || 0,
+        packageName: t.packageName || '',
+        appName: t.appName || '',
+        title: t.title || '',
+        device: t.device || '',
+        count: t.count || 0,
+      })),
+    })
+  }
+}
+
+function rememberIndex(session) {
+  const storeKey = session.storeKey || storageKeyForDigest(String(session.key || '').split(':').pop())
+  threadIndex.set(session.key, {
+    key: session.key,
+    storeKey,
+    lastAt: session.lastAt || 0,
+    packageName: session.packageName || '',
+    appName: session.appName || '',
+    title: session.title || '',
+    device: session.device || '',
+    count: Array.isArray(session.messages) ? session.messages.length : 0,
+  })
+  indexDirty = true
+}
+
+async function hydrateSession(key) {
+  let session = threadSessions.get(key)
+  if (session && Array.isArray(session.messages)) return session
+  const meta = threadIndex.get(key)
+  if (!meta) return null
+  const raw = await storageGet(meta.storeKey)
+  const messages = raw && Array.isArray(raw.messages)
+    ? raw.messages.map(normalizeStoredMessage).filter(Boolean)
+    : []
+  session = {
+    key,
+    storeKey: meta.storeKey,
+    messages,
+    lastAt: Number(raw && raw.lastAt) || meta.lastAt || 0,
+    packageName: (raw && raw.packageName) || meta.packageName || '',
+    appName: (raw && raw.appName) || meta.appName || '',
+    title: (raw && raw.title) || meta.title || '',
+    device: (raw && raw.device) || meta.device || '',
+  }
+  threadSessions.set(key, session)
+  return session
+}
+
+function loadThreads() {
+  if (threadsLoadPromise) return threadsLoadPromise
+  threadsLoadPromise = (async () => {
+    try {
+      const indexRaw = await storageGet(THREAD_INDEX_KEY)
+      const listed =
+        indexRaw && typeof indexRaw === 'object' && Array.isArray(indexRaw.threads)
+          ? indexRaw.threads
+          : null
+      if (listed && listed.length) {
+        for (const t of listed) {
+          if (!t || !t.key) continue
+          const storeKey = String(t.storeKey || storageKeyForDigest(String(t.key).split(':').pop()))
+          threadIndex.set(String(t.key), {
+            key: String(t.key),
+            storeKey,
+            lastAt: Number(t.lastAt) || 0,
+            packageName: t.packageName || '',
+            appName: t.appName || '',
+            title: t.title || '',
+            device: t.device || '',
+            count: Number(t.count) || 0,
+          })
+        }
+        log('chat index loaded', { count: threadIndex.size })
+        return
+      }
+      const legacy = await storageGet(LEGACY_THREAD_STORE_KEY)
+      const list = legacy && typeof legacy === 'object' && Array.isArray(legacy.threads) ? legacy.threads : []
+      for (const t of list) {
+        if (!t || typeof t !== 'object' || !t.key) continue
+        const key = String(t.key)
+        const digest = key.split(':').pop() || key
+        const storeKey = storageKeyForDigest(digest)
+        const messages = Array.isArray(t.messages)
+          ? t.messages.map(normalizeStoredMessage).filter(Boolean).slice(-MAX_THREAD_MESSAGES)
+          : []
+        const session = {
+          key,
+          storeKey,
+          messages,
+          lastAt: Number(t.lastAt) || 0,
+          packageName: t.packageName || '',
+          appName: t.appName || '',
+          title: t.title || '',
+          device: t.device || '',
+        }
+        threadSessions.set(key, session)
+        rememberIndex(session)
+        dirtyThreadKeys.add(key)
+      }
+      if (list.length) {
+        await persistThreads()
+        log('chat threads migrated', { count: threadIndex.size })
+      } else {
+        log('chat threads loaded', { count: 0 })
+      }
+    } catch (err) {
+      log(
+        'load threads failed',
+        { error: err instanceof Error ? err.message : String(err) },
+        'warn',
+      )
+    }
+  })()
+  return threadsLoadPromise
+}
+
+async function takeThreadSession(n, hash, otp) {
+  if (!shouldMergeChat(n)) return null
+  const ids = threadIds(n)
+  let session = threadSessions.get(ids.dedupeKey)
+  if (!session) session = await hydrateSession(ids.dedupeKey)
+  if (!session) {
+    session = {
+      key: ids.dedupeKey,
+      storeKey: ids.storeKey,
+      messages: [],
+      lastAt: 0,
+    }
+    threadSessions.set(ids.dedupeKey, session)
+  }
+  session.storeKey = session.storeKey || ids.storeKey
+  const parsed = parseSpeaker(n.body)
+  const msg = {
+    id: String(hash || '').slice(0, 16) || `${Date.now().toString(36)}`,
+    speaker: parsed.speaker,
+    text: parsed.text || String(n.body || ''),
+    receivedAt: n.receivedAt || n.webhookAt || toIsoNow(),
+    otp: otp || '',
+  }
+  const last = session.messages[session.messages.length - 1]
+  if (msg.text || msg.speaker) {
+    if (!last || last.id !== msg.id) {
+      session.messages.push(msg)
+      if (session.messages.length > MAX_THREAD_MESSAGES) {
+        session.messages = session.messages.slice(-MAX_THREAD_MESSAGES)
+      }
+    }
+  }
+  session.lastAt = Date.now()
+  session.packageName = n.packageName
+  session.appName = n.appName
+  session.title = stripTitleNoise(n.title) || n.title
+  session.device = n.device
+  session.uid = n.uid
+  rememberIndex(session)
+  dirtyThreadKeys.add(session.key)
+  schedulePersistThreads()
+  return session
+}
+
+function pageFromSession(session, beforeId, limit = TOAST_PAGE_SIZE) {
+  const messages = Array.isArray(session && session.messages) ? session.messages : []
+  const size = Math.max(1, Math.min(100, Number(limit) || TOAST_PAGE_SIZE))
+  if (!beforeId) {
+    const page = sliceTail(messages, size)
+    return {
+      messages: page,
+      total: messages.length,
+      hasMore: messages.length > page.length,
+    }
+  }
+  const idx = messages.findIndex((m) => m && m.id === beforeId)
+  const end = idx < 0 ? messages.length : idx
+  const start = Math.max(0, end - size)
+  const page = messages.slice(start, end)
+  return {
+    messages: page,
+    total: messages.length,
+    hasMore: start > 0,
+  }
+}
+
+function closeThreadFromResolved(_message) {
+  // History stays on disk. Closing a toast must not wipe the conversation.
+}
+
 function toastBody(n) {
   const raw = String(n.body || '')
   // toast card can scroll/wrap; keep generous limit
@@ -572,50 +1046,48 @@ function toastBody(n) {
  * @param {string} otp
  * @param {{ queuedAt?: number } | undefined} meta — set when re-pushing after idle defer
  */
-function publishNotification(n, hash, otp, meta = {}) {
+async function publishNotification(n, hash, otp, meta = {}) {
   const cardSec = clampInt(config.cardDurationSec, 0, 600, 10)
   const sticky = cardSec <= 0
-  const hideBody = config.hideSensitiveBody === true
-  // card UI shows sender (title) + app avatar; event.title is hub/fallback label
-  const sender = String(n.title || '').trim()
+  const kind = classifyNotice(n, otp)
+  const session = kind === 'chat' ? await takeThreadSession(n, hash, otp) : null
+  const page = session ? pageFromSession(session, '', TOAST_PAGE_SIZE) : null
+  const messages = page ? page.messages : null
+  const latest = messages && messages.length ? messages[messages.length - 1] : null
+  const sender = String((session && session.title) || n.title || '').trim()
   const app = String(n.appName || '').trim()
   const head = sender || app || '通知'
-  const body = hideBody ? '' : toastBody(n)
+  const body = kind === 'chat'
+    ? (latest ? (latest.speaker ? `${latest.speaker}: ${latest.text}` : latest.text) : toastBody(n))
+    : toastBody(n)
   const actions = []
-  // must be on event.actions — bus.resolve_action rejects unknown ids
-  if (!hideBody) {
-    actions.push({ id: 'copy-body', label: '复制正文' })
-    if (config.enableOtpAction !== false && otp) {
-      actions.push({ id: 'copy-otp', label: '复制验证码' })
-    }
+  if (kind === 'otp' && config.enableOtpAction !== false && otp) {
+    actions.push({ id: 'copy-otp', label: '复制验证码' })
   }
-  if (sticky) {
-    actions.push({ id: 'dismiss', label: '知道了' })
-  }
+  if (sticky) actions.push({ id: 'dismiss', label: '知道了' })
+  const lockscreen = LOCKSCREEN_PACKAGES.has(String(n.packageName || '').toLowerCase())
   actions.push({
     id: 'block-app',
-    label: LOCKSCREEN_PACKAGES.has(String(n.packageName || '').toLowerCase())
-      ? '屏蔽这个标题'
-      : '屏蔽此应用',
+    label: lockscreen ? '屏蔽这个标题' : '屏蔽此应用',
   })
+  if (!lockscreen) actions.push({ id: 'block-title', label: '屏蔽这个标题' })
 
-  // Timing chain (all ISO, host clock except receivedAt from phone):
-  // receivedAt → webhookAt → queuedAt? → publishedAt(shownAt)
   const publishedAt = toIsoNow()
   const webhookAt = n.webhookAt || publishedAt
   const payload = {
     packageName: n.packageName,
     appName: n.appName,
-    title: n.title,
-    receivedAt: n.receivedAt || webhookAt,
+    title: sender || n.title,
+    body,
+    receivedAt: (latest && latest.receivedAt) || n.receivedAt || webhookAt,
     webhookAt,
     publishedAt,
-    // alias kept for older UI
     shownAt: publishedAt,
     device: n.device || '',
     uid: n.uid || '',
     auto_hide_ms: sticky ? 0 : cardSec * 1000,
     card_duration_sec: cardSec,
+    noticeKind: kind,
   }
   if (n.phoneTimestamp != null && n.phoneTimestamp !== '') {
     payload.phoneTimestamp = n.phoneTimestamp
@@ -625,9 +1097,12 @@ function publishNotification(n, hash, otp, meta = {}) {
     payload.deferred = true
     payload.queuedAt = toIsoFromMs(queuedAt)
   }
-  if (!hideBody) {
-    payload.body = n.body
-    if (otp && config.enableOtpAction !== false) payload.otp = otp
+  if (kind === 'otp' && otp) payload.otp = otp
+  if (kind === 'chat' && session) {
+    payload.messages = messages
+    payload.threadKey = session.key
+    payload.threadCount = page.total
+    payload.hasMore = page.hasMore
   }
 
   send({
@@ -637,12 +1112,12 @@ function publishNotification(n, hash, otp, meta = {}) {
       eventType: 'smsforwarder-notify.notification',
       kind: 'smsforwarder-notify',
       title: head,
-      body: hideBody ? `${app || '应用'} 发来通知` : body,
+      body,
       level: 'info',
       sticky,
       actions,
       payload,
-      dedupeKey: `smsforwarder-notify:${hash}`,
+      dedupeKey: session ? session.key : `smsforwarder-notify:${hash}`,
     },
   })
 }
@@ -691,13 +1166,19 @@ async function flushPending(force = false) {
     return
   }
   if (!force && !(await isUserActive())) return
+  await loadThreads()
   const items = [...pendingQueue.values()]
   pendingQueue.clear()
   log('active, flushing deferred notifications', { count: items.length })
   for (const { n, hash, queuedAt } of items) {
     try {
+      if (isBlacklisted(n) || matchesFilter(n)) {
+        rejectedCount += 1
+        log('skipped deferred (filter)', { packageName: n.packageName })
+        continue
+      }
       const otp = extractOtp(n.title, n.body, n)
-      publishNotification(n, hash, otp, { queuedAt })
+      await publishNotification(n, hash, otp, { queuedAt })
       acceptedCount += 1
       lastSuccessAt = Date.now()
       log('flushed deferred notification', {
@@ -790,6 +1271,7 @@ async function handleWebhook(req, res, ip) {
     log('webhook fields', { ip, keys: Object.keys(raw).slice(0, 40), shape })
   }
 
+  await loadThreads()
   const n = normalizePayload(raw)
   // host wall clock when HTTP body fully received (before idle gate / publish)
   n.webhookAt = toIsoNow()
@@ -797,13 +1279,17 @@ async function handleWebhook(req, res, ip) {
   if (raw && typeof raw === 'object' && raw.timestamp != null) {
     n.phoneTimestamp = raw.timestamp
   }
-  if (isBlacklisted(n)) {
+  const blacklisted = isBlacklisted(n)
+  const filtered = !blacklisted && matchesFilter(n)
+  if (blacklisted || filtered) {
     rejectedCount += 1
-    writeJson(res, 200, { ok: true, skipped: true, reason: 'blacklist' })
-    log('skipped blacklist', {
+    const reason = blacklisted ? 'blacklist' : 'filter'
+    writeJson(res, 200, { ok: true, skipped: true, reason })
+    log(blacklisted ? 'skipped blacklist' : 'skipped filter', {
       ip,
       status: 200,
       packageName: n.packageName,
+      titleLen: (n.title || '').length,
       bodyLen: (n.body || '').length,
       webhookAt: n.webhookAt,
     })
@@ -844,7 +1330,7 @@ async function handleWebhook(req, res, ip) {
 
   const otp = extractOtp(n.title, n.body, n)
   try {
-    publishNotification(n, hash, otp)
+    await publishNotification(n, hash, otp)
     acceptedCount += 1
     lastSuccessAt = Date.now()
     lastClientIp = ip
@@ -1079,9 +1565,12 @@ function statusPayload() {
     dedupeWindowSec: config.dedupeWindowSec,
     appBlacklist: [...(config.appBlacklist || [])],
     mmsTitleBlacklist: [...(config.mmsTitleBlacklist || [])],
+    filters: (config.filters || []).map((f) => ({ ...f })),
     hideSensitiveBody: config.hideSensitiveBody === true,
     enableOtpAction: config.enableOtpAction !== false,
     onlyPushWhenActive: config.onlyPushWhenActive === true,
+    mergeChatThreads: config.mergeChatThreads !== false,
+    chatApps: [...(config.chatApps || DEFAULT_CHAT_APPS)],
     ipv4,
     webhookUrls: urls,
     acceptedCount,
@@ -1142,6 +1631,9 @@ async function applyHostConfig(input) {
   if (config.onlyPushWhenActive !== true) {
     await flushPending(true)
   }
+  if (config.mergeChatThreads === false) {
+    // keep persisted history; only stop merging new cards
+  }
 
   const bindChanged =
     prev.host !== config.host || prev.port !== config.port || prev.path !== config.path
@@ -1161,8 +1653,11 @@ async function applyHostConfig(input) {
     dedupeWindowSec: config.dedupeWindowSec,
     blacklist: (config.appBlacklist || []).length,
     mmsTitleBlacklist: (config.mmsTitleBlacklist || []).length,
+    filters: (config.filters || []).length,
     hideSensitiveBody: config.hideSensitiveBody,
     enableOtpAction: config.enableOtpAction,
+    mergeChatThreads: config.mergeChatThreads !== false,
+    chatApps: (config.chatApps || []).length,
     bindChanged,
   })
 
@@ -1203,7 +1698,30 @@ function handleRequest(message) {
       case 'restartServer':
         await stopServer()
         return startServer()
+      case 'clearChatHistory': {
+        await loadThreads()
+        const storeKeys = [...threadIndex.values()].map((t) => t.storeKey).filter(Boolean)
+        threadSessions.clear()
+        threadIndex.clear()
+        dirtyThreadKeys.clear()
+        indexDirty = true
+        await persistThreads()
+        await storageSet(LEGACY_THREAD_STORE_KEY, { v: 1, threads: [] })
+        for (const key of storeKeys) {
+          await storageSet(key, { v: 1, messages: [] })
+        }
+        return { ok: true, cleared: true }
+      }
+      case 'loadThreadPage': {
+        await loadThreads()
+        const key = String(params.threadKey || '')
+        if (!key) return { ok: false, error: 'missing threadKey' }
+        const session = (await hydrateSession(key)) || threadSessions.get(key)
+        if (!session) return { ok: true, messages: [], total: 0, hasMore: false }
+        return { ok: true, ...pageFromSession(session, params.beforeId || '', params.limit) }
+      }
       case 'sendTest': {
+        await loadThreads()
         // Simulate phone→PC lag so delay badge / hover chain is easy to verify.
         const lagMs = 5 * 60 * 1000
         const now = Date.now()
@@ -1222,7 +1740,7 @@ function handleRequest(message) {
         }
         const hash = contentHash({ ...n, body: `${n.body}:${now}` })
         const otp = extractOtp(n.title, n.body, n)
-        publishNotification(n, hash, otp)
+        await publishNotification(n, hash, otp)
         acceptedCount += 1
         lastSuccessAt = now
         return { ok: true, otp: otp || null, lagMs }
@@ -1245,7 +1763,13 @@ async function shutdown() {
     rejectedCount,
     dedupedCount,
     pendingCount: pendingQueue.size,
+    threadCount: threadSessions.size,
   })
+  try {
+    await persistThreads()
+  } catch {
+    /* ignore */
+  }
   await stopServer()
   process.exit(0)
 }
@@ -1259,11 +1783,19 @@ log('smsforwarder-notify sidecar ready', {
 })
 
 setTimeout(() => {
-  if (config.enabled !== false) {
-    startServer().catch((err) => {
-      log('initial listen failed', { error: err instanceof Error ? err.message : String(err) }, 'error')
+  loadThreads()
+    .catch(() => {})
+    .finally(() => {
+      if (config.enabled !== false) {
+        startServer().catch((err) => {
+          log(
+            'initial listen failed',
+            { error: err instanceof Error ? err.message : String(err) },
+            'error',
+          )
+        })
+      }
     })
-  }
 }, 300).unref?.()
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
@@ -1304,6 +1836,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
 
   if (message.op === 'resolved') {
+    closeThreadFromResolved(message)
     log('toast resolved by host', {
       eventId: message.eventId,
       actionId: message.actionId,
