@@ -957,6 +957,7 @@ export default {
     this.threadKey = ''
     this.scrollTop = 0
     this.needScrollBottom = false
+    this.topLoadArmed = true
     this.syncFromPayload((this.event && this.event.payload) || {}, { initial: true })
   },
   mounted() {
@@ -967,12 +968,10 @@ export default {
         { deep: true },
       )
     }
+    this.flushScrollBottom()
   },
   updated() {
-    if (!this.needScrollBottom) return
-    this.needScrollBottom = false
-    const el = this.$refs && this.$refs.thread
-    if (el) el.scrollTop = el.scrollHeight
+    this.flushScrollBottom()
   },
   beforeUnmount() {
     if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
@@ -987,6 +986,14 @@ export default {
     pluginApi() {
       return typeof plugin !== 'undefined' ? plugin : null
     },
+    flushScrollBottom() {
+      if (!this.needScrollBottom) return
+      const el = this.$refs && this.$refs.thread
+      if (!el) return
+      this.needScrollBottom = false
+      el.scrollTop = el.scrollHeight
+      this.scrollTop = el.scrollTop
+    },
     syncFromPayload(pl, opts = {}) {
       const incoming = Array.isArray(pl.messages)
         ? pl.messages.filter((m) => m && (m.text || m.speaker))
@@ -998,6 +1005,7 @@ export default {
         this.stickToBottom = true
         this.unseenCount = 0
         this.needScrollBottom = true
+        this.topLoadArmed = true
       } else if (incoming.length) {
         const seen = new Set(this.messages.map((m) => m && m.id))
         let added = 0
@@ -1025,8 +1033,18 @@ export default {
     visibleSlice() {
       const all = this.messages
       const viewH = 256
-      const start = Math.max(0, Math.floor(this.scrollTop / THREAD_ROW_EST) - THREAD_OVERSCAN)
       const count = Math.ceil(viewH / THREAD_ROW_EST) + THREAD_OVERSCAN * 2
+      if (this.stickToBottom || this.needScrollBottom) {
+        const start = Math.max(0, all.length - count)
+        return {
+          start,
+          end: all.length,
+          padTop: start * THREAD_ROW_EST,
+          padBottom: 0,
+          rows: all.slice(start),
+        }
+      }
+      const start = Math.max(0, Math.floor(this.scrollTop / THREAD_ROW_EST) - THREAD_OVERSCAN)
       const end = Math.min(all.length, start + count)
       return {
         start,
@@ -1037,12 +1055,13 @@ export default {
       }
     },
     async loadOlder() {
-      if (this.loadingMore || !this.hasMore || !this.threadKey) return
+      if (this.loadingMore || !this.hasMore || !this.threadKey || !this.topLoadArmed) return
       const api = this.pluginApi()
       if (!api || !api.storage || typeof api.storage.get !== 'function') return
       const first = this.messages[0]
       const beforeId = first && first.id
       this.loadingMore = true
+      this.topLoadArmed = false
       const el = this.$refs && this.$refs.thread
       const prevH = el ? el.scrollHeight : 0
       const prevTop = el ? el.scrollTop : 0
@@ -1053,6 +1072,7 @@ export default {
         const end = idx < 0 ? all.length : idx
         const start = Math.max(0, end - 40)
         const older = all.slice(start, end)
+        let prepended = 0
         if (older.length) {
           const seen = new Set(this.messages.map((m) => m && m.id))
           const prepend = []
@@ -1062,14 +1082,19 @@ export default {
               seen.add(m.id)
             }
           }
-          if (prepend.length) this.messages = prepend.concat(this.messages)
+          prepended = prepend.length
+          if (prepended) this.messages = prepend.concat(this.messages)
         }
         this.total = all.length || this.messages.length
         this.hasMore = start > 0
-        this.$nextTick(() => {
-          const node = this.$refs && this.$refs.thread
-          if (node && prevH) node.scrollTop = node.scrollHeight - prevH + prevTop
-        })
+        this.$forceUpdate()
+        await this.$nextTick()
+        const node = this.$refs && this.$refs.thread
+        if (node) {
+          if (prepended && prevH) node.scrollTop = node.scrollHeight - prevH + prevTop
+          else node.scrollTop = Math.max(prevTop, 48)
+          this.scrollTop = node.scrollTop
+        }
       } catch (e) {
         console.warn('[smsforwarder-notify] load older failed', e)
       } finally {
@@ -1085,6 +1110,7 @@ export default {
       const atBottom = gap < 8
       this.stickToBottom = atBottom
       if (atBottom) this.unseenCount = 0
+      if (el.scrollTop > 80) this.topLoadArmed = true
       if (el.scrollTop < 48) this.loadOlder()
       this.$forceUpdate()
     },
@@ -1092,9 +1118,8 @@ export default {
       this.stickToBottom = true
       this.unseenCount = 0
       this.needScrollBottom = true
-      const el = this.$refs && this.$refs.thread
-      if (el) el.scrollTop = el.scrollHeight
       this.$forceUpdate()
+      this.$nextTick(() => this.flushScrollBottom())
     },
     async copyBubble(text, id) {
       const value = String(text || '').trim()
