@@ -6,7 +6,7 @@ if (typeof h !== 'function') {
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v29'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v32'
 const THREAD_ROW_EST = 56
 const THREAD_OVERSCAN = 6
 const CSS = `
@@ -401,8 +401,8 @@ const CSS = `
   font-variant-numeric: tabular-nums;
 }
 .sf-card .copy-btn {
-  align-self: flex-start;
-  margin-top: 0.5rem;
+  flex: 0 0 auto;
+  align-self: flex-end;
   border: none;
   background: transparent;
   padding: 0.25rem 0.375rem;
@@ -412,21 +412,29 @@ const CSS = `
   color: #10b981;
   cursor: pointer;
   font-family: inherit;
-  line-height: 1.2;
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  white-space: nowrap;
 }
 .sf-card .copy-btn:hover { color: #059669; }
 .sf-card .copy-btn svg { width: 0.9375rem; height: 0.9375rem; flex-shrink: 0; }
 .sf-card .foot-right {
   display: flex;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
   min-width: 0;
-  flex-shrink: 1;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+.sf-card .foot-actions {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 0.75rem;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 .sf-card .block-btn {
   border: none;
@@ -455,17 +463,18 @@ const CSS = `
 .sf-card .block-btn svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
 .sf-card .row-foot {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 0.875rem;
-  min-height: 1.25rem;
 }
 .sf-card .dev {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.3125rem;
   min-width: 0;
+  max-width: 100%;
   font-size: 0.75rem;
   color: #9ca3af;
 }
@@ -553,6 +562,9 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-css-v26',
     'catrace-plugin-smsforwarder-notify-css-v27',
     'catrace-plugin-smsforwarder-notify-css-v28',
+    'catrace-plugin-smsforwarder-notify-css-v29',
+    'catrace-plugin-smsforwarder-notify-css-v30',
+    'catrace-plugin-smsforwarder-notify-css-v31',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -803,20 +815,23 @@ function avatarProps(appName, packageName) {
   }
 }
 
-function pickOtpFromText(title, body, packageName, appName) {
+function pickOtpFromText(title, body) {
   const text = `${title || ''}\n${body || ''}`.replace(/[０-９]/g, (ch) =>
     String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30),
   )
   if (!text.trim()) return ''
+  const kw =
+    /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP|verification\s*code|security\s*code/i
+  if (!kw.test(text)) return ''
   const nearAfter =
-    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|口令|密码|OTP|PIN|code|Code|CODE)[^\d]{0,16}(\d(?:[\s-]?\d){3,7})/i
+    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP)[^\d]{0,16}(\d(?:[\s-]?\d){3,7})/i
   const nm = nearAfter.exec(text)
   if (nm) {
     const d = nm[1].replace(/\D/g, '')
     if (d.length >= 4 && d.length <= 8) return d
   }
   const nearBefore =
-    /(\d(?:[\s-]?\d){3,7})[^\d]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP|code)/i
+    /(\d(?:[\s-]?\d){3,7})[^\d]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP)/i
   const nb = nearBefore.exec(text)
   if (nb) {
     const d = nb[1].replace(/\D/g, '')
@@ -827,18 +842,8 @@ function pickOtpFromText(title, body, packageName, appName) {
     const d = cn[1].replace(/\D/g, '')
     if (d.length >= 4 && d.length <= 8) return d
   }
-  const kw =
-    /验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|OTP|PIN|verification\s*code|security\s*code|\bcode\b/i
   const all = text.match(/(?<!\d)\d{4,8}(?!\d)/g) || []
-  if (kw.test(text) && all.length) return all.find((x) => x.length === 6) || all[0]
-  const smsLike =
-    /mms|sms|messaging|telephony|短信|信息|SMS|MMS/i.test(`${packageName || ''} ${appName || ''}`)
-  const compact = text.replace(/\s+/g, ' ').trim()
-  if ((smsLike || compact.length <= 120) && all.length) {
-    if (all.length === 1) return all[0]
-    return all.find((x) => x.length === 6) || all[0]
-  }
-  return ''
+  return all.find((x) => x.length === 6) || all[0] || ''
 }
 
 function svgIcon(paths, viewBox = '0 0 24 24') {
@@ -1183,12 +1188,7 @@ export default {
     let otp = payload.otp ? String(payload.otp) : ''
     if (!otp && noticeKind !== 'chat') {
       otp =
-        pickOtpFromText(
-          payload.title || event.title,
-          payload.body || event.body,
-          payload.packageName,
-          payload.appName,
-        ) || ''
+        pickOtpFromText(payload.title || event.title, payload.body || event.body) || ''
     }
 
     const actions = Array.isArray(event.actions) ? event.actions.slice() : []
@@ -1336,63 +1336,61 @@ export default {
               },
               [IconCopy(), '复制验证码'],
             )
-          : h('div', { class: 'dev' }),
+          : h('div'),
         h('div', { class: 'foot-right' }, [
-          hasBlockTitle
-            ? h(
-                'button',
-                {
-                  class: [
-                    'block-btn',
-                    this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
-                  ],
-                  type: 'button',
-                  title: `不再显示标题含「${sender}」的通知`,
-                  onClick: () => this.handleBlockClick('block-title'),
-                },
-                [
-                  IconBan(),
-                  this.blockArmedKind === 'block-title' && this.blockArmedAt
-                    ? '确认屏蔽标题？'
-                    : '屏蔽这个标题',
-                ],
-              )
-            : null,
-          hasBlock
-            ? h(
-                'button',
-                {
-                  class: [
-                    'block-btn',
-                    this.blockArmedKind === 'block-app' && this.blockArmedAt ? 'is-armed' : '',
-                  ],
-                  type: 'button',
-                  title: isLockscreenSms
-                    ? `不再显示标题为「${sender}」的通知`
-                    : '不再显示该应用的通知',
-                  onClick: () => this.handleBlockClick('block-app'),
-                },
-                [
-                  IconBan(),
-                  this.blockArmedKind === 'block-app' && this.blockArmedAt
-                    ? isLockscreenSms
+          h(
+            'div',
+            { class: 'dev', title: device || appName || '' },
+            [IconPhone(), h('span', { class: 'dev-name' }, device || appName || '设备')],
+          ),
+          h('div', { class: 'foot-actions' }, [
+            hasBlockTitle
+              ? h(
+                  'button',
+                  {
+                    class: [
+                      'block-btn',
+                      this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
+                    ],
+                    type: 'button',
+                    title: `不再显示标题含「${sender}」的通知`,
+                    onClick: () => this.handleBlockClick('block-title'),
+                  },
+                  [
+                    IconBan(),
+                    this.blockArmedKind === 'block-title' && this.blockArmedAt
                       ? '确认屏蔽标题？'
-                      : '确认屏蔽应用？'
-                    : isLockscreenSms
-                      ? '屏蔽这个标题'
-                      : '屏蔽此应用',
-                ],
-              )
-            : null,
-          device
-            ? h('div', { class: 'dev', title: device }, [
-                IconPhone(),
-                h('span', { class: 'dev-name' }, device),
-              ])
-            : h('div', { class: 'dev' }, [
-                IconPhone(),
-                h('span', { class: 'dev-name' }, appName || '设备'),
-              ]),
+                      : '屏蔽这个标题',
+                  ],
+                )
+              : null,
+            hasBlock
+              ? h(
+                  'button',
+                  {
+                    class: [
+                      'block-btn',
+                      this.blockArmedKind === 'block-app' && this.blockArmedAt ? 'is-armed' : '',
+                    ],
+                    type: 'button',
+                    title: isLockscreenSms
+                      ? `不再显示标题为「${sender}」的通知`
+                      : '不再显示该应用的通知',
+                    onClick: () => this.handleBlockClick('block-app'),
+                  },
+                  [
+                    IconBan(),
+                    this.blockArmedKind === 'block-app' && this.blockArmedAt
+                      ? isLockscreenSms
+                        ? '确认屏蔽标题？'
+                        : '确认屏蔽应用？'
+                      : isLockscreenSms
+                        ? '屏蔽这个标题'
+                        : '屏蔽此应用',
+                  ],
+                )
+              : null,
+          ]),
         ]),
       ]),
     )

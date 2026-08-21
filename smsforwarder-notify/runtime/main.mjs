@@ -37,14 +37,11 @@ const FILTER_FIELDS = new Set(['title', 'body', 'app', 'package', 'any'])
 const FILTER_MATCHES = new Set(['contains', 'equals', 'startsWith', 'regex'])
 // keywords near which a 4–8 digit code is treated as OTP
 const OTP_KEYWORD_RE =
-  /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|提取码|兑换码|OTP|PIN|verification\s*code|security\s*code|auth(?:entication)?\s*code|one[-\s]?time\s*(?:pass)?(?:word|code)?|\bcode\b/i
+  /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP|verification\s*code|security\s*code|auth(?:entication)?\s*code|one[-\s]?time\s*(?:pass)?(?:word|code)?/i
 // plain ASCII digits, optional spaces/dashes between (e.g. 123 456 / 123-456)
 const OTP_CODE_RE = /(?<!\d)(?:\d[ \t-]*){3,7}\d(?!\d)/g
 // fullwidth digits ０-９
 const OTP_FULLWIDTH_RE = /(?<![0-9０-９])[０-９]{4,8}(?![0-9０-９])/g
-// packages that are SMS / messaging — extract more aggressively
-const SMS_PACKAGE_RE =
-  /mms|sms|messaging|telephony|contacts|samsung\.android\.messaging|miui\.sms|oppo\.sms|coloros\.mms|transsion\.smartmessage|google\.android\.apps\.messaging/i
 
 // Packages Android may re-label notifications with while the screen is locked.
 // Every lock-screen SMS shares the same package (com.android.mms) no matter the
@@ -63,6 +60,7 @@ const DEFAULT_CONFIG = {
   cardDurationSec: 10,
   dedupeWindowSec: 5,
   appBlacklist: [],
+  appBlacklistPaused: [],
   mmsTitleBlacklist: [],
   filters: [],
   hideSensitiveBody: false,
@@ -76,6 +74,7 @@ const DEFAULT_CONFIG = {
 let config = {
   ...DEFAULT_CONFIG,
   appBlacklist: [],
+  appBlacklistPaused: [],
   mmsTitleBlacklist: [],
   filters: [],
   chatApps: [...DEFAULT_CHAT_APPS],
@@ -308,6 +307,10 @@ function normalizeConfig(input = {}) {
       input.appBlacklist !== undefined
         ? normalizeBlacklist(input.appBlacklist)
         : [...(config.appBlacklist || [])],
+    appBlacklistPaused:
+      input.appBlacklistPaused !== undefined
+        ? normalizeBlacklist(input.appBlacklistPaused)
+        : [...(config.appBlacklistPaused || [])],
     mmsTitleBlacklist:
       input.mmsTitleBlacklist !== undefined
         ? normalizeBlacklist(input.mmsTitleBlacklist)
@@ -527,10 +530,13 @@ function isBlacklisted(n) {
 
   const list = config.appBlacklist || []
   if (!list.length) return false
+  const paused = new Set(
+    (config.appBlacklistPaused || []).map((x) => String(x || '').toLowerCase()).filter(Boolean),
+  )
   const app = String(n.appName || '').toLowerCase()
   for (const item of list) {
     const k = String(item || '').toLowerCase()
-    if (!k) continue
+    if (!k || paused.has(k)) continue
     if (pkg === k || app === k || pkg.includes(k) || app.includes(k)) return true
   }
   return false
@@ -608,70 +614,44 @@ function normalizeOtpCandidate(raw) {
   return digits
 }
 
-function isSmsLikePackage(packageName, appName) {
-  const s = `${packageName || ''} ${appName || ''}`
-  return SMS_PACKAGE_RE.test(s) || /短信|信息|讯息|SMS|MMS/i.test(s)
-}
-
-function extractOtp(title, body, meta = {}) {
+function extractOtp(title, body, _meta = {}) {
   const text = toHalfWidthDigits(`${title || ''}\n${body || ''}`)
   if (!text.trim()) return ''
+  if (!OTP_KEYWORD_RE.test(text)) return ''
 
-  const hasKeyword = OTP_KEYWORD_RE.test(text)
-  const smsLike = isSmsLikePackage(meta.packageName, meta.appName)
   const candidates = []
 
-  // 1) code immediately after a keyword (最高置信)
   const nearAfter =
-    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|口令|密码|OTP|PIN|code|Code|CODE)[^\d０-９]{0,16}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
+    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP)[^\d０-９]{0,16}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
   let m
   while ((m = nearAfter.exec(text)) !== null) {
     const c = normalizeOtpCandidate(m[1])
     if (c) candidates.push({ code: c, rank: 4 })
   }
 
-  // 1b) code BEFORE keyword: 582913（登录验证码） / 123456是您的验证码
   const nearBefore =
-    /([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])[^\d０-９]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP|code)/gi
+    /([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])[^\d０-９]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP)/gi
   while ((m = nearBefore.exec(text)) !== null) {
     const c = normalizeOtpCandidate(m[1])
     if (c) candidates.push({ code: c, rank: 4 })
   }
 
-  // 1c) 码为 / 码是 / 为 … 码
   const cnBare =
-    /(?:码为|码是|码：|码:|密码为|密码是)[^\d０-９]{0,8}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
+    /(?:码为|码是|码：|码:)[^\d０-９]{0,8}([0-9０-９][0-9０-９ \t-]{2,18}[0-9０-９])/gi
   while ((m = cnBare.exec(text)) !== null) {
     const c = normalizeOtpCandidate(m[1])
     if (c) candidates.push({ code: c, rank: 3 })
   }
 
-  // 2) any 4–8 digit run when keyword present
-  if (hasKeyword || candidates.length) {
-    const ascii = text.match(OTP_CODE_RE) || []
-    for (const raw of ascii) {
-      const c = normalizeOtpCandidate(raw)
-      if (c) candidates.push({ code: c, rank: 2 })
-    }
-    const fw = text.match(OTP_FULLWIDTH_RE) || []
-    for (const raw of fw) {
-      const c = normalizeOtpCandidate(raw)
-      if (c) candidates.push({ code: c, rank: 2 })
-    }
+  const ascii = text.match(OTP_CODE_RE) || []
+  for (const raw of ascii) {
+    const c = normalizeOtpCandidate(raw)
+    if (c) candidates.push({ code: c, rank: 2 })
   }
-
-  // 3) SMS package or short message: single clear 4–8 digit token
-  if (!candidates.length) {
-    const compact = text.replace(/\s+/g, ' ').trim()
-    const only = compact.match(OTP_CODE_RE) || []
-    const norms = [...new Set(only.map(normalizeOtpCandidate).filter(Boolean))]
-    // drop phone-like 11-digit already excluded by 4-8; prefer 6-digit among few
-    if (norms.length === 1 && (smsLike || compact.length <= 120)) {
-      candidates.push({ code: norms[0], rank: 1 })
-    } else if (smsLike && norms.length >= 1 && norms.length <= 3) {
-      const six = norms.find((x) => x.length === 6)
-      candidates.push({ code: six || norms[0], rank: 1 })
-    }
+  const fw = text.match(OTP_FULLWIDTH_RE) || []
+  for (const raw of fw) {
+    const c = normalizeOtpCandidate(raw)
+    if (c) candidates.push({ code: c, rank: 2 })
   }
 
   if (!candidates.length) return ''
@@ -739,8 +719,8 @@ function shouldMergeChat(n) {
 }
 
 function classifyNotice(n, otp) {
-  if (otp && config.enableOtpAction !== false) return 'otp'
   if (shouldMergeChat(n)) return 'chat'
+  if (otp && config.enableOtpAction !== false) return 'otp'
   return 'notice'
 }
 
@@ -1564,6 +1544,7 @@ function statusPayload() {
     cardDurationSec: config.cardDurationSec,
     dedupeWindowSec: config.dedupeWindowSec,
     appBlacklist: [...(config.appBlacklist || [])],
+    appBlacklistPaused: [...(config.appBlacklistPaused || [])],
     mmsTitleBlacklist: [...(config.mmsTitleBlacklist || [])],
     filters: (config.filters || []).map((f) => ({ ...f })),
     hideSensitiveBody: config.hideSensitiveBody === true,

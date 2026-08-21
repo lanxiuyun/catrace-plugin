@@ -2,12 +2,12 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, computed, onMounted, onBeforeUnmount } = vue
-const { NButton, NInput, NSwitch, NTag, NPopconfirm, NSelect, useMessage } = naive
+const { NButton, NInput, NSwitch, NTag, NPopconfirm, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
-if (!NButton || !NInput || !NSwitch || !NTag || !NSelect || !useMessage) {
+if (!NButton || !NInput || !NSwitch || !NTag || !useMessage) {
   throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
 }
 if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v2'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v7'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -154,32 +154,139 @@ const CSS = `
 .sf-settings .mms-tag:hover { opacity: 0.85; }
 .sf-settings .mms-tag.is-selected { box-shadow: 0 0 0 0.125rem #d97706 inset; }
 .sf-settings .mms-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
-.sf-settings .filter-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.sf-settings .filter-row {
-  display: flex; flex-direction: column; gap: 0.5rem;
-  padding: 0.75rem;
-  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem;
-  background: #f0fdfa;
-}
-.sf-settings .filter-row.is-off { opacity: 0.55; }
-.sf-settings .filter-top {
-  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
-}
-.sf-settings .filter-fields {
-  display: grid;
-  grid-template-columns: minmax(7rem, 1fr) minmax(7rem, 1fr);
-  gap: 0.5rem;
-}
-.sf-settings .filter-fields .n-select { min-width: 0; width: 100%; }
-.sf-settings .filter-value { min-width: 0; }
-.sf-settings .filter-app { min-width: 0; }
+.sf-settings .kw-add { display: flex; gap: 0.5rem; align-items: center; }
+.sf-settings .kw-add .n-input { flex: 1; min-width: 0; }
 .sf-settings .filter-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
+.sf-settings .block-box {
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem; overflow: hidden; background: #fff;
+}
+.sf-settings .block-search { padding: 0.5rem 0.625rem; border-bottom: 0.0625rem solid #f0fdfa; }
+.sf-settings .block-list { max-height: 16rem; overflow-y: auto; }
+.sf-settings .block-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 0.0625rem solid #f0fdfa;
+}
+.sf-settings .block-row:last-child { border-bottom: 0; }
+.sf-settings .block-row:hover { background: #f0fdfa; }
+.sf-settings .block-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0.125rem; }
+.sf-settings .block-title { font-size: 0.8125rem; font-weight: 600; color: #134e4a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sf-settings .block-sub {
+  font-size: 0.6875rem; color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sf-settings .block-count { font-size: 0.75rem; font-weight: 600; color: #8b949e; }
+.sf-settings .block-split {
+  display: grid; gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 56rem) {
+  .sf-settings .block-split { grid-template-columns: 1fr 1fr; align-items: start; }
+}
+.sf-settings .pane {
+  padding: 1rem 1.125rem;
+  border: 0.0625rem solid #99f6e4;
+  border-radius: 1rem;
+  background: #fff;
+  display: flex; flex-direction: column; gap: 0.75rem; min-width: 0;
+}
+.sf-settings .pane-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+}
+.sf-settings .pane-title {
+  margin: 0; font-size: 0.9375rem; font-weight: 750; color: #134e4a;
+  display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.sf-settings .pane-title .count { color: #8b949e; font-weight: 600; font-size: 0.8125rem; }
+.sf-settings .pane-hint { font-size: 0.75rem; color: #94a3b8; font-weight: 500; }
+.sf-settings .seg {
+  display: inline-flex; padding: 0.1875rem; border-radius: 0.5rem;
+  background: #f1f5f9; gap: 0.125rem;
+}
+.sf-settings .seg-btn {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 0.25rem 0.625rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-weight: 600; color: #64748b;
+}
+.sf-settings .seg-btn.is-on { background: #fff; color: #0f172a; box-shadow: 0 0.0625rem 0.125rem rgba(15,23,42,0.08); }
+.sf-settings .search-add {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.sf-settings .search-add .n-input { flex: 1; min-width: 0; }
+.sf-settings .app-grid {
+  display: grid; gap: 0.625rem;
+  grid-template-columns: 1fr;
+}
+.sf-settings .app-grid.is-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.sf-settings .app-tile {
+  display: flex; align-items: center; gap: 0.625rem;
+  padding: 0.75rem;
+  border: 0.0625rem solid #e2e8f0; border-radius: 0.875rem;
+  background: #fff; min-width: 0;
+}
+.sf-settings .app-tile.is-off { opacity: 0.55; }
+.sf-settings .app-avatar {
+  flex: 0 0 auto; width: 2.25rem; height: 2.25rem; border-radius: 0.75rem;
+  color: #fff; font-weight: 800; font-size: 0.875rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sf-settings .app-meta { min-width: 0; flex: 1; }
+.sf-settings .app-name {
+  font-size: 0.8125rem; font-weight: 700; color: #0f172a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sf-settings .app-pkg {
+  font-size: 0.6875rem; color: #94a3b8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.sf-settings .title-chip {
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  padding: 0.5rem 0.75rem; border-radius: 0.75rem;
+  background: #fff7ed; border: 0.0625rem solid #fed7aa;
+  color: #9a3412; font-size: 0.8125rem; font-weight: 650;
+}
+.sf-settings .title-chip .hash { color: #f59e0b; font-weight: 800; }
+.sf-settings .title-chip .badge {
+  font-size: 0.625rem; font-weight: 700; color: #c2410c;
+  background: #fff; border: 0.0625rem solid #fdba74;
+  border-radius: 0.375rem; padding: 0.0625rem 0.3125rem;
+}
+.sf-settings .title-chip .dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #f59e0b;
+}
+.sf-settings .title-chip .x {
+  border: 0; background: transparent; cursor: pointer; color: #c2410c;
+  padding: 0; font-size: 0.875rem; line-height: 1;
+}
+.sf-settings .adv-toggle {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 0; text-align: left;
+  font-size: 0.8125rem; font-weight: 700; color: #0d9488;
+  display: inline-flex; align-items: center; gap: 0.375rem;
+}
+.sf-settings .adv-toggle:hover { color: #0f766e; }
+.sf-settings .adv-body {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  padding-top: 0.25rem;
+}
 `
 
 function ensureStyles() {
   if (typeof document === 'undefined') return
-  const old = document.getElementById('catrace-plugin-smsforwarder-notify-settings-css')
-  if (old) old.remove()
+  for (const id of [
+    'catrace-plugin-smsforwarder-notify-settings-css',
+    'catrace-plugin-smsforwarder-notify-settings-css-v2',
+    'catrace-plugin-smsforwarder-notify-settings-css-v3',
+    'catrace-plugin-smsforwarder-notify-settings-css-v4',
+    'catrace-plugin-smsforwarder-notify-settings-css-v5',
+    'catrace-plugin-smsforwarder-notify-settings-css-v6',
+  ]) {
+    const old = document.getElementById(id)
+    if (old) old.remove()
+  }
   let el = document.getElementById(STYLE_ID)
   if (!el) {
     el = document.createElement('style')
@@ -235,6 +342,7 @@ const DEFAULT_CONFIG = {
   cardDurationSec: DEFAULT_CARD_SEC,
   dedupeWindowSec: DEFAULT_DEDUPE_SEC,
   appBlacklist: [],
+  appBlacklistPaused: [],
   mmsTitleBlacklist: [],
   filters: [],
   hideSensitiveBody: false,
@@ -262,21 +370,8 @@ const TABS = [
 ]
 
 const MAX_FILTERS = 50
-const FILTER_FIELD_OPTIONS = [
-  { label: '标题', value: 'title' },
-  { label: '正文', value: 'body' },
-  { label: '应用名', value: 'app' },
-  { label: '包名', value: 'package' },
-  { label: '任意字段', value: 'any' },
-]
-const FILTER_MATCH_OPTIONS = [
-  { label: '包含', value: 'contains' },
-  { label: '等于', value: 'equals' },
-  { label: '开头是', value: 'startsWith' },
-  { label: '正则', value: 'regex' },
-]
-const FILTER_FIELDS = new Set(FILTER_FIELD_OPTIONS.map((o) => o.value))
-const FILTER_MATCHES = new Set(FILTER_MATCH_OPTIONS.map((o) => o.value))
+const FILTER_FIELDS = new Set(['title', 'body', 'app', 'package', 'any'])
+const FILTER_MATCHES = new Set(['contains', 'equals', 'startsWith', 'regex'])
 
 function newFilterId() {
   return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -316,6 +411,13 @@ function normalizeFilters(input) {
 
 function persistableFilters(list) {
   return normalizeFilters(list)
+}
+
+function filterTagLabel(f) {
+  const value = String(f && f.value ? f.value : '').trim()
+  const app = String(f && f.appContains ? f.appContains : '').trim()
+  if (app) return `${value} · ${app}`
+  return value
 }
 
 const DOWNLOAD_LINKS = [
@@ -365,7 +467,7 @@ const FAQ = [
   ],
   [
     '重复通知刷屏',
-    '在「设置」里调大「去重窗口」（默认 5 秒）。只想拦某个 QQ 群，不要整应用拉黑：在卡片上点「屏蔽这个标题」，或在过滤器里用标题「包含」群名。',
+    '在「高级」里调大「相同通知最短间隔」（默认 5 秒）。只想不看某个标题：在卡片上点「屏蔽这个标题」，或在「不看这些标题」里添加。',
   ],
   [
     '验证码没有复制按钮',
@@ -398,6 +500,12 @@ export default {
     const mmsTitleQuery = ref('')
     const mmsSelected = ref(new Set())
     const filters = ref([])
+    const keywordDraft = ref('')
+    const appDraft = ref('')
+    const appQuery = ref('')
+    const titleQuery = ref('')
+    const pausedApps = ref([])
+    const appView = ref('grid')
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
@@ -406,6 +514,7 @@ export default {
     const status = ref(null)
     const webhookInfo = ref(null)
     const activeTab = ref('overview')
+    const showAdvanced = ref(false)
     let saveTimer = null
 
     const headerEnabled = computed(() => enabled.value !== false)
@@ -434,6 +543,166 @@ export default {
       mmsSelected.value = new Set()
     }
 
+    function looksLikePackage(s) {
+      const v = String(s || '')
+      return v.includes('.') && /[a-z]/i.test(v) && !/\s/.test(v)
+    }
+
+    const blockedAppRows = computed(() => {
+      const raw = textToBlacklist(blacklistText.value)
+      const names = []
+      const pkgs = []
+      for (const item of raw) {
+        if (looksLikePackage(item)) pkgs.push(item)
+        else names.push(item)
+      }
+      const usedPkg = new Set()
+      const rows = []
+      for (const name of names) {
+        const n = name.toLowerCase().replace(/\s+/g, '')
+        const pkg =
+          pkgs.find((p) => {
+            if (usedPkg.has(p)) return false
+            const last = p.split('.').pop() || ''
+            return last.toLowerCase() === n || p.toLowerCase().includes(n)
+          }) || ''
+        if (pkg) usedPkg.add(pkg)
+        const tokens = [name, pkg]
+        const paused = new Set(pausedApps.value.map((x) => String(x).toLowerCase()))
+        const on = !paused.has(name.toLowerCase()) && !(pkg && paused.has(pkg.toLowerCase()))
+        rows.push({ key: `app:${name}`, title: name, sub: pkg, tokens, on })
+      }
+      for (const pkg of pkgs) {
+        if (usedPkg.has(pkg)) continue
+        const on = !pausedApps.value.some((x) => String(x).toLowerCase() === pkg.toLowerCase())
+        rows.push({ key: `pkg:${pkg}`, title: pkg, sub: '', tokens: [pkg], on })
+      }
+      rows.sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
+      const q = appQuery.value.trim().toLowerCase()
+      if (!q) return rows
+      return rows.filter((r) => r.tokens.some((t) => String(t).toLowerCase().includes(q)))
+    })
+
+    const titleBlocks = computed(() => {
+      const out = []
+      for (const f of filters.value) {
+        if (!f || !f.value) continue
+        out.push({
+          kind: 'filter',
+          id: f.id,
+          title: String(f.value).trim(),
+          sub: String(f.appContains || '').trim(),
+        })
+      }
+      for (const t of mmsTitleBlacklist.value) {
+        const label = String(t || '').trim()
+        if (!label) continue
+        out.push({ kind: 'mms', id: `mms:${label}`, title: label, sub: '锁屏短信' })
+      }
+      out.sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
+      const q = titleQuery.value.trim().toLowerCase()
+      if (!q) return out
+      return out.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) || String(r.sub || '').toLowerCase().includes(q),
+      )
+    })
+
+    function addBlockedApp() {
+      const value = String(appDraft.value || '').trim()
+      if (!value) return
+      const list = textToBlacklist(blacklistText.value)
+      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
+        list.push(value)
+        blacklistText.value = sortBlacklist(list).join('\n')
+        scheduleSave()
+      }
+      appDraft.value = ''
+    }
+
+    function avatarHue(title) {
+      let hval = 0
+      const s = String(title || '')
+      for (let i = 0; i < s.length; i++) hval = (hval * 31 + s.charCodeAt(i)) >>> 0
+      return hval % 360
+    }
+
+    function toggleAppPaused(row) {
+      if (!row) return
+      const keys = [row.title, row.sub].filter(Boolean)
+      const paused = new Set(pausedApps.value.map((x) => String(x).toLowerCase()))
+      const isOn = row.on !== false
+      if (isOn) {
+        for (const k of keys) paused.add(String(k).toLowerCase())
+        const raw = textToBlacklist(blacklistText.value)
+        pausedApps.value = sortBlacklist(raw.filter((x) => paused.has(String(x).toLowerCase())))
+      } else {
+        for (const k of keys) paused.delete(String(k).toLowerCase())
+        pausedApps.value = sortBlacklist(
+          pausedApps.value.filter((x) => paused.has(String(x).toLowerCase())),
+        )
+      }
+      scheduleSave()
+    }
+
+    function removeBlockedApp(row) {
+      const drop = new Set(
+        [row && row.title, row && row.sub].filter(Boolean).map((x) => String(x).toLowerCase()),
+      )
+      const list = textToBlacklist(blacklistText.value).filter(
+        (x) => !drop.has(String(x).toLowerCase()),
+      )
+      blacklistText.value = list.join('\n')
+      scheduleSave()
+    }
+
+    function addKeywordFilter() {
+      const value = String(keywordDraft.value || '').trim()
+      if (!value) return
+      const dup = filters.value.some(
+        (f) =>
+          f &&
+          String(f.value || '').toLowerCase() === value.toLowerCase() &&
+          (f.match === 'contains' || f.match === 'equals'),
+      )
+      if (dup) {
+        keywordDraft.value = ''
+        return
+      }
+      if (filters.value.length >= MAX_FILTERS) return
+      filters.value = [
+        ...filters.value,
+        {
+          id: newFilterId(),
+          enabled: true,
+          field: 'any',
+          match: 'contains',
+          value,
+          appContains: '',
+        },
+      ]
+      keywordDraft.value = ''
+      scheduleSave()
+    }
+
+    function removeFilter(id) {
+      filters.value = filters.value.filter((f) => f && f.id !== id)
+      scheduleSave()
+    }
+
+    function removeTitleBlock(item) {
+      if (!item) return
+      if (item.kind === 'filter') {
+        removeFilter(item.id)
+        return
+      }
+      const label = String(item.title || item.label || '')
+      mmsTitleBlacklist.value = mmsTitleBlacklist.value.filter(
+        (t) => String(t).toLowerCase() !== label.toLowerCase(),
+      )
+      scheduleSave()
+    }
+
     function removeSelectedMmsTitles() {
       const sel = mmsSelected.value
       if (!sel.size) return
@@ -458,6 +727,7 @@ export default {
           DEFAULT_DEDUPE_SEC,
         ),
         appBlacklist: textToBlacklist(blacklistText.value),
+        appBlacklistPaused: sortBlacklist(pausedApps.value),
         mmsTitleBlacklist: sortBlacklist(
           Array.isArray(mmsTitleBlacklist.value) ? mmsTitleBlacklist.value : [],
         ),
@@ -484,6 +754,9 @@ export default {
         DEFAULT_DEDUPE_SEC,
       )
       blacklistText.value = blacklistToText(cfg.appBlacklist)
+      pausedApps.value = sortBlacklist(
+        Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
+      )
       mmsTitleBlacklist.value = sortBlacklist(
         Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
       )
@@ -747,6 +1020,9 @@ export default {
         // toast actions mutate; full applyConfig would stomp port/token drafts.
         const cfg = raw
         blacklistText.value = blacklistToText(cfg.appBlacklist)
+        pausedApps.value = sortBlacklist(
+          Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
+        )
         mmsTitleBlacklist.value = sortBlacklist(
           Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
         )
@@ -949,33 +1225,26 @@ export default {
       ])
 
       const settingsCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '连接配置')]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '端口'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(port.value),
-                'onUpdate:value': (v) => {
-                  port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
-                  scheduleSave()
-                },
-              }),
-            ]),
-            h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
+        h('div', { class: 'head' }, [h('h2', '连接')]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '电脑接收地址'),
+          h('div', { class: 'copy-row' }, [
+            h('pre', { class: 'mono' }, primaryUrl),
+            copyBtn('复制', primaryUrl, 'copy-url'),
           ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '路径'),
-            h(NInput, {
-              value: path.value,
-              placeholder: '/webhook',
-              'onUpdate:value': (v) => {
-                path.value = v
-                scheduleSave()
-              },
-            }),
-          ]),
+          urls.length > 1
+            ? h(
+                'div',
+                { class: 'url-list' },
+                urls.slice(1).map((u) =>
+                  h('div', { class: 'copy-row', key: u }, [
+                    h('pre', { class: 'mono' }, u),
+                    copyBtn('复制', u, `copy-url-${u}`),
+                  ]),
+                ),
+              )
+            : null,
+          h('p', { class: 'hint' }, '填到手机 SmsForwarder 的 Webhook。详细步骤见「教程」。'),
         ]),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, 'Token'),
@@ -1001,6 +1270,7 @@ export default {
               },
               { default: () => (showToken.value ? '隐藏' : '显示') },
             ),
+            copyBtn('复制', authHeader.replace(/^Authorization:\s*/i, ''), 'copy-token'),
             NPopconfirm
               ? h(
                   NPopconfirm,
@@ -1035,39 +1305,18 @@ export default {
           ]),
           h('p', { class: 'hint' }, 'SmsForwarder 请求头：Authorization: Bearer <token>'),
         ]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, 'Toast 停留'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(cardDurationSec.value),
-                'onUpdate:value': (v) => {
-                  cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'unit' }, '秒（0=常驻）'),
-            ]),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '去重窗口'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(dedupeWindowSec.value),
-                'onUpdate:value': (v) => {
-                  dedupeWindowSec.value = clamp(
-                    v,
-                    MIN_DEDUPE_SEC,
-                    MAX_DEDUPE_SEC,
-                    DEFAULT_DEDUPE_SEC,
-                  )
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'unit' }, '秒'),
-            ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '卡片显示多久'),
+          h('div', { class: 'row-inline' }, [
+            h(NInput, {
+              class: 'num',
+              value: String(cardDurationSec.value),
+              'onUpdate:value': (v) => {
+                cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
+                scheduleSave()
+              },
+            }),
+            h('span', { class: 'unit' }, '秒（0=不自动关掉）'),
           ]),
         ]),
         h('div', { class: 'actions' }, [
@@ -1084,314 +1333,291 @@ export default {
         ]),
       ])
 
-      const filterCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '过滤与推送')]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '仅电脑活跃时推送'),
-            h('div', { class: 'row-inline' }, [
-              h(NSwitch, {
-                value: onlyPushWhenActive.value,
-                'onUpdate:value': (v) => {
-                  onlyPushWhenActive.value = v === true
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'switch-pair' }, onlyPushWhenActive.value ? '已开启' : '已关闭'),
-            ]),
-            h(
-              'p',
-              { class: 'hint' },
-              '电脑空闲（无键鼠）时先暂存，回到活跃后再补推；不会丢通知。',
-            ),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '相同会话合并成气泡'),
-            h('div', { class: 'row-inline' }, [
-              h(NSwitch, {
-                value: mergeChatThreads.value,
-                'onUpdate:value': (v) => {
-                  mergeChatThreads.value = v !== false
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'switch-pair' }, mergeChatThreads.value ? '已开启' : '已关闭'),
-            ]),
-            h(
-              'p',
-              { class: 'hint' },
-              '聊天类通知合成可滚动对话小窗。历史按会话存在本机，不设过期；卡片只先画最近一屏，往上滚再加载更早的。',
-            ),
-            h(NInput, {
-              value: chatAppsText.value,
-              type: 'textarea',
-              rows: 3,
-              placeholder: 'QQ\n微信\ncom.tencent.mobileqq',
+      const advancedBody = [
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '离开电脑时先存着'),
+          h('div', { class: 'row-inline' }, [
+            h(NSwitch, {
+              value: onlyPushWhenActive.value,
               'onUpdate:value': (v) => {
-                chatAppsText.value = v
+                onlyPushWhenActive.value = v === true
                 scheduleSave()
               },
-              onBlur: () => {
-                chatAppsText.value = textToBlacklist(chatAppsText.value).join('\n')
-              },
             }),
-            h('p', { class: 'hint' }, '一行一个应用名或包名。命中的才走对话小窗；验证码仍单独弹短卡。'),
-            NPopconfirm
-              ? h(
-                  NPopconfirm,
-                  { onPositiveClick: clearChatHistory },
-                  {
-                    trigger: () =>
-                      h(
-                        NButton,
-                        {
-                          size: 'tiny',
-                          tertiary: true,
-                          loading: busy.value === 'clear-chat',
-                        },
-                        { default: () => '清空对话历史' },
-                      ),
-                    default: () => '清空本机保存的全部会话气泡？',
-                  },
-                )
-              : h(
-                  NButton,
-                  {
-                    size: 'tiny',
-                    tertiary: true,
-                    loading: busy.value === 'clear-chat',
-                    onClick: clearChatHistory,
-                  },
-                  { default: () => '清空对话历史' },
-                ),
+            h('span', { class: 'switch-pair' }, onlyPushWhenActive.value ? '已开启' : '已关闭'),
           ]),
+          h(
+            'p',
+            { class: 'hint' },
+            '电脑空闲（无键鼠）时先暂存，回到电脑前再补推。',
+          ),
         ]),
         h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名，自动排序）'),
+          h('div', { class: 'label' }, '聊天小窗'),
+          h('div', { class: 'row-inline' }, [
+            h(NSwitch, {
+              value: mergeChatThreads.value,
+              'onUpdate:value': (v) => {
+                mergeChatThreads.value = v !== false
+                scheduleSave()
+              },
+            }),
+            h('span', { class: 'switch-pair' }, mergeChatThreads.value ? '已开启' : '已关闭'),
+          ]),
+          h('p', { class: 'hint' }, 'QQ、微信等会合成对话小窗，历史保存在这台电脑。'),
           h(NInput, {
-            value: blacklistText.value,
+            value: chatAppsText.value,
             type: 'textarea',
-            rows: 4,
-            placeholder: 'com.example.ads\n某广告 App',
+            rows: 3,
+            placeholder: 'QQ\n微信',
             'onUpdate:value': (v) => {
-              blacklistText.value = v
+              chatAppsText.value = v
               scheduleSave()
             },
             onBlur: () => {
-              blacklistText.value = textToBlacklist(blacklistText.value).join('\n')
+              chatAppsText.value = textToBlacklist(chatAppsText.value).join('\n')
+            },
+          }),
+          h('p', { class: 'hint' }, '哪些应用走聊天小窗。一行一个名字，例如 QQ、微信。'),
+          NPopconfirm
+            ? h(
+                NPopconfirm,
+                { onPositiveClick: clearChatHistory },
+                {
+                  trigger: () =>
+                    h(
+                      NButton,
+                      {
+                        size: 'tiny',
+                        tertiary: true,
+                        loading: busy.value === 'clear-chat',
+                      },
+                      { default: () => '清空聊天记录' },
+                    ),
+                  default: () => '清空本机保存的全部会话气泡？',
+                },
+              )
+            : h(
+                NButton,
+                {
+                  size: 'tiny',
+                  tertiary: true,
+                  loading: busy.value === 'clear-chat',
+                  onClick: clearChatHistory,
+                },
+                { default: () => '清空聊天记录' },
+              ),
+        ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '相同通知最短间隔'),
+          h('div', { class: 'row-inline' }, [
+            h(NInput, {
+              class: 'num',
+              value: String(dedupeWindowSec.value),
+              'onUpdate:value': (v) => {
+                dedupeWindowSec.value = clamp(
+                  v,
+                  MIN_DEDUPE_SEC,
+                  MAX_DEDUPE_SEC,
+                  DEFAULT_DEDUPE_SEC,
+                )
+                scheduleSave()
+              },
+            }),
+            h('span', { class: 'unit' }, '秒（0=每次都弹）'),
+          ]),
+          h('p', { class: 'hint' }, '完全一样的通知，这么短时间内再来一次就不重复弹。'),
+        ]),
+        h('div', { class: 'row' }, [
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, '端口'),
+            h('div', { class: 'row-inline' }, [
+              h(NInput, {
+                class: 'num',
+                value: String(port.value),
+                'onUpdate:value': (v) => {
+                  port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
+                  scheduleSave()
+                },
+              }),
+            ]),
+            h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
+          ]),
+          h('div', { class: 'field' }, [
+            h('div', { class: 'label' }, '路径'),
+            h(NInput, {
+              value: path.value,
+              placeholder: '/webhook',
+              'onUpdate:value': (v) => {
+                path.value = v
+                scheduleSave()
+              },
+            }),
+          ]),
+        ]),
+      ]
+
+      const appPane = h('div', { class: 'pane' }, [
+        h('div', { class: 'pane-head' }, [
+          h('h3', { class: 'pane-title' }, [
+            '不看这些应用',
+            h('span', { class: 'count' }, `(${blockedAppRows.value.length})`),
+          ]),
+          h('div', { class: 'seg' }, [
+            h(
+              'button',
+              {
+                class: ['seg-btn', { 'is-on': appView.value === 'grid' }],
+                type: 'button',
+                onClick: () => {
+                  appView.value = 'grid'
+                },
+              },
+              '网格',
+            ),
+            h(
+              'button',
+              {
+                class: ['seg-btn', { 'is-on': appView.value === 'list' }],
+                type: 'button',
+                onClick: () => {
+                  appView.value = 'list'
+                },
+              },
+              '列表',
+            ),
+          ]),
+        ]),
+        h('div', { class: 'search-add' }, [
+          h(NInput, {
+            size: 'small',
+            value: appDraft.value || appQuery.value,
+            placeholder: '搜索或输入应用名/包名，按 Enter 添加…',
+            'onUpdate:value': (v) => {
+              appDraft.value = v
+              appQuery.value = v
+            },
+            onKeyup: (e) => {
+              if (e && e.key === 'Enter') addBlockedApp()
             },
           }),
           h(
-            'p',
-            { class: 'hint' },
-            '这里用于整应用屏蔽。只想拦某个群 / 某条标题，用下面的过滤器，或在卡片上点「屏蔽这个标题」。不会影响锁屏短信。',
+            NButton,
+            { size: 'small', type: 'primary', ghost: true, onClick: addBlockedApp },
+            { default: () => '添加' },
           ),
         ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'head' }, [
-            h('div', { class: 'label' }, '过滤器（命中则不弹）'),
-            h(
-              NButton,
-              {
-                size: 'small',
-                secondary: true,
-                disabled: filters.value.length >= MAX_FILTERS,
-                onClick: () => {
-                  if (filters.value.length >= MAX_FILTERS) return
-                  filters.value = [
-                    ...filters.value,
-                    {
-                      id: newFilterId(),
-                      enabled: true,
-                      field: 'title',
-                      match: 'contains',
-                      value: '',
-                      appContains: '',
-                    },
-                  ]
-                },
-              },
-              { default: () => '添加规则' },
-            ),
-          ]),
-          filters.value.length
-            ? h(
-                'div',
-                { class: 'filter-list' },
-                filters.value.map((f, idx) =>
-                  h('div', { class: ['filter-row', { 'is-off': f.enabled === false }], key: f.id }, [
-                    h('div', { class: 'filter-top' }, [
-                      h(NSwitch, {
-                        size: 'small',
-                        value: f.enabled !== false,
-                        'onUpdate:value': (v) => {
-                          const next = filters.value.slice()
-                          next[idx] = { ...next[idx], enabled: v === true }
-                          filters.value = next
-                          scheduleSave()
-                        },
-                      }),
-                      h('span', { class: 'switch-pair' }, f.enabled === false ? '已关闭' : '已开启'),
-                      h('div', { style: { flex: 1 } }),
-                      h(
-                        NButton,
-                        {
-                          size: 'tiny',
-                          type: 'error',
-                          tertiary: true,
-                          onClick: () => {
-                            filters.value = filters.value.filter((_, i) => i !== idx)
-                            scheduleSave()
-                          },
-                        },
-                        { default: () => '删除' },
-                      ),
-                    ]),
-                    h('div', { class: 'filter-fields' }, [
-                      h(NSelect, {
-                        value: f.field,
-                        options: FILTER_FIELD_OPTIONS,
-                        size: 'small',
-                        'onUpdate:value': (v) => {
-                          const next = filters.value.slice()
-                          next[idx] = { ...next[idx], field: FILTER_FIELDS.has(v) ? v : 'title' }
-                          filters.value = next
-                          scheduleSave()
-                        },
-                      }),
-                      h(NSelect, {
-                        value: f.match,
-                        options: FILTER_MATCH_OPTIONS,
-                        size: 'small',
-                        'onUpdate:value': (v) => {
-                          const next = filters.value.slice()
-                          next[idx] = {
-                            ...next[idx],
-                            match: FILTER_MATCHES.has(v) ? v : 'contains',
-                          }
-                          filters.value = next
-                          scheduleSave()
-                        },
-                      }),
-                    ]),
-                    h(NInput, {
-                      class: 'filter-value',
-                      size: 'small',
-                      value: f.value,
-                      placeholder:
-                        f.match === 'regex'
-                          ? '正则，例如 DSH Desktop.*交流群'
-                          : f.field === 'title'
-                            ? '例如：DSH Desktop 交流群'
-                            : '匹配内容',
-                      'onUpdate:value': (v) => {
-                        const next = filters.value.slice()
-                        next[idx] = { ...next[idx], value: v }
-                        filters.value = next
-                        scheduleSave()
-                      },
-                    }),
-                    h(NInput, {
-                      class: 'filter-app',
-                      size: 'small',
-                      value: f.appContains,
-                      placeholder: '限定应用（可选，如 QQ / com.tencent.mobileqq）',
-                      'onUpdate:value': (v) => {
-                        const next = filters.value.slice()
-                        next[idx] = { ...next[idx], appContains: v }
-                        filters.value = next
-                        scheduleSave()
-                      },
-                    }),
-                  ]),
-                ),
-              )
-            : h('p', { class: 'filter-empty' }, '暂无规则。可手动添加，或在 Toast 上点「屏蔽这个标题」。'),
-          h(
-            'p',
-            { class: 'hint' },
-            '标题默认用「包含」：QQ 群名后面的「(36条…)」也会命中。可选填限定应用，避免同名标题误伤别的 App。',
-          ),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '已屏蔽的通知标题'),
-          mmsTitleBlacklist.value.length
-            ? h('div', { class: 'mms-toolbar' }, [
-                h(NInput, {
-                  class: 'mms-search',
-                  value: mmsTitleQuery.value,
-                  size: 'small',
-                  clearable: true,
-                  placeholder: '查找标题',
-                  'onUpdate:value': (v) => {
-                    mmsTitleQuery.value = v
-                  },
-                }),
-                h(
-                  NButton,
-                  {
-                    size: 'small',
-                    secondary: true,
-                    disabled: !shownMmsTitles.value.length,
-                    onClick: selectAllShown,
-                  },
-                  { default: () => '全选当前' },
-                ),
-                h(
-                  NButton,
-                  {
-                    size: 'small',
-                    secondary: true,
-                    disabled: !mmsSelectedCount.value,
-                    onClick: clearMmsSelection,
-                  },
-                  { default: () => '取消选择' },
-                ),
-                mmsSelectedCount.value
-                  ? h(
-                      NButton,
-                      {
-                        size: 'small',
-                        type: 'error',
-                        secondary: true,
-                        onClick: removeSelectedMmsTitles,
-                      },
-                      { default: () => `删除选中 (${mmsSelectedCount.value})` },
-                    )
-                  : null,
-              ])
-            : null,
-          mmsTitleBlacklist.value.length
-            ? h(
-                'div',
-                { class: 'mms-tags' },
-                shownMmsTitles.value.map((t) =>
+        blockedAppRows.value.length
+          ? h(
+              'div',
+              { class: ['app-grid', { 'is-grid': appView.value === 'grid' }] },
+              blockedAppRows.value.map((row) => {
+                const hue = avatarHue(row.title)
+                const ch = String(row.title || '?').trim().slice(0, 1)
+                return h('div', { class: ['app-tile', { 'is-off': row.on === false }], key: row.key }, [
                   h(
-                    NTag,
+                    'div',
                     {
-                      key: t,
-                      size: 'small',
-                      round: true,
-                      bordered: false,
-                      type: mmsSelected.value.has(t) ? 'error' : 'warning',
-                      class: ['mms-tag', { 'is-selected': mmsSelected.value.has(t) }],
-                      onClick: () => toggleMmsTitle(t),
+                      class: 'app-avatar',
+                      style: { background: `hsl(${hue} 62% 52%)` },
                     },
-                    { default: () => t },
+                    ch,
                   ),
-                ).concat(
-                  shownMmsTitles.value.length === 0 && mmsTitleQuery.value.trim()
-                    ? [h('p', { class: 'mms-empty' }, '没有匹配的标题')]
-                    : [],
-                ),
-              )
-            : h('pre', { class: 'mono' }, '暂无。可在通知卡片上点击「屏蔽这个标题」。'),
+                  h('div', { class: 'app-meta' }, [
+                    h('div', { class: 'app-name', title: row.title }, row.title),
+                    row.sub ? h('div', { class: 'app-pkg', title: row.sub }, row.sub) : null,
+                  ]),
+                  h(NSwitch, {
+                    size: 'small',
+                    value: row.on !== false,
+                    'onUpdate:value': () => toggleAppPaused(row),
+                  }),
+                ])
+              }),
+            )
+          : h(
+              'p',
+              { class: 'filter-empty' },
+              appQuery.value.trim() ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。',
+            ),
+      ])
+
+      const titlePane = h('div', { class: 'pane' }, [
+        h('div', { class: 'pane-head' }, [
+          h('h3', { class: 'pane-title' }, [
+            '不看这些标题',
+            h('span', { class: 'count' }, `(${titleBlocks.value.length})`),
+          ]),
+          h('span', { class: 'pane-hint' }, '支持文本模糊或精准匹配'),
+        ]),
+        h('div', { class: 'search-add' }, [
+          h(NInput, {
+            size: 'small',
+            value: keywordDraft.value || titleQuery.value,
+            placeholder: '搜索或输入消息标题关键字，按 Enter 添加…',
+            'onUpdate:value': (v) => {
+              keywordDraft.value = v
+              titleQuery.value = v
+            },
+            onKeyup: (e) => {
+              if (e && e.key === 'Enter') addKeywordFilter()
+            },
+          }),
           h(
-            'p',
-            { class: 'hint' },
-            '在 Toast 上点「屏蔽这个标题」会记到这里；只拦标题完全相同的通知（多用于锁屏短信）。点标签可选中后批量删除。',
+            NButton,
+            {
+              size: 'small',
+              secondary: true,
+              disabled: filters.value.length >= MAX_FILTERS,
+              onClick: addKeywordFilter,
+            },
+            { default: () => '添加' },
           ),
         ]),
+        titleBlocks.value.length
+          ? h(
+              'div',
+              { class: 'title-chips' },
+              titleBlocks.value.map((item) =>
+                h('div', { class: 'title-chip', key: item.id }, [
+                  h('span', { class: 'hash' }, '#'),
+                  h('span', item.title),
+                  item.sub === '锁屏短信' ? h('span', { class: 'badge' }, '锁屏短信') : null,
+                  h('span', { class: 'dot' }),
+                  h(
+                    'button',
+                    {
+                      class: 'x',
+                      type: 'button',
+                      onClick: () => removeTitleBlock(item),
+                    },
+                    '×',
+                  ),
+                ]),
+              ),
+            )
+          : h(
+              'p',
+              { class: 'filter-empty' },
+              titleQuery.value.trim() ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。',
+            ),
+      ])
+
+      const filterCard = h('div', { class: 'block-split' }, [appPane, titlePane])
+
+      const advancedCard = h('div', { class: 'card' }, [
+        h(
+          'button',
+          {
+            class: 'adv-toggle',
+            type: 'button',
+            onClick: () => {
+              showAdvanced.value = !showAdvanced.value
+            },
+          },
+          showAdvanced.value ? '收起高级 ▴' : '高级 ▾',
+        ),
+        showAdvanced.value ? h('div', { class: 'adv-body' }, advancedBody) : null,
       ])
 
       const urlRows = urls.length ? urls : [primaryUrl]
@@ -1549,7 +1775,7 @@ export default {
 
       let panel
       if (activeTab.value === 'settings') {
-        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard])
+        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard, advancedCard])
       } else if (activeTab.value === 'tutorial') {
         panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, faqCard])
       } else {

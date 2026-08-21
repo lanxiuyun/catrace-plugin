@@ -33,11 +33,19 @@ function startActivityPoller() {
 }
 
 function pickOtp(text) {
+  const s = String(text || '')
+  if (
+    !/验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP|verification\s*code|security\s*code/i.test(
+      s,
+    )
+  ) {
+    return ''
+  }
   const near =
-    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|OTP|code)[^\d]{0,12}(\d(?:[\s-]?\d){3,7})/i
-  const m = near.exec(text)
+    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|OTP)[^\d]{0,12}(\d(?:[\s-]?\d){3,7})/i
+  const m = near.exec(s)
   if (m) return m[1].replace(/\D/g, '')
-  const all = text.match(/(?<!\d)\d{4,8}(?!\d)/g) || []
+  const all = s.match(/(?<!\d)\d{4,8}(?!\d)/g) || []
   return all.find((x) => x.length === 6) || all[0] || ''
 }
 
