@@ -41,6 +41,24 @@ const CSS = `
   background: #fff;
   display: flex; flex-direction: column; gap: 0.75rem;
 }
+.sf-settings .card.is-error {
+  border-color: #fecaca;
+  background: #fff5f5;
+  border-left: 0.25rem solid #ef4444;
+  box-shadow: 0 0.125rem 0.5rem rgba(220, 38, 38, 0.08);
+}
+.sf-settings .card.is-error h2 { color: #991b1b; display: inline-flex; align-items: center; gap: 0.375rem; }
+.sf-settings .card.is-error h2::before {
+  content: '!';
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.125rem; height: 1.125rem; border-radius: 999px;
+  background: #dc2626; color: #fff;
+  font-size: 0.6875rem; font-weight: 800; line-height: 1;
+}
+.sf-settings .status.is-error {
+  background: #fff;
+  border: 0.0625rem solid #fecaca;
+}
 .sf-settings .head {
   display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
 }
@@ -66,7 +84,12 @@ const CSS = `
   padding: 0.625rem 0.75rem; border-radius: 0.5rem; background: #f0fdfa;
   font-size: 0.75rem; color: #424a53;
 }
+.sf-settings .status.is-error {
+  background: #fef2f2; color: #7f1d1d;
+}
 .sf-settings .status strong { color: #0d9488; font-weight: 650; }
+.sf-settings .status.is-error strong { color: #dc2626; }
+.sf-settings .status.is-error span { color: #991b1b; }
 .sf-settings .switch-pair {
   display: inline-flex; align-items: center; gap: 0.5rem;
   font-size: 0.8125rem; color: #424a53; font-weight: 500;
@@ -181,7 +204,7 @@ const CSS = `
   grid-template-columns: 1fr;
 }
 @media (min-width: 56rem) {
-  .sf-settings .block-split { grid-template-columns: 1fr 1fr; align-items: start; }
+  .sf-settings .block-split { grid-template-columns: 1fr 1fr; align-items: stretch; }
 }
 .sf-settings .pane {
   padding: 1rem 1.125rem;
@@ -189,7 +212,13 @@ const CSS = `
   border-radius: 1rem;
   background: #fff;
   display: flex; flex-direction: column; gap: 0.75rem; min-width: 0;
+  max-height: 22rem; overflow: hidden;
 }
+.sf-settings .pane-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-right: 0.25rem; margin-right: -0.25rem;
+}
+.sf-settings .pane-body:empty { display: none; }
 .sf-settings .pane-head {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
 }
@@ -214,11 +243,7 @@ const CSS = `
 }
 .sf-settings .search-add .n-input { flex: 1; min-width: 0; }
 .sf-settings .app-grid {
-  display: grid; gap: 0.625rem;
-  grid-template-columns: 1fr;
-}
-.sf-settings .app-grid.is-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex; flex-direction: column; gap: 0.625rem;
 }
 .sf-settings .app-tile {
   display: flex; align-items: center; gap: 0.625rem;
@@ -241,6 +266,17 @@ const CSS = `
   font-size: 0.6875rem; color: #94a3b8;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.sf-settings .app-tile .x {
+  border: 0; background: transparent; cursor: pointer; color: #94a3b8;
+  padding: 0; font-size: 0.875rem; line-height: 1;
+  width: 1.125rem; height: 1.125rem; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sf-settings .app-tile .x:hover {
+  background: #fee2e2; color: #b91c1c;
+}
+.sf-settings .app-tile .x:active { background: #fecaca; }
 .sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .sf-settings .title-chip {
   display: inline-flex; align-items: center; gap: 0.375rem;
@@ -248,19 +284,22 @@ const CSS = `
   background: #fff7ed; border: 0.0625rem solid #fed7aa;
   color: #9a3412; font-size: 0.8125rem; font-weight: 650;
 }
-.sf-settings .title-chip .hash { color: #f59e0b; font-weight: 800; }
 .sf-settings .title-chip .badge {
   font-size: 0.625rem; font-weight: 700; color: #c2410c;
   background: #fff; border: 0.0625rem solid #fdba74;
   border-radius: 0.375rem; padding: 0.0625rem 0.3125rem;
 }
-.sf-settings .title-chip .dot {
-  width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #f59e0b;
-}
 .sf-settings .title-chip .x {
   border: 0; background: transparent; cursor: pointer; color: #c2410c;
   padding: 0; font-size: 0.875rem; line-height: 1;
+  width: 1.125rem; height: 1.125rem; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
 }
+.sf-settings .title-chip .x:hover {
+  background: #fdba74; color: #7c2d12;
+}
+.sf-settings .title-chip .x:active { background: #fb923c; }
 .sf-settings .adv-toggle {
   border: 0; background: transparent; cursor: pointer;
   padding: 0; text-align: left;
@@ -268,9 +307,33 @@ const CSS = `
   display: inline-flex; align-items: center; gap: 0.375rem;
 }
 .sf-settings .adv-toggle:hover { color: #0f766e; }
+.sf-settings .adv-chevron {
+  display: inline-block; font-size: 0.6875rem; line-height: 1;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center;
+}
+.sf-settings .adv-toggle[aria-expanded="true"] .adv-chevron { transform: rotate(180deg); }
+.sf-settings .advanced-card { gap: 0; }
+.sf-settings .adv-collapse {
+  display: grid; grid-template-rows: 0fr;
+  margin-top: 0; opacity: 0;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    margin-top 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
+}
+.sf-settings .adv-collapse.open {
+  grid-template-rows: 1fr;
+  margin-top: 0.75rem; opacity: 1;
+}
+.sf-settings .adv-collapse-inner { min-height: 0; overflow: hidden; }
 .sf-settings .adv-body {
   display: flex; flex-direction: column; gap: 0.75rem;
   padding-top: 0.25rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-settings .adv-chevron,
+  .sf-settings .adv-collapse { transition: none; }
 }
 `
 
@@ -505,7 +568,6 @@ export default {
     const appQuery = ref('')
     const titleQuery = ref('')
     const pausedApps = ref([])
-    const appView = ref('grid')
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
@@ -653,6 +715,9 @@ export default {
         (x) => !drop.has(String(x).toLowerCase()),
       )
       blacklistText.value = list.join('\n')
+      pausedApps.value = sortBlacklist(
+        pausedApps.value.filter((x) => !drop.has(String(x).toLowerCase())),
+      )
       scheduleSave()
     }
 
@@ -1176,13 +1241,13 @@ export default {
         ),
       ])
 
-      const overviewCard = h('div', { class: 'card' }, [
+      const overviewCard = h('div', { class: ['card', { 'is-error': !!st.error }] }, [
         h('div', { class: 'head' }, [h('h2', '服务状态')]),
         loading.value
           ? h('p', { class: 'desc' }, '加载中…')
           : h(
               'div',
-              { class: 'status' },
+              { class: ['status', { 'is-error': !!st.error }] },
               statusRows.flatMap(([k, v]) => [h('strong', k), h('span', String(v))]),
             ),
         h('div', { class: 'actions' }, [
@@ -1335,7 +1400,7 @@ export default {
 
       const advancedBody = [
         h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '离开电脑时先存着'),
+          h('div', { class: 'label' }, '活跃时推送'),
           h('div', { class: 'row-inline' }, [
             h(NSwitch, {
               value: onlyPushWhenActive.value,
@@ -1349,7 +1414,7 @@ export default {
           h(
             'p',
             { class: 'hint' },
-            '电脑空闲（无键鼠）时先暂存，回到电脑前再补推。',
+            '只在电脑活跃（有键鼠）时推送；空闲时暂存，恢复活跃后补推。',
           ),
         ]),
         h('div', { class: 'field' }, [
@@ -1463,30 +1528,6 @@ export default {
             '不看这些应用',
             h('span', { class: 'count' }, `(${blockedAppRows.value.length})`),
           ]),
-          h('div', { class: 'seg' }, [
-            h(
-              'button',
-              {
-                class: ['seg-btn', { 'is-on': appView.value === 'grid' }],
-                type: 'button',
-                onClick: () => {
-                  appView.value = 'grid'
-                },
-              },
-              '网格',
-            ),
-            h(
-              'button',
-              {
-                class: ['seg-btn', { 'is-on': appView.value === 'list' }],
-                type: 'button',
-                onClick: () => {
-                  appView.value = 'list'
-                },
-              },
-              '列表',
-            ),
-          ]),
         ]),
         h('div', { class: 'search-add' }, [
           h(NInput, {
@@ -1507,39 +1548,53 @@ export default {
             { default: () => '添加' },
           ),
         ]),
-        blockedAppRows.value.length
-          ? h(
-              'div',
-              { class: ['app-grid', { 'is-grid': appView.value === 'grid' }] },
-              blockedAppRows.value.map((row) => {
-                const hue = avatarHue(row.title)
-                const ch = String(row.title || '?').trim().slice(0, 1)
-                return h('div', { class: ['app-tile', { 'is-off': row.on === false }], key: row.key }, [
-                  h(
-                    'div',
-                    {
-                      class: 'app-avatar',
-                      style: { background: `hsl(${hue} 62% 52%)` },
-                    },
-                    ch,
-                  ),
-                  h('div', { class: 'app-meta' }, [
-                    h('div', { class: 'app-name', title: row.title }, row.title),
-                    row.sub ? h('div', { class: 'app-pkg', title: row.sub }, row.sub) : null,
-                  ]),
-                  h(NSwitch, {
-                    size: 'small',
-                    value: row.on !== false,
-                    'onUpdate:value': () => toggleAppPaused(row),
-                  }),
-                ])
-              }),
-            )
-          : h(
-              'p',
-              { class: 'filter-empty' },
-              appQuery.value.trim() ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。',
-            ),
+        h(
+          'div',
+          { class: 'pane-body' },
+          blockedAppRows.value.length
+            ? h(
+                'div',
+                { class: 'app-grid' },
+                blockedAppRows.value.map((row) => {
+                  const hue = avatarHue(row.title)
+                  const ch = String(row.title || '?').trim().slice(0, 1)
+                  return h('div', { class: ['app-tile', { 'is-off': row.on === false }], key: row.key }, [
+                    h(
+                      'div',
+                      {
+                        class: 'app-avatar',
+                        style: { background: `hsl(${hue} 62% 52%)` },
+                      },
+                      ch,
+                    ),
+                    h('div', { class: 'app-meta' }, [
+                      h('div', { class: 'app-name', title: row.title }, row.title),
+                      row.sub ? h('div', { class: 'app-pkg', title: row.sub }, row.sub) : null,
+                    ]),
+                    h(NSwitch, {
+                      size: 'small',
+                      value: row.on !== false,
+                      'onUpdate:value': () => toggleAppPaused(row),
+                    }),
+                    h(
+                      'button',
+                      {
+                        class: 'x',
+                        type: 'button',
+                        title: '删除',
+                        onClick: () => removeBlockedApp(row),
+                      },
+                      '×',
+                    ),
+                  ])
+                }),
+              )
+            : h(
+                'p',
+                { class: 'filter-empty' },
+                appQuery.value.trim() ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。',
+              ),
+        ),
       ])
 
       const titlePane = h('div', { class: 'pane' }, [
@@ -1574,50 +1629,66 @@ export default {
             { default: () => '添加' },
           ),
         ]),
-        titleBlocks.value.length
-          ? h(
-              'div',
-              { class: 'title-chips' },
-              titleBlocks.value.map((item) =>
-                h('div', { class: 'title-chip', key: item.id }, [
-                  h('span', { class: 'hash' }, '#'),
-                  h('span', item.title),
-                  item.sub === '锁屏短信' ? h('span', { class: 'badge' }, '锁屏短信') : null,
-                  h('span', { class: 'dot' }),
-                  h(
-                    'button',
-                    {
-                      class: 'x',
-                      type: 'button',
-                      onClick: () => removeTitleBlock(item),
-                    },
-                    '×',
-                  ),
-                ]),
+        h(
+          'div',
+          { class: 'pane-body' },
+          titleBlocks.value.length
+            ? h(
+                'div',
+                { class: 'title-chips' },
+                titleBlocks.value.map((item) =>
+                  h('div', { class: 'title-chip', key: item.id }, [
+                    h('span', item.title),
+                    item.sub === '锁屏短信' ? h('span', { class: 'badge' }, '锁屏短信') : null,
+                    h(
+                      'button',
+                      {
+                        class: 'x',
+                        type: 'button',
+                        onClick: () => removeTitleBlock(item),
+                      },
+                      '×',
+                    ),
+                  ]),
+                ),
+              )
+            : h(
+                'p',
+                { class: 'filter-empty' },
+                titleQuery.value.trim() ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。',
               ),
-            )
-          : h(
-              'p',
-              { class: 'filter-empty' },
-              titleQuery.value.trim() ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。',
-            ),
+        ),
       ])
 
       const filterCard = h('div', { class: 'block-split' }, [appPane, titlePane])
 
-      const advancedCard = h('div', { class: 'card' }, [
+      const advancedCard = h('div', { class: 'card advanced-card' }, [
         h(
           'button',
           {
             class: 'adv-toggle',
             type: 'button',
+            'aria-expanded': String(showAdvanced.value),
+            'aria-controls': 'smsforwarder-advanced-settings',
             onClick: () => {
               showAdvanced.value = !showAdvanced.value
             },
           },
-          showAdvanced.value ? '收起高级 ▴' : '高级 ▾',
+          [
+            '高级',
+            h('span', { class: 'adv-chevron', 'aria-hidden': 'true' }, '▾'),
+          ],
         ),
-        showAdvanced.value ? h('div', { class: 'adv-body' }, advancedBody) : null,
+        h(
+          'div',
+          {
+            id: 'smsforwarder-advanced-settings',
+            class: ['adv-collapse', { open: showAdvanced.value }],
+            'aria-hidden': String(!showAdvanced.value),
+            inert: !showAdvanced.value,
+          },
+          [h('div', { class: 'adv-collapse-inner' }, [h('div', { class: 'adv-body' }, advancedBody)])],
+        ),
       ])
 
       const urlRows = urls.length ? urls : [primaryUrl]
