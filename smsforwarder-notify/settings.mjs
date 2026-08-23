@@ -2,12 +2,12 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, computed, onMounted, onBeforeUnmount } = vue
-const { NButton, NInput, NSwitch, NTag, NPopconfirm, useMessage } = naive
+const { NButton, NInput, NSwitch, NTag, NPopconfirm, NSelect, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
-if (!NButton || !NInput || !NSwitch || !NTag || !useMessage) {
+if (!NButton || !NInput || !NSwitch || !NTag || !NSelect || !useMessage) {
   throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
 }
 if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v7'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v11'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -180,6 +180,124 @@ const CSS = `
 .sf-settings .kw-add { display: flex; gap: 0.5rem; align-items: center; }
 .sf-settings .kw-add .n-input { flex: 1; min-width: 0; }
 .sf-settings .filter-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
+.sf-settings .adv-section-title {
+  margin: 0.25rem 0 0; font-size: 0.875rem; font-weight: 750; color: #134e4a;
+}
+.sf-settings .adv-grid-2,
+.sf-settings .adv-grid-3 {
+  display: grid; gap: 0.75rem; grid-template-columns: 1fr;
+}
+@media (min-width: 48rem) {
+  .sf-settings .adv-grid-2 { grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .sf-settings .adv-grid-3 { grid-template-columns: 1fr 1fr 1fr; align-items: stretch; }
+}
+.sf-settings .adv-tile {
+  padding: 1rem;
+  border: 0.0625rem solid #ccfbf1; border-radius: 1rem;
+  background: #fff; min-width: 0;
+  display: flex; flex-direction: column; gap: 0.625rem;
+}
+.sf-settings .adv-tile-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+}
+.sf-settings .adv-tile-title { margin: 0; font-size: 0.875rem; font-weight: 750; color: #134e4a; }
+.sf-settings .adv-tile-desc { margin: 0; font-size: 0.75rem; line-height: 1.55; color: #5b6b6a; }
+.sf-settings .adv-chip-box {
+  min-height: 5.5rem;
+  padding: 0.625rem;
+  border: 0.0625rem dashed #99f6e4; border-radius: 0.75rem;
+  background: #f8fffd;
+  display: flex; flex-wrap: wrap; gap: 0.375rem; align-content: flex-start;
+}
+.sf-settings .adv-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.25rem 0.5rem; border-radius: 999px;
+  background: #eef2ff; color: #4338ca; font-size: 0.75rem; font-weight: 650;
+}
+.sf-settings .adv-chip button {
+  border: 0; background: transparent; cursor: pointer; color: #6366f1;
+  padding: 0; line-height: 1; font-size: 0.875rem;
+}
+.sf-settings .adv-chip button:hover { color: #b91c1c; }
+.sf-settings .adv-chip-input { flex: 1 1 8rem; min-width: 8rem; }
+.sf-settings .adv-tile-foot {
+  margin-top: auto; padding-top: 0.5rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+  font-size: 0.6875rem; color: #8b949e;
+}
+.sf-settings .adv-status-dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #14b8a6; display: inline-block;
+}
+.sf-settings .adv-link {
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+  color: #dc2626; font-size: 0.75rem; font-weight: 650;
+}
+.sf-settings .adv-link:hover { color: #b91c1c; }
+.sf-settings .adv-metric { display: flex; align-items: center; gap: 0.5rem; }
+.sf-settings .adv-metric .n-input { flex: 1; min-width: 0; }
+.sf-settings .filter-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+}
+.sf-settings .filter-composer {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 0.0625rem solid #c4b5fd; border-radius: 1rem;
+  background: #faf5ff;
+}
+.sf-settings .filter-composer-title { margin: 0; font-size: 0.8125rem; font-weight: 750; color: #6d28d9; }
+.sf-settings .filter-form {
+  display: grid; gap: 0.5rem 0.75rem;
+  grid-template-columns: 1fr;
+}
+.sf-settings .filter-form > .field { min-width: 0; }
+@media (min-width: 40rem) {
+  .sf-settings .filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 72rem) {
+  .sf-settings .filter-form { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+.sf-settings .filter-form .label { font-size: 0.6875rem; }
+.sf-settings .filter-add {
+  display: flex; justify-content: flex-end;
+}
+.sf-settings .filter-list-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+  font-size: 0.75rem; color: #5b6b6a;
+}
+.sf-settings .filter-list {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  max-height: 16rem; overflow-y: auto;
+}
+.sf-settings .filter-item {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border: 0.0625rem solid #e2e8f0; border-radius: 0.75rem; background: #fff;
+}
+.sf-settings .filter-item.is-off { opacity: 0.55; }
+.sf-settings .filter-item.is-warn { border-color: #fde68a; background: #fffbeb; }
+.sf-settings .filter-tags { display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap; min-width: 0; flex: 1; }
+.sf-settings .filter-tag {
+  display: inline-flex; align-items: center;
+  padding: 0.125rem 0.5rem; border-radius: 999px;
+  font-size: 0.6875rem; font-weight: 700;
+}
+.sf-settings .filter-tag.is-hide { background: #ffe4e6; color: #be123c; }
+.sf-settings .filter-tag.is-muted { background: #f1f5f9; color: #475569; }
+.sf-settings .filter-tag.is-match { background: #ede9fe; color: #6d28d9; }
+.sf-settings .filter-quote {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem; color: #0f172a; background: #f8fafc;
+  padding: 0.125rem 0.375rem; border-radius: 0.375rem;
+}
+.sf-settings .filter-scope { font-size: 0.6875rem; color: #64748b; }
+.sf-settings .filter-warn { margin: 0; width: 100%; font-size: 0.6875rem; color: #b45309; }
+.sf-settings .filter-x {
+  border: 0; background: transparent; cursor: pointer; color: #94a3b8;
+  padding: 0; font-size: 0.875rem; line-height: 1;
+  width: 1.125rem; height: 1.125rem; border-radius: 999px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sf-settings .filter-x:hover { background: #fee2e2; color: #b91c1c; }
 .sf-settings .block-box {
   border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem; overflow: hidden; background: #fff;
 }
@@ -242,64 +360,48 @@ const CSS = `
   display: flex; align-items: center; gap: 0.5rem;
 }
 .sf-settings .search-add .n-input { flex: 1; min-width: 0; }
-.sf-settings .app-grid {
-  display: flex; flex-direction: column; gap: 0.625rem;
-}
-.sf-settings .app-tile {
-  display: flex; align-items: center; gap: 0.625rem;
-  padding: 0.75rem;
-  border: 0.0625rem solid #e2e8f0; border-radius: 0.875rem;
-  background: #fff; min-width: 0;
-}
-.sf-settings .app-tile.is-off { opacity: 0.55; }
-.sf-settings .app-avatar {
-  flex: 0 0 auto; width: 2.25rem; height: 2.25rem; border-radius: 0.75rem;
-  color: #fff; font-weight: 800; font-size: 0.875rem;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.sf-settings .app-meta { min-width: 0; flex: 1; }
-.sf-settings .app-name {
-  font-size: 0.8125rem; font-weight: 700; color: #0f172a;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sf-settings .app-pkg {
-  font-size: 0.6875rem; color: #94a3b8;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sf-settings .app-tile .x {
-  border: 0; background: transparent; cursor: pointer; color: #94a3b8;
-  padding: 0; font-size: 0.875rem; line-height: 1;
-  width: 1.125rem; height: 1.125rem; border-radius: 999px;
-  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.sf-settings .app-tile .x:hover {
-  background: #fee2e2; color: #b91c1c;
-}
-.sf-settings .app-tile .x:active { background: #fecaca; }
-.sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
 .sf-settings .title-chip {
-  display: inline-flex; align-items: center; gap: 0.375rem;
-  padding: 0.5rem 0.75rem; border-radius: 0.75rem;
-  background: #fff7ed; border: 0.0625rem solid #fed7aa;
-  color: #9a3412; font-size: 0.8125rem; font-weight: 650;
+  display: inline-flex; align-items: flex-start; gap: 0.375rem;
+  padding: 0.4375rem 0.625rem 0.4375rem 0.75rem; border-radius: 999px;
+  background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+  border: 0.0625rem solid #fecdd3;
+  color: #9f1239; font-size: 0.8125rem; font-weight: 650;
+  max-width: 100%; box-shadow: 0 0.0625rem 0.125rem rgba(159, 18, 57, 0.08);
+}
+.sf-settings .title-chip .chip-text {
+  min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.4;
+}
+.sf-settings .title-chip.is-pkg {
+  background: linear-gradient(180deg, #ecfeff 0%, #cffafe 100%);
+  border-color: #67e8f9; color: #155e75;
+  box-shadow: 0 0.0625rem 0.125rem rgba(14, 116, 144, 0.08);
+}
+.sf-settings .title-chip.is-pkg .chip-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem; font-weight: 650;
 }
 .sf-settings .title-chip .badge {
-  font-size: 0.625rem; font-weight: 700; color: #c2410c;
-  background: #fff; border: 0.0625rem solid #fdba74;
+  font-size: 0.625rem; font-weight: 700; color: #9f1239;
+  background: #fff; border: 0.0625rem solid #fecdd3;
   border-radius: 0.375rem; padding: 0.0625rem 0.3125rem;
 }
 .sf-settings .title-chip .x {
-  border: 0; background: transparent; cursor: pointer; color: #c2410c;
+  border: 0; background: transparent; cursor: pointer; color: #be123c;
   padding: 0; font-size: 0.875rem; line-height: 1;
   width: 1.125rem; height: 1.125rem; border-radius: 999px;
   display: inline-flex; align-items: center; justify-content: center;
   transition: background 0.15s ease, color 0.15s ease;
 }
+.sf-settings .title-chip.is-pkg .x { color: #0e7490; }
 .sf-settings .title-chip .x:hover {
-  background: #fdba74; color: #7c2d12;
+  background: #fecdd3; color: #881337;
 }
-.sf-settings .title-chip .x:active { background: #fb923c; }
+.sf-settings .title-chip.is-pkg .x:hover {
+  background: #a5f3fc; color: #155e75;
+}
+.sf-settings .title-chip .x:active { background: #fda4af; }
+.sf-settings .title-chip.is-pkg .x:active { background: #67e8f9; }
 .sf-settings .adv-toggle {
   border: 0; background: transparent; cursor: pointer;
   padding: 0; text-align: left;
@@ -346,6 +448,10 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-settings-css-v4',
     'catrace-plugin-smsforwarder-notify-settings-css-v5',
     'catrace-plugin-smsforwarder-notify-settings-css-v6',
+    'catrace-plugin-smsforwarder-notify-settings-css-v7',
+    'catrace-plugin-smsforwarder-notify-settings-css-v8',
+    'catrace-plugin-smsforwarder-notify-settings-css-v9',
+    'catrace-plugin-smsforwarder-notify-settings-css-v10',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -433,8 +539,24 @@ const TABS = [
 ]
 
 const MAX_FILTERS = 50
-const FILTER_FIELDS = new Set(['title', 'body', 'app', 'package', 'any'])
-const FILTER_MATCHES = new Set(['contains', 'equals', 'startsWith', 'regex'])
+const FILTER_ACTION_OPTIONS = [
+  { label: '不看（屏蔽）', value: 'hide' },
+]
+const FILTER_FIELD_OPTIONS = [
+  { label: '标题', value: 'title' },
+  { label: '正文', value: 'body' },
+  { label: '应用名', value: 'app' },
+  { label: '包名', value: 'package' },
+  { label: '任意位置', value: 'any' },
+]
+const FILTER_MATCH_OPTIONS = [
+  { label: '包含文本', value: 'contains' },
+  { label: '完全等于', value: 'equals' },
+  { label: '开头是', value: 'startsWith' },
+  { label: '正则匹配', value: 'regex' },
+]
+const FILTER_FIELDS = new Set(FILTER_FIELD_OPTIONS.map((o) => o.value))
+const FILTER_MATCHES = new Set(FILTER_MATCH_OPTIONS.map((o) => o.value))
 
 function newFilterId() {
   return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -481,6 +603,37 @@ function filterTagLabel(f) {
   const app = String(f && f.appContains ? f.appContains : '').trim()
   if (app) return `${value} · ${app}`
   return value
+}
+
+function optionLabel(options, value, fallback) {
+  const hit = options.find((o) => o.value === value)
+  return hit ? hit.label : fallback
+}
+
+function filterPreview(f) {
+  const value = String(f && f.value ? f.value : '').trim()
+  const app = String(f && f.appContains ? f.appContains : '').trim()
+  const field = optionLabel(FILTER_FIELD_OPTIONS, f && f.field, '标题')
+  const match = optionLabel(FILTER_MATCH_OPTIONS, f && f.match, '包含文本')
+  const core = `不看 ${field} ${match}「${value || '…'}」`
+  return app ? `${core}（仅限 ${app}）` : core
+}
+
+function filterRegexError(match, value) {
+  if (match !== 'regex') return ''
+  const v = String(value || '').trim()
+  if (!v) return ''
+  try {
+    void new RegExp(v, 'i')
+    return ''
+  } catch {
+    return '正则无效，这条不会生效'
+  }
+}
+
+function filterIssue(f) {
+  if (!String(f && f.value ? f.value : '').trim()) return '还没填内容，这条不会生效'
+  return filterRegexError(f && f.match, f && f.value)
 }
 
 const DOWNLOAD_LINKS = [
@@ -564,6 +717,12 @@ export default {
     const mmsSelected = ref(new Set())
     const filters = ref([])
     const keywordDraft = ref('')
+    const filterDraft = ref({
+      field: 'title',
+      match: 'contains',
+      value: '',
+      appContains: '',
+    })
     const appDraft = ref('')
     const appQuery = ref('')
     const titleQuery = ref('')
@@ -573,6 +732,7 @@ export default {
     const onlyPushWhenActive = ref(false)
     const mergeChatThreads = ref(true)
     const chatAppsText = ref(blacklistToText(DEFAULT_CONFIG.chatApps))
+    const chatAppDraft = ref('')
     const status = ref(null)
     const webhookInfo = ref(null)
     const activeTab = ref('overview')
@@ -605,44 +765,19 @@ export default {
       mmsSelected.value = new Set()
     }
 
-    function looksLikePackage(s) {
-      const v = String(s || '')
-      return v.includes('.') && /[a-z]/i.test(v) && !/\s/.test(v)
-    }
-
     const blockedAppRows = computed(() => {
-      const raw = textToBlacklist(blacklistText.value)
-      const names = []
-      const pkgs = []
-      for (const item of raw) {
-        if (looksLikePackage(item)) pkgs.push(item)
-        else names.push(item)
-      }
-      const usedPkg = new Set()
-      const rows = []
-      for (const name of names) {
-        const n = name.toLowerCase().replace(/\s+/g, '')
-        const pkg =
-          pkgs.find((p) => {
-            if (usedPkg.has(p)) return false
-            const last = p.split('.').pop() || ''
-            return last.toLowerCase() === n || p.toLowerCase().includes(n)
-          }) || ''
-        if (pkg) usedPkg.add(pkg)
-        const tokens = [name, pkg]
-        const paused = new Set(pausedApps.value.map((x) => String(x).toLowerCase()))
-        const on = !paused.has(name.toLowerCase()) && !(pkg && paused.has(pkg.toLowerCase()))
-        rows.push({ key: `app:${name}`, title: name, sub: pkg, tokens, on })
-      }
-      for (const pkg of pkgs) {
-        if (usedPkg.has(pkg)) continue
-        const on = !pausedApps.value.some((x) => String(x).toLowerCase() === pkg.toLowerCase())
-        rows.push({ key: `pkg:${pkg}`, title: pkg, sub: '', tokens: [pkg], on })
-      }
-      rows.sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
       const q = appQuery.value.trim().toLowerCase()
-      if (!q) return rows
-      return rows.filter((r) => r.tokens.some((t) => String(t).toLowerCase().includes(q)))
+      return textToBlacklist(blacklistText.value)
+        .map((item) => {
+          const label = String(item || '').trim()
+          return {
+            key: `app:${label.toLowerCase()}`,
+            title: label,
+            tokens: [label],
+          }
+        })
+        .filter((row) => !q || row.title.toLowerCase().includes(q))
+        .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
     })
 
     const titleBlocks = computed(() => {
@@ -670,6 +805,26 @@ export default {
       )
     })
 
+    function addChatApp() {
+      const value = String(chatAppDraft.value || '').trim()
+      if (!value) return
+      const list = textToBlacklist(chatAppsText.value)
+      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
+        list.push(value)
+        chatAppsText.value = sortBlacklist(list).join('\n')
+        scheduleSave()
+      }
+      chatAppDraft.value = ''
+    }
+
+    function removeChatApp(name) {
+      const drop = String(name || '').toLowerCase()
+      chatAppsText.value = textToBlacklist(chatAppsText.value)
+        .filter((x) => String(x).toLowerCase() !== drop)
+        .join('\n')
+      scheduleSave()
+    }
+
     function addBlockedApp() {
       const value = String(appDraft.value || '').trim()
       if (!value) return
@@ -682,42 +837,24 @@ export default {
       appDraft.value = ''
     }
 
-    function avatarHue(title) {
-      let hval = 0
-      const s = String(title || '')
-      for (let i = 0; i < s.length; i++) hval = (hval * 31 + s.charCodeAt(i)) >>> 0
-      return hval % 360
-    }
-
-    function toggleAppPaused(row) {
-      if (!row) return
-      const keys = [row.title, row.sub].filter(Boolean)
-      const paused = new Set(pausedApps.value.map((x) => String(x).toLowerCase()))
-      const isOn = row.on !== false
-      if (isOn) {
-        for (const k of keys) paused.add(String(k).toLowerCase())
-        const raw = textToBlacklist(blacklistText.value)
-        pausedApps.value = sortBlacklist(raw.filter((x) => paused.has(String(x).toLowerCase())))
-      } else {
-        for (const k of keys) paused.delete(String(k).toLowerCase())
-        pausedApps.value = sortBlacklist(
-          pausedApps.value.filter((x) => paused.has(String(x).toLowerCase())),
-        )
-      }
-      scheduleSave()
-    }
-
     function removeBlockedApp(row) {
-      const drop = new Set(
-        [row && row.title, row && row.sub].filter(Boolean).map((x) => String(x).toLowerCase()),
-      )
+      const drop = String(row && row.title ? row.title : '').toLowerCase()
+      if (!drop) return
       const list = textToBlacklist(blacklistText.value).filter(
-        (x) => !drop.has(String(x).toLowerCase()),
+        (x) => String(x).toLowerCase() !== drop,
       )
       blacklistText.value = list.join('\n')
       pausedApps.value = sortBlacklist(
-        pausedApps.value.filter((x) => !drop.has(String(x).toLowerCase())),
+        pausedApps.value.filter((x) => String(x).toLowerCase() !== drop),
       )
+      scheduleSave()
+    }
+
+    function patchFilter(idx, patch) {
+      const next = filters.value.slice()
+      if (!next[idx]) return
+      next[idx] = { ...next[idx], ...patch }
+      filters.value = next
       scheduleSave()
     }
 
@@ -747,6 +884,53 @@ export default {
         },
       ]
       keywordDraft.value = ''
+      scheduleSave()
+    }
+
+    function addCustomFilter() {
+      const field = FILTER_FIELDS.has(filterDraft.value.field) ? filterDraft.value.field : 'title'
+      const match = FILTER_MATCHES.has(filterDraft.value.match)
+        ? filterDraft.value.match
+        : 'contains'
+      const value = String(filterDraft.value.value || '').trim()
+      const appContains = String(filterDraft.value.appContains || '').trim()
+      if (!value) {
+        message.warning('先填要拦截的内容')
+        return
+      }
+      const regexErr = filterRegexError(match, value)
+      if (regexErr) {
+        message.warning(regexErr)
+        return
+      }
+      if (filters.value.length >= MAX_FILTERS) {
+        message.warning(`最多 ${MAX_FILTERS} 条`)
+        return
+      }
+      const dup = filters.value.some(
+        (f) =>
+          f &&
+          String(f.field || '') === field &&
+          String(f.match || '') === match &&
+          String(f.value || '').toLowerCase() === value.toLowerCase() &&
+          String(f.appContains || '').toLowerCase() === appContains.toLowerCase(),
+      )
+      if (dup) {
+        message.warning('已经有同样的规则了')
+        return
+      }
+      filters.value = [
+        ...filters.value,
+        {
+          id: newFilterId(),
+          enabled: true,
+          field,
+          match,
+          value,
+          appContains,
+        },
+      ]
+      filterDraft.value = { field, match, value: '', appContains }
       scheduleSave()
     }
 
@@ -1398,118 +1582,138 @@ export default {
         ]),
       ])
 
+      const chatApps = textToBlacklist(chatAppsText.value)
+      const clearChatBtn = NPopconfirm
+        ? h(
+            NPopconfirm,
+            { onPositiveClick: clearChatHistory },
+            {
+              trigger: () =>
+                h(
+                  'button',
+                  {
+                    class: 'adv-link',
+                    type: 'button',
+                    disabled: busy.value === 'clear-chat',
+                  },
+                  busy.value === 'clear-chat' ? '清空中…' : '清空聊天记录',
+                ),
+              default: () => '清空本机保存的全部会话气泡？',
+            },
+          )
+        : h(
+            'button',
+            {
+              class: 'adv-link',
+              type: 'button',
+              onClick: clearChatHistory,
+            },
+            '清空聊天记录',
+          )
+
       const advancedBody = [
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '活跃时推送'),
-          h('div', { class: 'row-inline' }, [
-            h(NSwitch, {
-              value: onlyPushWhenActive.value,
-              'onUpdate:value': (v) => {
-                onlyPushWhenActive.value = v === true
-                scheduleSave()
-              },
-            }),
-            h('span', { class: 'switch-pair' }, onlyPushWhenActive.value ? '已开启' : '已关闭'),
-          ]),
-          h(
-            'p',
-            { class: 'hint' },
-            '只在电脑活跃（有键鼠）时推送；空闲时暂存，恢复活跃后补推。',
-          ),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '聊天小窗'),
-          h('div', { class: 'row-inline' }, [
-            h(NSwitch, {
-              value: mergeChatThreads.value,
-              'onUpdate:value': (v) => {
-                mergeChatThreads.value = v !== false
-                scheduleSave()
-              },
-            }),
-            h('span', { class: 'switch-pair' }, mergeChatThreads.value ? '已开启' : '已关闭'),
-          ]),
-          h('p', { class: 'hint' }, 'QQ、微信等会合成对话小窗，历史保存在这台电脑。'),
-          h(NInput, {
-            value: chatAppsText.value,
-            type: 'textarea',
-            rows: 3,
-            placeholder: 'QQ\n微信',
-            'onUpdate:value': (v) => {
-              chatAppsText.value = v
-              scheduleSave()
-            },
-            onBlur: () => {
-              chatAppsText.value = textToBlacklist(chatAppsText.value).join('\n')
-            },
-          }),
-          h('p', { class: 'hint' }, '哪些应用走聊天小窗。一行一个名字，例如 QQ、微信。'),
-          NPopconfirm
-            ? h(
-                NPopconfirm,
-                { onPositiveClick: clearChatHistory },
-                {
-                  trigger: () =>
-                    h(
-                      NButton,
-                      {
-                        size: 'tiny',
-                        tertiary: true,
-                        loading: busy.value === 'clear-chat',
-                      },
-                      { default: () => '清空聊天记录' },
-                    ),
-                  default: () => '清空本机保存的全部会话气泡？',
-                },
-              )
-            : h(
-                NButton,
-                {
-                  size: 'tiny',
-                  tertiary: true,
-                  loading: busy.value === 'clear-chat',
-                  onClick: clearChatHistory,
-                },
-                { default: () => '清空聊天记录' },
-              ),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '相同通知最短间隔'),
-          h('div', { class: 'row-inline' }, [
-            h(NInput, {
-              class: 'num',
-              value: String(dedupeWindowSec.value),
-              'onUpdate:value': (v) => {
-                dedupeWindowSec.value = clamp(
-                  v,
-                  MIN_DEDUPE_SEC,
-                  MAX_DEDUPE_SEC,
-                  DEFAULT_DEDUPE_SEC,
-                )
-                scheduleSave()
-              },
-            }),
-            h('span', { class: 'unit' }, '秒（0=每次都弹）'),
-          ]),
-          h('p', { class: 'hint' }, '完全一样的通知，这么短时间内再来一次就不重复弹。'),
-        ]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '端口'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(port.value),
+        h('div', { class: 'adv-grid-2' }, [
+          h('div', { class: 'adv-tile' }, [
+            h('div', { class: 'adv-tile-head' }, [
+              h('h3', { class: 'adv-tile-title' }, '活跃时推送'),
+              h(NSwitch, {
+                value: onlyPushWhenActive.value,
                 'onUpdate:value': (v) => {
-                  port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
+                  onlyPushWhenActive.value = v === true
                   scheduleSave()
                 },
               }),
             ]),
-            h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
+            h(
+              'p',
+              { class: 'adv-tile-desc' },
+              '电脑有键鼠操作时才实时推送；空闲时先暂存，回来后一次性补推。',
+            ),
+            h('div', { class: 'adv-tile-foot' }, [
+              h('span', [
+                h('span', { class: 'adv-status-dot' }),
+                ' ',
+                onlyPushWhenActive.value ? '已开启（空闲先存）' : '已关闭（随时推送）',
+              ]),
+            ]),
           ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '路径'),
+          h('div', { class: 'adv-tile' }, [
+            h('div', { class: 'adv-tile-head' }, [
+              h('h3', { class: 'adv-tile-title' }, '聊天小窗'),
+              h(NSwitch, {
+                value: mergeChatThreads.value,
+                'onUpdate:value': (v) => {
+                  mergeChatThreads.value = v !== false
+                  scheduleSave()
+                },
+              }),
+            ]),
+            h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗，历史保存在这台电脑。'),
+            h('div', { class: 'adv-chip-box' }, [
+              ...chatApps.map((name) =>
+                h('span', { class: 'adv-chip', key: name }, [
+                  name,
+                  h(
+                    'button',
+                    { type: 'button', title: '删除', onClick: () => removeChatApp(name) },
+                    '×',
+                  ),
+                ]),
+              ),
+              h(NInput, {
+                class: 'adv-chip-input',
+                size: 'small',
+                bordered: false,
+                value: chatAppDraft.value,
+                placeholder: '+ 输入名字按回车添加',
+                'onUpdate:value': (v) => {
+                  chatAppDraft.value = v
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addChatApp()
+                },
+              }),
+            ]),
+            h('div', { class: 'adv-tile-foot' }, [
+              h('span', '输入应用名或包名后按回车添加'),
+              clearChatBtn,
+            ]),
+          ]),
+        ]),
+        h('h3', { class: 'adv-section-title' }, '频控与 Webhook'),
+        h('div', { class: 'adv-grid-3' }, [
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, '相同通知最短间隔'),
+            h('div', { class: 'adv-metric' }, [
+              h(NInput, {
+                value: String(dedupeWindowSec.value),
+                'onUpdate:value': (v) => {
+                  dedupeWindowSec.value = clamp(
+                    v,
+                    MIN_DEDUPE_SEC,
+                    MAX_DEDUPE_SEC,
+                    DEFAULT_DEDUPE_SEC,
+                  )
+                  scheduleSave()
+                },
+              }),
+              h('span', { class: 'unit' }, '秒'),
+            ]),
+            h('p', { class: 'hint' }, '完全不一样的通知，短时间内再来一次就不重复。'),
+          ]),
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, 'Webhook 监听端口'),
+            h(NInput, {
+              value: String(port.value),
+              'onUpdate:value': (v) => {
+                port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
+                scheduleSave()
+              },
+            }),
+            h('p', { class: 'hint' }, `端口范围：${MIN_PORT} – ${MAX_PORT}`),
+          ]),
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, 'Webhook 路由路径'),
             h(NInput, {
               value: path.value,
               placeholder: '/webhook',
@@ -1518,8 +1722,153 @@ export default {
                 scheduleSave()
               },
             }),
+            h('p', { class: 'hint' }, '接收 SmsForwarder POST 的 HTTP 路径。'),
           ]),
         ]),
+        h('div', { class: 'filter-head' }, [
+          h('h3', { class: 'adv-section-title' }, '自定义过滤规则'),
+          h(
+            'p',
+            { class: 'hint' },
+            '比「不看这些标题」更细：可指定应用、正文或正则。命中就不弹。',
+          ),
+        ]),
+        h('div', { class: 'filter-composer' }, [
+          h('p', { class: 'filter-composer-title' }, '新建规则'),
+          h('div', { class: 'filter-form' }, [
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '动作'),
+              h(NSelect, {
+                value: 'hide',
+                options: FILTER_ACTION_OPTIONS,
+                size: 'small',
+                disabled: true,
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '匹配字段'),
+              h(NSelect, {
+                value: filterDraft.value.field,
+                options: FILTER_FIELD_OPTIONS,
+                size: 'small',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = {
+                    ...filterDraft.value,
+                    field: FILTER_FIELDS.has(v) ? v : 'title',
+                  }
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '匹配逻辑'),
+              h(NSelect, {
+                value: filterDraft.value.match,
+                options: FILTER_MATCH_OPTIONS,
+                size: 'small',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = {
+                    ...filterDraft.value,
+                    match: FILTER_MATCHES.has(v) ? v : 'contains',
+                  }
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '关键词 / 正则'),
+              h(NInput, {
+                size: 'small',
+                value: filterDraft.value.value,
+                placeholder:
+                  filterDraft.value.match === 'regex'
+                    ? '例如 DSH Desktop.*交流群'
+                    : '例如：DSH Desktop 交流群',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = { ...filterDraft.value, value: v }
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addCustomFilter()
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '仅限应用（可选）'),
+              h(NInput, {
+                size: 'small',
+                value: filterDraft.value.appContains,
+                placeholder: 'QQ / com.tencent.mobileqq',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = { ...filterDraft.value, appContains: v }
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addCustomFilter()
+                },
+              }),
+            ]),
+          ]),
+          filterRegexError(filterDraft.value.match, filterDraft.value.value)
+            ? h('p', { class: 'filter-warn' }, filterRegexError(filterDraft.value.match, filterDraft.value.value))
+            : null,
+          h('div', { class: 'filter-add' }, [
+            h(
+              NButton,
+              {
+                size: 'small',
+                type: 'primary',
+                disabled: filters.value.length >= MAX_FILTERS,
+                onClick: addCustomFilter,
+              },
+              { default: () => '添加到规则列表' },
+            ),
+          ]),
+        ]),
+        h('div', { class: 'filter-list-head' }, [
+          h('span', `已生效规则（${filters.value.length}）`),
+          h('span', { class: 'hint' }, '从上到下匹配'),
+        ]),
+        filters.value.length
+          ? h(
+              'div',
+              { class: 'filter-list' },
+              filters.value.map((f, idx) => {
+                const issue = filterIssue(f)
+                return h(
+                  'div',
+                  {
+                    class: ['filter-item', { 'is-off': f.enabled === false, 'is-warn': !!issue }],
+                    key: f.id,
+                  },
+                  [
+                    h('div', { class: 'filter-tags' }, [
+                      h('span', { class: 'filter-tag is-hide' }, '不看'),
+                      h('span', { class: 'filter-tag is-muted' }, optionLabel(FILTER_FIELD_OPTIONS, f.field, '标题')),
+                      h('span', { class: 'filter-tag is-match' }, optionLabel(FILTER_MATCH_OPTIONS, f.match, '包含文本')),
+                      h('span', { class: 'filter-quote' }, `"${f.value || '…'}"`),
+                      f.appContains ? h('span', { class: 'filter-scope' }, `仅限 ${f.appContains}`) : null,
+                    ]),
+                    issue ? h('p', { class: 'filter-warn' }, issue) : null,
+                    h(NSwitch, {
+                      size: 'small',
+                      value: f.enabled !== false,
+                      'onUpdate:value': (v) => patchFilter(idx, { enabled: v === true }),
+                    }),
+                    h(
+                      'button',
+                      {
+                        class: 'filter-x',
+                        type: 'button',
+                        title: '删除',
+                        onClick: () => {
+                          filters.value = filters.value.filter((_, i) => i !== idx)
+                          scheduleSave()
+                        },
+                      },
+                      '×',
+                    ),
+                  ],
+                )
+              }),
+            )
+          : h('p', { class: 'filter-empty' }, '还没有自定义规则。常见群名直接在上面「不看这些标题」里加就行。'),
       ]
 
       const appPane = h('div', { class: 'pane' }, [
@@ -1533,7 +1882,7 @@ export default {
           h(NInput, {
             size: 'small',
             value: appDraft.value || appQuery.value,
-            placeholder: '搜索或输入应用名/包名，按 Enter 添加…',
+            placeholder: '搜索或输入包名，按 Enter 添加…',
             'onUpdate:value': (v) => {
               appDraft.value = v
               appQuery.value = v
@@ -1554,28 +1903,10 @@ export default {
           blockedAppRows.value.length
             ? h(
                 'div',
-                { class: 'app-grid' },
-                blockedAppRows.value.map((row) => {
-                  const hue = avatarHue(row.title)
-                  const ch = String(row.title || '?').trim().slice(0, 1)
-                  return h('div', { class: ['app-tile', { 'is-off': row.on === false }], key: row.key }, [
-                    h(
-                      'div',
-                      {
-                        class: 'app-avatar',
-                        style: { background: `hsl(${hue} 62% 52%)` },
-                      },
-                      ch,
-                    ),
-                    h('div', { class: 'app-meta' }, [
-                      h('div', { class: 'app-name', title: row.title }, row.title),
-                      row.sub ? h('div', { class: 'app-pkg', title: row.sub }, row.sub) : null,
-                    ]),
-                    h(NSwitch, {
-                      size: 'small',
-                      value: row.on !== false,
-                      'onUpdate:value': () => toggleAppPaused(row),
-                    }),
+                { class: 'title-chips' },
+                blockedAppRows.value.map((row) =>
+                  h('div', { class: ['title-chip', 'is-pkg'], key: row.key }, [
+                    h('span', { class: 'chip-text', title: row.title }, row.title),
                     h(
                       'button',
                       {
@@ -1586,8 +1917,8 @@ export default {
                       },
                       '×',
                     ),
-                  ])
-                }),
+                  ]),
+                ),
               )
             : h(
                 'p',
@@ -1638,7 +1969,7 @@ export default {
                 { class: 'title-chips' },
                 titleBlocks.value.map((item) =>
                   h('div', { class: 'title-chip', key: item.id }, [
-                    h('span', item.title),
+                    h('span', { class: 'chip-text' }, item.title),
                     item.sub === '锁屏短信' ? h('span', { class: 'badge' }, '锁屏短信') : null,
                     h(
                       'button',
