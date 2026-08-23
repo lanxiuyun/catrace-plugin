@@ -354,11 +354,14 @@ const CSS = `
 }
 .sf-settings .adv-toggle:hover { color: #0f766e; }
 .sf-settings .adv-chevron {
-  display: inline-block; font-size: 0.6875rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1rem; height: 1rem; line-height: 0;
   transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   transform-origin: center;
+  transform: rotate(-90deg);
 }
-.sf-settings .adv-toggle[aria-expanded="true"] .adv-chevron { transform: rotate(180deg); }
+.sf-settings .adv-chevron svg { width: 0.875rem; height: 0.875rem; display: block; }
+.sf-settings .adv-toggle[aria-expanded="true"] .adv-chevron { transform: rotate(0deg); }
 .sf-settings .advanced-card { gap: 0; }
 .sf-settings .adv-collapse {
   display: grid; grid-template-rows: 0fr;
@@ -541,6 +544,26 @@ function normalizeFilters(input) {
 
 function persistableFilters(list) {
   return normalizeFilters(list)
+}
+
+function chevronIcon() {
+  return h(
+    'svg',
+    {
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      'aria-hidden': 'true',
+    },
+    [
+      h('path', {
+        d: 'M6 9l6 6 6-6',
+        stroke: 'currentColor',
+        'stroke-width': '1.8',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+      }),
+    ],
+  )
 }
 
 function filterTagLabel(f) {
@@ -1970,7 +1993,7 @@ export default {
           },
           [
             '高级',
-            h('span', { class: 'adv-chevron', 'aria-hidden': 'true' }, '▾'),
+            h('span', { class: 'adv-chevron', 'aria-hidden': 'true' }, [chevronIcon()]),
           ],
         ),
         h(
