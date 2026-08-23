@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v11'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v12'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -204,22 +204,18 @@ const CSS = `
 .sf-settings .adv-tile-desc { margin: 0; font-size: 0.75rem; line-height: 1.55; color: #5b6b6a; }
 .sf-settings .adv-chip-box {
   min-height: 5.5rem;
-  padding: 0.625rem;
-  border: 0.0625rem dashed #99f6e4; border-radius: 0.75rem;
-  background: #f8fffd;
+  padding: 0.5rem;
+  border: 0.0625rem solid #e5e7eb; border-radius: 0.5rem;
+  background: #fafafa;
   display: flex; flex-wrap: wrap; gap: 0.375rem; align-content: flex-start;
 }
-.sf-settings .adv-chip {
-  display: inline-flex; align-items: center; gap: 0.25rem;
-  padding: 0.25rem 0.5rem; border-radius: 999px;
-  background: #eef2ff; color: #4338ca; font-size: 0.75rem; font-weight: 650;
-}
-.sf-settings .adv-chip button {
-  border: 0; background: transparent; cursor: pointer; color: #6366f1;
-  padding: 0; line-height: 1; font-size: 0.875rem;
-}
-.sf-settings .adv-chip button:hover { color: #b91c1c; }
 .sf-settings .adv-chip-input { flex: 1 1 8rem; min-width: 8rem; }
+.sf-settings .chip-text {
+  min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.4;
+}
+.sf-settings .chip-pkg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .sf-settings .adv-tile-foot {
   margin-top: auto; padding-top: 0.5rem;
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
@@ -228,11 +224,6 @@ const CSS = `
 .sf-settings .adv-status-dot {
   width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #14b8a6; display: inline-block;
 }
-.sf-settings .adv-link {
-  border: 0; background: transparent; cursor: pointer; padding: 0;
-  color: #dc2626; font-size: 0.75rem; font-weight: 650;
-}
-.sf-settings .adv-link:hover { color: #b91c1c; }
 .sf-settings .adv-metric { display: flex; align-items: center; gap: 0.5rem; }
 .sf-settings .adv-metric .n-input { flex: 1; min-width: 0; }
 .sf-settings .filter-head {
@@ -241,10 +232,10 @@ const CSS = `
 .sf-settings .filter-composer {
   display: flex; flex-direction: column; gap: 0.75rem;
   padding: 0.875rem 1rem;
-  border: 0.0625rem solid #c4b5fd; border-radius: 1rem;
-  background: #faf5ff;
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem;
+  background: #f0fdfa;
 }
-.sf-settings .filter-composer-title { margin: 0; font-size: 0.8125rem; font-weight: 750; color: #6d28d9; }
+.sf-settings .filter-composer-title { margin: 0; font-size: 0.8125rem; font-weight: 750; color: #0f766e; }
 .sf-settings .filter-form {
   display: grid; gap: 0.5rem 0.75rem;
   grid-template-columns: 1fr;
@@ -281,9 +272,9 @@ const CSS = `
   padding: 0.125rem 0.5rem; border-radius: 999px;
   font-size: 0.6875rem; font-weight: 700;
 }
-.sf-settings .filter-tag.is-hide { background: #ffe4e6; color: #be123c; }
+.sf-settings .filter-tag.is-hide { background: #ccfbf1; color: #0f766e; }
 .sf-settings .filter-tag.is-muted { background: #f1f5f9; color: #475569; }
-.sf-settings .filter-tag.is-match { background: #ede9fe; color: #6d28d9; }
+.sf-settings .filter-tag.is-match { background: #e0f2fe; color: #0369a1; }
 .sf-settings .filter-quote {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.75rem; color: #0f172a; background: #f8fafc;
@@ -291,13 +282,6 @@ const CSS = `
 }
 .sf-settings .filter-scope { font-size: 0.6875rem; color: #64748b; }
 .sf-settings .filter-warn { margin: 0; width: 100%; font-size: 0.6875rem; color: #b45309; }
-.sf-settings .filter-x {
-  border: 0; background: transparent; cursor: pointer; color: #94a3b8;
-  padding: 0; font-size: 0.875rem; line-height: 1;
-  width: 1.125rem; height: 1.125rem; border-radius: 999px; flex: 0 0 auto;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.sf-settings .filter-x:hover { background: #fee2e2; color: #b91c1c; }
 .sf-settings .block-box {
   border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem; overflow: hidden; background: #fff;
 }
@@ -361,47 +345,7 @@ const CSS = `
 }
 .sf-settings .search-add .n-input { flex: 1; min-width: 0; }
 .sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
-.sf-settings .title-chip {
-  display: inline-flex; align-items: flex-start; gap: 0.375rem;
-  padding: 0.4375rem 0.625rem 0.4375rem 0.75rem; border-radius: 999px;
-  background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
-  border: 0.0625rem solid #fecdd3;
-  color: #9f1239; font-size: 0.8125rem; font-weight: 650;
-  max-width: 100%; box-shadow: 0 0.0625rem 0.125rem rgba(159, 18, 57, 0.08);
-}
-.sf-settings .title-chip .chip-text {
-  min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.4;
-}
-.sf-settings .title-chip.is-pkg {
-  background: linear-gradient(180deg, #ecfeff 0%, #cffafe 100%);
-  border-color: #67e8f9; color: #155e75;
-  box-shadow: 0 0.0625rem 0.125rem rgba(14, 116, 144, 0.08);
-}
-.sf-settings .title-chip.is-pkg .chip-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.75rem; font-weight: 650;
-}
-.sf-settings .title-chip .badge {
-  font-size: 0.625rem; font-weight: 700; color: #9f1239;
-  background: #fff; border: 0.0625rem solid #fecdd3;
-  border-radius: 0.375rem; padding: 0.0625rem 0.3125rem;
-}
-.sf-settings .title-chip .x {
-  border: 0; background: transparent; cursor: pointer; color: #be123c;
-  padding: 0; font-size: 0.875rem; line-height: 1;
-  width: 1.125rem; height: 1.125rem; border-radius: 999px;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.sf-settings .title-chip.is-pkg .x { color: #0e7490; }
-.sf-settings .title-chip .x:hover {
-  background: #fecdd3; color: #881337;
-}
-.sf-settings .title-chip.is-pkg .x:hover {
-  background: #a5f3fc; color: #155e75;
-}
-.sf-settings .title-chip .x:active { background: #fda4af; }
-.sf-settings .title-chip.is-pkg .x:active { background: #67e8f9; }
+.sf-settings .title-chips .n-tag { max-width: 100%; height: auto; white-space: normal; }
 .sf-settings .adv-toggle {
   border: 0; background: transparent; cursor: pointer;
   padding: 0; text-align: left;
@@ -452,6 +396,7 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-settings-css-v8',
     'catrace-plugin-smsforwarder-notify-settings-css-v9',
     'catrace-plugin-smsforwarder-notify-settings-css-v10',
+    'catrace-plugin-smsforwarder-notify-settings-css-v11',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -1590,25 +1535,28 @@ export default {
             {
               trigger: () =>
                 h(
-                  'button',
+                  NButton,
                   {
-                    class: 'adv-link',
-                    type: 'button',
-                    disabled: busy.value === 'clear-chat',
+                    size: 'tiny',
+                    type: 'error',
+                    text: true,
+                    loading: busy.value === 'clear-chat',
                   },
-                  busy.value === 'clear-chat' ? '清空中…' : '清空聊天记录',
+                  { default: () => '清空聊天记录' },
                 ),
               default: () => '清空本机保存的全部会话气泡？',
             },
           )
         : h(
-            'button',
+            NButton,
             {
-              class: 'adv-link',
-              type: 'button',
+              size: 'tiny',
+              type: 'error',
+              text: true,
+              loading: busy.value === 'clear-chat',
               onClick: clearChatHistory,
             },
-            '清空聊天记录',
+            { default: () => '清空聊天记录' },
           )
 
       const advancedBody = [
@@ -1651,19 +1599,22 @@ export default {
             h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗，历史保存在这台电脑。'),
             h('div', { class: 'adv-chip-box' }, [
               ...chatApps.map((name) =>
-                h('span', { class: 'adv-chip', key: name }, [
-                  name,
-                  h(
-                    'button',
-                    { type: 'button', title: '删除', onClick: () => removeChatApp(name) },
-                    '×',
-                  ),
-                ]),
+                h(
+                  NTag,
+                  {
+                    key: name,
+                    size: 'small',
+                    round: true,
+                    closable: true,
+                    onClose: () => removeChatApp(name),
+                  },
+                  { default: () => h('span', { class: 'chip-text' }, name) },
+                ),
               ),
               h(NInput, {
                 class: 'adv-chip-input',
                 size: 'small',
-                bordered: false,
+                bordered: true,
                 value: chatAppDraft.value,
                 placeholder: '+ 输入名字按回车添加',
                 'onUpdate:value': (v) => {
@@ -1852,17 +1803,17 @@ export default {
                       'onUpdate:value': (v) => patchFilter(idx, { enabled: v === true }),
                     }),
                     h(
-                      'button',
+                      NButton,
                       {
-                        class: 'filter-x',
-                        type: 'button',
-                        title: '删除',
+                        size: 'tiny',
+                        quaternary: true,
+                        type: 'error',
                         onClick: () => {
                           filters.value = filters.value.filter((_, i) => i !== idx)
                           scheduleSave()
                         },
                       },
-                      '×',
+                      { default: () => '删除' },
                     ),
                   ],
                 )
@@ -1893,7 +1844,7 @@ export default {
           }),
           h(
             NButton,
-            { size: 'small', type: 'primary', ghost: true, onClick: addBlockedApp },
+            { size: 'small', secondary: true, onClick: addBlockedApp },
             { default: () => '添加' },
           ),
         ]),
@@ -1905,19 +1856,21 @@ export default {
                 'div',
                 { class: 'title-chips' },
                 blockedAppRows.value.map((row) =>
-                  h('div', { class: ['title-chip', 'is-pkg'], key: row.key }, [
-                    h('span', { class: 'chip-text', title: row.title }, row.title),
-                    h(
-                      'button',
-                      {
-                        class: 'x',
-                        type: 'button',
-                        title: '删除',
-                        onClick: () => removeBlockedApp(row),
-                      },
-                      '×',
-                    ),
-                  ]),
+                  h(
+                    NTag,
+                    {
+                      key: row.key,
+                      size: 'small',
+                      round: true,
+                      type: 'info',
+                      closable: true,
+                      onClose: () => removeBlockedApp(row),
+                    },
+                    {
+                      default: () =>
+                        h('span', { class: 'chip-text chip-pkg', title: row.title }, row.title),
+                    },
+                  ),
                 ),
               )
             : h(
@@ -1968,19 +1921,29 @@ export default {
                 'div',
                 { class: 'title-chips' },
                 titleBlocks.value.map((item) =>
-                  h('div', { class: 'title-chip', key: item.id }, [
-                    h('span', { class: 'chip-text' }, item.title),
-                    item.sub === '锁屏短信' ? h('span', { class: 'badge' }, '锁屏短信') : null,
-                    h(
-                      'button',
-                      {
-                        class: 'x',
-                        type: 'button',
-                        onClick: () => removeTitleBlock(item),
-                      },
-                      '×',
-                    ),
-                  ]),
+                  h(
+                    NTag,
+                    {
+                      key: item.id,
+                      size: 'small',
+                      round: true,
+                      type: 'warning',
+                      closable: true,
+                      onClose: () => removeTitleBlock(item),
+                    },
+                    {
+                      default: () => [
+                        h('span', { class: 'chip-text' }, item.title),
+                        item.sub === '锁屏短信'
+                          ? h(
+                              NTag,
+                              { size: 'tiny', round: true, bordered: false },
+                              { default: () => '锁屏短信' },
+                            )
+                          : null,
+                      ],
+                    },
+                  ),
                 ),
               )
             : h(
