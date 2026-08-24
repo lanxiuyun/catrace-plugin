@@ -13,6 +13,7 @@ const MAX_PENDING = 200
 const MAX_FILTERS = 50
 const MAX_THREAD_MESSAGES = 10000
 const MAX_THREADS = 500
+const TOAST_LIVE_SIZE = 1
 const TOAST_PAGE_SIZE = 40
 const PENDING_POLL_MS = 3000
 const THREAD_INDEX_KEY = 'chatIndex'
@@ -1060,7 +1061,7 @@ async function publishNotification(n, hash, otp, meta = {}) {
   const sticky = cardSec <= 0
   const kind = classifyNotice(n, otp)
   const session = kind === 'chat' ? await takeThreadSession(n, hash, otp) : null
-  const page = session ? pageFromSession(session, '', TOAST_PAGE_SIZE) : null
+  const page = session ? pageFromSession(session, '', TOAST_LIVE_SIZE) : null
   const messages = page ? page.messages : null
   const latest = messages && messages.length ? messages[messages.length - 1] : null
   const sender = String((session && session.title) || n.title || '').trim()

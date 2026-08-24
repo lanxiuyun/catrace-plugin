@@ -1648,7 +1648,7 @@ export default {
                 },
               }),
             ]),
-            h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗，历史保存在这台电脑。'),
+            h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗：弹出只显示最新一条，新消息往上顶；往上滚加载本机历史。'),
             h('div', { class: 'adv-chip-box' }, [
               ...chatApps.map((name) =>
                 h(
