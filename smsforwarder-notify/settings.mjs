@@ -430,9 +430,38 @@ function normalizePath(raw) {
   return p
 }
 
-/** Stable sort for blacklist entries: digits/letters first, then CJK by pinyin. */
+/** Skip leading whitespace / punctuation so `"短信"` sorts as 短信, not before digits. */
+function firstSignificantChar(value) {
+  const str = String(value || '')
+  for (const ch of str) {
+    if (/\s/u.test(ch)) continue
+    if (/[\p{P}\p{S}]/u.test(ch)) continue
+    return ch
+  }
+  return ''
+}
+
+function blacklistSortRank(value) {
+  const ch = firstSignificantChar(value)
+  if (!ch) return 3
+  if (/\d/u.test(ch)) return 0
+  if (/\p{Script=Latin}/u.test(ch)) return 1
+  if (/\p{Script=Han}/u.test(ch)) return 2
+  return 3
+}
+
+/** Digits, then Latin, then CJK by pinyin. Leading quotes/brackets do not change the group. */
+function compareBlacklist(a, b) {
+  const sa = String(a || '')
+  const sb = String(b || '')
+  const ra = blacklistSortRank(sa)
+  const rb = blacklistSortRank(sb)
+  if (ra !== rb) return ra - rb
+  return sa.localeCompare(sb, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })
+}
+
 function sortBlacklist(list) {
-  return [...list].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { sensitivity: 'base' }))
+  return [...list].sort(compareBlacklist)
 }
 
 function blacklistToText(list) {
@@ -745,7 +774,7 @@ export default {
           }
         })
         .filter((row) => !q || row.title.toLowerCase().includes(q))
-        .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
+        .sort((a, b) => compareBlacklist(a.title, b.title))
     })
 
     const titleBlocks = computed(() => {
@@ -764,7 +793,7 @@ export default {
         if (!label) continue
         out.push({ kind: 'mms', id: `mms:${label}`, title: label, sub: '锁屏短信' })
       }
-      out.sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN', { sensitivity: 'base' }))
+      out.sort((a, b) => compareBlacklist(a.title, b.title))
       const q = titleQuery.value.trim().toLowerCase()
       if (!q) return out
       return out.filter(
