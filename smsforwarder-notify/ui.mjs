@@ -6,9 +6,15 @@ if (typeof h !== 'function') {
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v32'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v46'
 const THREAD_ROW_EST = 56
 const THREAD_OVERSCAN = 6
+const HISTORY_PAGE_SIZE = 40
+/** Group chat stamps into 2-minute buckets counting back from now. */
+const TIME_SEGMENT_MS = 2 * 60 * 1000
+const THREAD_COMPACT_MAX = 256
+const THREAD_EXPANDED_DEFAULT = 384
+const THREAD_HEIGHT_KEY = 'chatThreadHeight'
 const CSS = `
 .sf-card {
   display: flex;
@@ -248,7 +254,7 @@ const CSS = `
   background: linear-gradient(90deg, #34d399, #a7f3d0);
   transform-origin: left center;
   animation: sf-card-shrink var(--toast-auto-hide-ms, 10000ms) linear forwards;
-  margin: 0.625rem 0 0.25rem;
+  margin: 0.5rem 0 0;
 }
 .sf-card .bar.paused { animation-play-state: paused; }
 @keyframes sf-card-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
@@ -264,13 +270,36 @@ const CSS = `
 }
 .sf-card .thread-shell {
   position: relative;
-  margin: 0.5rem 0 0;
+  margin: 0.25rem 0 0;
+}
+.sf-card .thread-resize {
+  height: 0.5rem;
+  margin: -0.25rem 0 0.25rem;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+.sf-card .thread-resize::after {
+  content: '';
+  width: 2.25rem;
+  height: 0.1875rem;
+  border-radius: 999px;
+  background: #d1d5db;
+}
+.sf-card .thread-resize:hover::after,
+.sf-card .thread-resize.is-active::after {
+  background: #10b981;
 }
 .sf-card .thread {
   margin: 0;
   max-height: 16rem;
   overflow-y: auto;
-  padding: 0.125rem 0.25rem 0.125rem 0;
+  padding: 0 0.25rem 0.125rem 0;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
 }
@@ -311,13 +340,62 @@ const CSS = `
 .sf-card .thread-inner {
   display: flex;
   flex-direction: column;
-  gap: 0.4375rem;
+  gap: 0.375rem;
 }
-.sf-card .thread-more {
+.sf-card .thread-up {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 1rem;
+  height: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #3b82f6;
+  cursor: pointer;
+  line-height: 1;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transform: rotate(-90deg);
+  user-select: none;
+  -webkit-user-select: none;
+  animation: sf-thread-up-breathe 2.8s ease-in-out infinite;
+}
+.sf-card .thread-up:hover {
+  color: #2563eb;
+  animation-duration: 1.1s;
+}
+@keyframes sf-thread-up-breathe {
+  0%, 100% {
+    opacity: 0.55;
+    transform: rotate(-90deg) translateX(0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(-90deg) translateX(0.125rem) scale(1.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-card .thread-up { animation: none; opacity: 1; }
+}
+.sf-card .time-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sf-card .time-divider span {
   font-size: 0.6875rem;
   color: #9ca3af;
-  text-align: center;
-  padding: 0.25rem 0;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 .sf-card .thread::-webkit-scrollbar { width: 0.375rem; }
 .sf-card .thread::-webkit-scrollbar-thumb {
@@ -343,24 +421,27 @@ const CSS = `
   flex-shrink: 0;
   opacity: 0;
   border: none;
-  background: transparent;
-  padding: 0.1875rem;
-  margin: 0.125rem 0 0;
+  background: #fff;
+  padding: 0;
+  margin: 0.0625rem 0 0;
+  width: 2rem;
+  height: 2rem;
   color: #10b981;
   cursor: pointer;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
+  border: 1px solid #d1fae5;
 }
 .sf-card .bubble-row:hover .bubble-copy,
 .sf-card .bubble-copy:focus-visible {
   opacity: 1;
 }
-.sf-card .bubble-copy:hover { background: #ecfdf5; color: #059669; }
-.sf-card .bubble-copy.is-ok { opacity: 1; color: #047857; }
-.sf-card .bubble-copy svg { width: 0.8125rem; height: 0.8125rem; display: block; }
+.sf-card .bubble-copy:hover { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
+.sf-card .bubble-copy.is-ok { opacity: 1; color: #047857; background: #ecfdf5; }
+.sf-card .bubble-copy svg { width: 1.125rem; height: 1.125rem; display: block; }
 .sf-card .bubble-name {
   font-size: 0.6875rem;
   color: #9ca3af;
@@ -382,6 +463,9 @@ const CSS = `
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
 }
 .sf-card .bubble.is-otp {
   background: #ecfdf5;
@@ -565,6 +649,20 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-css-v29',
     'catrace-plugin-smsforwarder-notify-css-v30',
     'catrace-plugin-smsforwarder-notify-css-v31',
+    'catrace-plugin-smsforwarder-notify-css-v32',
+    'catrace-plugin-smsforwarder-notify-css-v33',
+    'catrace-plugin-smsforwarder-notify-css-v34',
+    'catrace-plugin-smsforwarder-notify-css-v35',
+    'catrace-plugin-smsforwarder-notify-css-v36',
+    'catrace-plugin-smsforwarder-notify-css-v37',
+    'catrace-plugin-smsforwarder-notify-css-v38',
+    'catrace-plugin-smsforwarder-notify-css-v39',
+    'catrace-plugin-smsforwarder-notify-css-v40',
+    'catrace-plugin-smsforwarder-notify-css-v41',
+    'catrace-plugin-smsforwarder-notify-css-v42',
+    'catrace-plugin-smsforwarder-notify-css-v43',
+    'catrace-plugin-smsforwarder-notify-css-v44',
+    'catrace-plugin-smsforwarder-notify-css-v45',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -597,6 +695,56 @@ function formatClock(raw) {
     return `${m[1].padStart(2, '0')}:${m[2]}:${(m[3] || '00').padStart(2, '0')}`
   }
   return s
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+function startOfLocalDay(ms) {
+  const d = new Date(ms)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/** QQ-style divider: 今天 12:34 / 昨天 12:34 / 周一 12:34 / 3月12日 12:34 / 2025年3月12日 12:34 */
+function formatChatStamp(raw, nowMs = Date.now()) {
+  const ms = parseTimeMs(raw)
+  if (!Number.isFinite(ms)) return ''
+  const d = new Date(ms)
+  const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  const today0 = startOfLocalDay(nowMs)
+  const that0 = startOfLocalDay(ms)
+  const dayDiff = Math.round((today0 - that0) / 86400000)
+  if (dayDiff <= 0) return hm
+  if (dayDiff === 1) return `昨天 ${hm}`
+  if (dayDiff < 7) {
+    const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return `${week[d.getDay()]} ${hm}`
+  }
+  const md = `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+  if (d.getFullYear() === new Date(nowMs).getFullYear()) return md
+  return `${d.getFullYear()}年${md}`
+}
+
+function messageTimeMs(m) {
+  if (!m) return NaN
+  return parseTimeMs(m.receivedAt || m.webhookAt || m.publishedAt || m.at)
+}
+
+function timeSegmentIndex(ms, nowMs = Date.now()) {
+  if (!Number.isFinite(ms)) return NaN
+  return Math.floor(Math.max(0, nowMs - ms) / TIME_SEGMENT_MS)
+}
+
+function shouldShowTimeDivider(curr, prev, nowMs = Date.now()) {
+  if (!curr) return false
+  const currMs = messageTimeMs(curr)
+  if (!Number.isFinite(currMs)) return !prev
+  if (!prev) return true
+  const prevMs = messageTimeMs(prev)
+  if (!Number.isFinite(prevMs)) return true
+  return timeSegmentIndex(currMs, nowMs) !== timeSegmentIndex(prevMs, nowMs)
 }
 
 function parseTimeMs(raw) {
@@ -963,6 +1111,17 @@ export default {
     this.scrollTop = 0
     this.needScrollBottom = false
     this.topLoadArmed = true
+    this.lastLoadAt = 0
+    this.threadExpanded = false
+    this.threadMaxPx = THREAD_COMPACT_MAX
+    this.expandedPreferred = THREAD_EXPANDED_DEFAULT
+    this.heightMap = {}
+    this.heightMapReady = false
+    this.resizeStartY = 0
+    this.resizeStartH = 0
+    this.resizing = false
+    this._onResizeMove = null
+    this._onResizeUp = null
     this.syncFromPayload((this.event && this.event.payload) || {}, { initial: true })
   },
   mounted() {
@@ -973,6 +1132,7 @@ export default {
         { deep: true },
       )
     }
+    this.restoreThreadHeight()
     this.flushScrollBottom()
   },
   updated() {
@@ -981,6 +1141,7 @@ export default {
   beforeUnmount() {
     if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
     if (this.copiedTimer) clearTimeout(this.copiedTimer)
+    this.stopResize()
     if (typeof this._unwatchEvent === 'function') this._unwatchEvent()
   },
   methods: {
@@ -1011,6 +1172,9 @@ export default {
         this.unseenCount = 0
         this.needScrollBottom = true
         this.topLoadArmed = true
+        this.threadExpanded = false
+        this.threadMaxPx = THREAD_COMPACT_MAX
+        this.applyPreferredHeight()
       } else if (incoming.length) {
         const seen = new Set(this.messages.map((m) => m && m.id))
         let added = 0
@@ -1035,9 +1199,104 @@ export default {
       this.total = Number(pl.threadCount) || this.messages.length
       this.hasMore = pl.hasMore === true || this.messages.length < this.total
     },
+    clampThreadHeight(px) {
+      const n = Number(px)
+      if (!Number.isFinite(n)) return THREAD_EXPANDED_DEFAULT
+      return Math.max(THREAD_COMPACT_MAX, Math.round(n))
+    },
+    currentTitle() {
+      const pl = (this.event && this.event.payload) || {}
+      return String(pl.title || this.event && this.event.title || '').trim()
+    },
+    heightMapKey() {
+      const title = this.currentTitle()
+      if (title) return `title:${title.toLowerCase()}`
+      const key = String(this.threadKey || '').trim()
+      return key ? `thread:${key}` : ''
+    },
+    applyPreferredHeight() {
+      const key = this.heightMapKey()
+      const px = key && this.heightMap ? this.heightMap[key] : 0
+      this.expandedPreferred = px ? this.clampThreadHeight(px) : THREAD_EXPANDED_DEFAULT
+    },
+    async restoreThreadHeight() {
+      const api = this.pluginApi()
+      if (!api || !api.storage || typeof api.storage.get !== 'function') return
+      try {
+        const saved = await api.storage.get(THREAD_HEIGHT_KEY)
+        const map = {}
+        if (saved && typeof saved === 'object') {
+          if (saved.heights && typeof saved.heights === 'object') {
+            for (const [k, v] of Object.entries(saved.heights)) {
+              if (k) map[k] = this.clampThreadHeight(v)
+            }
+          } else if (saved.px != null) {
+            // old global height — ignore so titles stay independent
+          }
+        }
+        this.heightMap = map
+        this.heightMapReady = true
+        this.applyPreferredHeight()
+        if (this.threadExpanded) {
+          this.threadMaxPx = this.expandedPreferred
+          this.$forceUpdate()
+        }
+      } catch {
+        this.heightMapReady = true
+      }
+    },
+    persistThreadHeight() {
+      const api = this.pluginApi()
+      if (!api || !api.storage || typeof api.storage.set !== 'function') return
+      const key = this.heightMapKey()
+      if (!key) return
+      this.heightMap = { ...(this.heightMap || {}), [key]: this.expandedPreferred }
+      api.storage.set(THREAD_HEIGHT_KEY, { v: 2, heights: this.heightMap }).catch(() => {})
+    },
+    expandThread() {
+      const next = this.clampThreadHeight(this.expandedPreferred || THREAD_EXPANDED_DEFAULT)
+      if (this.threadExpanded && this.threadMaxPx === next) return
+      this.threadExpanded = true
+      this.threadMaxPx = next
+      this.$forceUpdate()
+    },
+    startResize(e) {
+      if (!e || e.button != null && e.button !== 0) return
+      this.expandThread()
+      this.resizing = true
+      this.resizeStartY = e.clientY
+      this.resizeStartH = this.threadMaxPx
+      this._onResizeMove = (ev) => this.onResizeMove(ev)
+      this._onResizeUp = () => this.stopResize(true)
+      window.addEventListener('pointermove', this._onResizeMove)
+      window.addEventListener('pointerup', this._onResizeUp)
+      window.addEventListener('pointercancel', this._onResizeUp)
+      e.preventDefault()
+    },
+    onResizeMove(e) {
+      if (!this.resizing) return
+      // Drag the top handle: moving up grows the thread (card grows upward).
+      const next = this.clampThreadHeight(this.resizeStartH + (this.resizeStartY - e.clientY))
+      this.threadMaxPx = next
+      this.expandedPreferred = next
+      this.threadExpanded = true
+      this.$forceUpdate()
+    },
+    stopResize(persist) {
+      if (this._onResizeMove) window.removeEventListener('pointermove', this._onResizeMove)
+      if (this._onResizeUp) {
+        window.removeEventListener('pointerup', this._onResizeUp)
+        window.removeEventListener('pointercancel', this._onResizeUp)
+      }
+      this._onResizeMove = null
+      this._onResizeUp = null
+      if (this.resizing && persist) this.persistThreadHeight()
+      this.resizing = false
+      this.$forceUpdate()
+    },
     visibleSlice() {
       const all = this.messages
-      const viewH = 256
+      const viewH = this.threadMaxPx || THREAD_COMPACT_MAX
       const count = Math.ceil(viewH / THREAD_ROW_EST) + THREAD_OVERSCAN * 2
       if (this.stickToBottom || this.needScrollBottom) {
         const start = Math.max(0, all.length - count)
@@ -1060,23 +1319,51 @@ export default {
       }
     },
     async loadOlder() {
-      if (this.loadingMore || !this.hasMore || !this.threadKey || !this.topLoadArmed) return
+      if (this.loadingMore || !this.hasMore || !this.threadKey) return
+      if (Date.now() - (this.lastLoadAt || 0) < 350) return
+      this.expandThread()
       const api = this.pluginApi()
-      if (!api || !api.storage || typeof api.storage.get !== 'function') return
+      if (!api) return
       const first = this.messages[0]
       const beforeId = first && first.id
       this.loadingMore = true
-      this.topLoadArmed = false
+      this.lastLoadAt = Date.now()
       const el = this.$refs && this.$refs.thread
       const prevH = el ? el.scrollHeight : 0
       const prevTop = el ? el.scrollTop : 0
       try {
-        const stored = await api.storage.get(this.storeKeyFromThread(this.threadKey))
-        const all = stored && Array.isArray(stored.messages) ? stored.messages.filter((m) => m && (m.text || m.speaker)) : []
-        const idx = beforeId ? all.findIndex((m) => m && m.id === beforeId) : all.length
-        const end = idx < 0 ? all.length : idx
-        const start = Math.max(0, end - 40)
-        const older = all.slice(start, end)
+        let older = []
+        let total = this.total
+        let hasMore = false
+        const sidecar = api.sidecar
+        if (sidecar && typeof sidecar.request === 'function') {
+          try {
+            const page = await sidecar.request('loadThreadPage', {
+              threadKey: this.threadKey,
+              beforeId: beforeId || '',
+              limit: HISTORY_PAGE_SIZE,
+            })
+            if (page && Array.isArray(page.messages)) {
+              older = page.messages.filter((m) => m && (m.text || m.speaker))
+              total = Number(page.total) || total
+              hasMore = page.hasMore === true
+            }
+          } catch (e) {
+            console.warn('[smsforwarder-notify] loadThreadPage failed', e)
+          }
+        }
+        if (!older.length && api.storage && typeof api.storage.get === 'function') {
+          const stored = await api.storage.get(this.storeKeyFromThread(this.threadKey))
+          const all = stored && Array.isArray(stored.messages)
+            ? stored.messages.filter((m) => m && (m.text || m.speaker))
+            : []
+          const idx = beforeId ? all.findIndex((m) => m && m.id === beforeId) : all.length
+          const end = idx < 0 ? all.length : idx
+          const start = Math.max(0, end - HISTORY_PAGE_SIZE)
+          older = all.slice(start, end)
+          total = all.length || this.messages.length
+          hasMore = start > 0
+        }
         let prepended = 0
         if (older.length) {
           const seen = new Set(this.messages.map((m) => m && m.id))
@@ -1090,14 +1377,15 @@ export default {
           prepended = prepend.length
           if (prepended) this.messages = prepend.concat(this.messages)
         }
-        this.total = all.length || this.messages.length
-        this.hasMore = start > 0
+        if (prepended) this.expandThread()
+        this.total = total || this.messages.length
+        this.hasMore = hasMore
         this.$forceUpdate()
         await this.$nextTick()
         const node = this.$refs && this.$refs.thread
         if (node) {
           if (prepended && prevH) node.scrollTop = node.scrollHeight - prevH + prevTop
-          else node.scrollTop = Math.max(prevTop, 48)
+          else if (prepended) node.scrollTop = Math.max(prevTop, 8)
           this.scrollTop = node.scrollTop
         }
       } catch (e) {
@@ -1115,9 +1403,16 @@ export default {
       const atBottom = gap < 8
       this.stickToBottom = atBottom
       if (atBottom) this.unseenCount = 0
-      if (el.scrollTop > 80) this.topLoadArmed = true
+      else this.expandThread()
       if (el.scrollTop < 48) this.loadOlder()
       this.$forceUpdate()
+    },
+    onThreadWheel(e) {
+      if (!e || e.deltaY >= 0) return
+      this.expandThread()
+      const el = this.$refs && this.$refs.thread
+      if (!el) return
+      if (el.scrollTop <= 8) this.loadOlder()
     },
     jumpToLatest() {
       this.stickToBottom = true
@@ -1204,6 +1499,13 @@ export default {
         : 'SMS'
 
     const children = [
+      isChat && this.threadExpanded
+        ? h('div', {
+            class: ['thread-resize', this.resizing ? 'is-active' : ''],
+            title: '拖动调整高度',
+            onPointerdown: (e) => this.startResize(e),
+          })
+        : null,
       h('div', { class: 'row-top' }, [
         h('div', { class: 'who' }, [
           h(
@@ -1254,12 +1556,9 @@ export default {
     if (isChat && messages.length) {
       const slice = this.visibleSlice()
       const threadKids = []
-      if (this.hasMore || this.loadingMore) {
-        threadKids.push(
-          h('div', { class: 'thread-more' }, this.loadingMore ? '加载更早的消息…' : '向上滚动加载更早'),
-        )
+      if (slice.padTop) {
+        threadKids.push(h('div', { style: { height: `${slice.padTop}px`, flexShrink: 0 } }))
       }
-      threadKids.push(h('div', { style: { height: `${slice.padTop}px`, flexShrink: 0 } }))
       slice.rows.forEach((m, i) => {
         const abs = slice.start + i
         const text = String(m.text || '').trim()
@@ -1267,6 +1566,31 @@ export default {
         const prev = abs > 0 ? messages[abs - 1] : null
         const showName = Boolean(name && (!prev || String(prev.speaker || '') !== name))
         const id = String(m.id || `${abs}-${text.slice(0, 12)}`)
+        const stamp = formatChatStamp(m.receivedAt || m.webhookAt || m.publishedAt)
+        if (shouldShowTimeDivider(m, prev) && stamp) {
+          const showUp = this.hasMore && i === 0
+          threadKids.push(
+            h('div', { class: 'time-divider', key: `t-${id}` }, [
+              showUp
+                ? h(
+                    'button',
+                    {
+                      class: 'thread-up',
+                      type: 'button',
+                      title: '查看更早的消息',
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        this.expandThread()
+                        this.loadOlder()
+                      },
+                    },
+                    '>',
+                  )
+                : null,
+              h('span', stamp),
+            ]),
+          )
+        }
         threadKids.push(
           h('div', { class: 'bubble-row', key: id }, [
             showName ? h('div', { class: 'bubble-name', title: name }, name) : null,
@@ -1291,12 +1615,20 @@ export default {
           ]),
         )
       })
-      threadKids.push(h('div', { style: { height: `${slice.padBottom}px`, flexShrink: 0 } }))
+      if (slice.padBottom) {
+        threadKids.push(h('div', { style: { height: `${slice.padBottom}px`, flexShrink: 0 } }))
+      }
       children.push(
         h('div', { class: 'thread-shell' }, [
           h(
             'div',
-            { class: 'thread', ref: 'thread', onScroll: (e) => this.onThreadScroll(e) },
+            {
+              class: 'thread',
+              ref: 'thread',
+              style: { maxHeight: `${this.threadMaxPx}px` },
+              onScroll: (e) => this.onThreadScroll(e),
+              onWheel: (e) => this.onThreadWheel(e),
+            },
             [h('div', { class: 'thread-inner' }, threadKids)],
           ),
           !this.stickToBottom
