@@ -1,11 +1,20 @@
 /** smsforwarder-notify toast — match SMS sync card (avatar / sender / badge / device). */
 const { h } = globalThis.__CATRACE_VUE__ || {}
+const vueWatch = globalThis.__CATRACE_VUE__ && globalThis.__CATRACE_VUE__.watch
 if (typeof h !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v23'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v46'
+const THREAD_ROW_EST = 56
+const THREAD_OVERSCAN = 6
+const HISTORY_PAGE_SIZE = 40
+/** Group chat stamps into 2-minute buckets counting back from now. */
+const TIME_SEGMENT_MS = 2 * 60 * 1000
+const THREAD_COMPACT_MAX = 256
+const THREAD_EXPANDED_DEFAULT = 384
+const THREAD_HEIGHT_KEY = 'chatThreadHeight'
 const CSS = `
 .sf-card {
   display: flex;
@@ -245,7 +254,7 @@ const CSS = `
   background: linear-gradient(90deg, #34d399, #a7f3d0);
   transform-origin: left center;
   animation: sf-card-shrink var(--toast-auto-hide-ms, 10000ms) linear forwards;
-  margin: 0.625rem 0 0.25rem;
+  margin: 0.5rem 0 0;
 }
 .sf-card .bar.paused { animation-play-state: paused; }
 @keyframes sf-card-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
@@ -258,6 +267,209 @@ const CSS = `
   word-break: break-word;
   max-height: 10.5rem;
   overflow-y: auto;
+}
+.sf-card .thread-shell {
+  position: relative;
+  margin: 0.25rem 0 0;
+}
+.sf-card .thread-resize {
+  height: 0.5rem;
+  margin: -0.25rem 0 0.25rem;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+.sf-card .thread-resize::after {
+  content: '';
+  width: 2.25rem;
+  height: 0.1875rem;
+  border-radius: 999px;
+  background: #d1d5db;
+}
+.sf-card .thread-resize:hover::after,
+.sf-card .thread-resize.is-active::after {
+  background: #10b981;
+}
+.sf-card .thread {
+  margin: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0 0.25rem 0.125rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.sf-card .jump-new {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 3;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: #10b981;
+  box-shadow: 0 0.25rem 0.75rem rgba(16, 185, 129, 0.35);
+  border-radius: 999px;
+  padding: 0.375rem 0.625rem;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+.sf-card .jump-new.is-arrow {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: #0f766e;
+  background: #fff;
+  border: 1px solid #99f6e4;
+  box-shadow: 0 0.25rem 0.75rem rgba(15, 118, 110, 0.16);
+}
+.sf-card .jump-new.is-arrow:hover { background: #f0fdfa; }
+.sf-card .jump-new:hover { background: #059669; }
+.sf-card .jump-new svg { width: 0.875rem; height: 0.875rem; display: block; }
+.sf-card .thread-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.sf-card .thread-up {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 1rem;
+  height: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #3b82f6;
+  cursor: pointer;
+  line-height: 1;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transform: rotate(-90deg);
+  user-select: none;
+  -webkit-user-select: none;
+  animation: sf-thread-up-breathe 2.8s ease-in-out infinite;
+}
+.sf-card .thread-up:hover {
+  color: #2563eb;
+  animation-duration: 1.1s;
+}
+@keyframes sf-thread-up-breathe {
+  0%, 100% {
+    opacity: 0.55;
+    transform: rotate(-90deg) translateX(0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(-90deg) translateX(0.125rem) scale(1.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-card .thread-up { animation: none; opacity: 1; }
+}
+.sf-card .time-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sf-card .time-divider span {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.sf-card .thread::-webkit-scrollbar { width: 0.375rem; }
+.sf-card .thread::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+.sf-card .bubble-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.sf-card .bubble-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.sf-card .bubble-copy {
+  flex-shrink: 0;
+  opacity: 0;
+  border: none;
+  background: #fff;
+  padding: 0;
+  margin: 0.0625rem 0 0;
+  width: 2rem;
+  height: 2rem;
+  color: #10b981;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 1px solid #d1fae5;
+}
+.sf-card .bubble-row:hover .bubble-copy,
+.sf-card .bubble-copy:focus-visible {
+  opacity: 1;
+}
+.sf-card .bubble-copy:hover { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
+.sf-card .bubble-copy.is-ok { opacity: 1; color: #047857; background: #ecfdf5; }
+.sf-card .bubble-copy svg { width: 1.125rem; height: 1.125rem; display: block; }
+.sf-card .bubble-name {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0 0.125rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sf-card .bubble {
+  max-width: 100%;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.25rem 0.75rem 0.75rem 0.75rem;
+  background: #f3f4f6;
+  color: #1f2937;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+.sf-card .bubble.is-otp {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
 }
 .sf-card .otp-chip {
   margin-top: 0.5rem;
@@ -273,8 +485,8 @@ const CSS = `
   font-variant-numeric: tabular-nums;
 }
 .sf-card .copy-btn {
-  align-self: flex-start;
-  margin-top: 0.5rem;
+  flex: 0 0 auto;
+  align-self: flex-end;
   border: none;
   background: transparent;
   padding: 0.25rem 0.375rem;
@@ -284,19 +496,29 @@ const CSS = `
   color: #10b981;
   cursor: pointer;
   font-family: inherit;
-  line-height: 1.2;
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  white-space: nowrap;
 }
 .sf-card .copy-btn:hover { color: #059669; }
 .sf-card .copy-btn svg { width: 0.9375rem; height: 0.9375rem; flex-shrink: 0; }
 .sf-card .foot-right {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.sf-card .foot-actions {
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.75rem;
   min-width: 0;
-  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 .sf-card .block-btn {
   border: none;
@@ -325,17 +547,18 @@ const CSS = `
 .sf-card .block-btn svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
 .sf-card .row-foot {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 0.875rem;
-  min-height: 1.25rem;
 }
 .sf-card .dev {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.3125rem;
   min-width: 0;
+  max-width: 100%;
   font-size: 0.75rem;
   color: #9ca3af;
 }
@@ -417,6 +640,29 @@ function ensureStyles() {
     'catrace-plugin-smsforwarder-notify-css-v20',
     'catrace-plugin-smsforwarder-notify-css-v21',
     'catrace-plugin-smsforwarder-notify-css-v22',
+    'catrace-plugin-smsforwarder-notify-css-v23',
+    'catrace-plugin-smsforwarder-notify-css-v24',
+    'catrace-plugin-smsforwarder-notify-css-v25',
+    'catrace-plugin-smsforwarder-notify-css-v26',
+    'catrace-plugin-smsforwarder-notify-css-v27',
+    'catrace-plugin-smsforwarder-notify-css-v28',
+    'catrace-plugin-smsforwarder-notify-css-v29',
+    'catrace-plugin-smsforwarder-notify-css-v30',
+    'catrace-plugin-smsforwarder-notify-css-v31',
+    'catrace-plugin-smsforwarder-notify-css-v32',
+    'catrace-plugin-smsforwarder-notify-css-v33',
+    'catrace-plugin-smsforwarder-notify-css-v34',
+    'catrace-plugin-smsforwarder-notify-css-v35',
+    'catrace-plugin-smsforwarder-notify-css-v36',
+    'catrace-plugin-smsforwarder-notify-css-v37',
+    'catrace-plugin-smsforwarder-notify-css-v38',
+    'catrace-plugin-smsforwarder-notify-css-v39',
+    'catrace-plugin-smsforwarder-notify-css-v40',
+    'catrace-plugin-smsforwarder-notify-css-v41',
+    'catrace-plugin-smsforwarder-notify-css-v42',
+    'catrace-plugin-smsforwarder-notify-css-v43',
+    'catrace-plugin-smsforwarder-notify-css-v44',
+    'catrace-plugin-smsforwarder-notify-css-v45',
   ]) {
     const old = document.getElementById(id)
     if (old) old.remove()
@@ -449,6 +695,88 @@ function formatClock(raw) {
     return `${m[1].padStart(2, '0')}:${m[2]}:${(m[3] || '00').padStart(2, '0')}`
   }
   return s
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+function startOfLocalDay(ms) {
+  const d = new Date(ms)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/** QQ-style divider: 今天 12:34 / 昨天 12:34 / 周一 12:34 / 3月12日 12:34 / 2025年3月12日 12:34 */
+function formatChatStamp(raw, nowMs = Date.now()) {
+  const ms = parseTimeMs(raw)
+  if (!Number.isFinite(ms)) return ''
+  const d = new Date(ms)
+  const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  const today0 = startOfLocalDay(nowMs)
+  const that0 = startOfLocalDay(ms)
+  const dayDiff = Math.round((today0 - that0) / 86400000)
+  if (dayDiff <= 0) return hm
+  if (dayDiff === 1) return `昨天 ${hm}`
+  if (dayDiff < 7) {
+    const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return `${week[d.getDay()]} ${hm}`
+  }
+  const md = `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+  if (d.getFullYear() === new Date(nowMs).getFullYear()) return md
+  return `${d.getFullYear()}年${md}`
+}
+
+function messageTimeMs(m) {
+  if (!m) return NaN
+  return parseTimeMs(m.receivedAt)
+}
+
+function timeSegmentIndex(ms, nowMs = Date.now()) {
+  if (!Number.isFinite(ms)) return NaN
+  return Math.floor(Math.max(0, nowMs - ms) / TIME_SEGMENT_MS)
+}
+
+function shouldShowTimeDivider(curr, prev, nowMs = Date.now()) {
+  if (!curr) return false
+  const currMs = messageTimeMs(curr)
+  if (!Number.isFinite(currMs)) return !prev
+  if (!prev) return true
+  const prevMs = messageTimeMs(prev)
+  if (!Number.isFinite(prevMs)) return true
+  return timeSegmentIndex(currMs, nowMs) !== timeSegmentIndex(prevMs, nowMs)
+}
+
+function sortMessagesByTime(list) {
+  return [...list].sort((a, b) => {
+    const ta = messageTimeMs(a)
+    const tb = messageTimeMs(b)
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
+    return 0
+  })
+}
+
+function insertChronological(messages, msg) {
+  if (!msg || !msg.id) return false
+  if (messages.some((m) => m && m.id === msg.id)) return false
+  const t = messageTimeMs(msg)
+  if (!messages.length || !Number.isFinite(t)) {
+    messages.push(msg)
+    return true
+  }
+  const lastT = messageTimeMs(messages[messages.length - 1])
+  if (!Number.isFinite(lastT) || t >= lastT) {
+    messages.push(msg)
+    return true
+  }
+  let i = messages.length - 1
+  while (i >= 0) {
+    const mt = messageTimeMs(messages[i])
+    if (Number.isFinite(mt) && mt <= t) break
+    i -= 1
+  }
+  messages.splice(i + 1, 0, msg)
+  return true
 }
 
 function parseTimeMs(raw) {
@@ -667,20 +995,23 @@ function avatarProps(appName, packageName) {
   }
 }
 
-function pickOtpFromText(title, body, packageName, appName) {
+function pickOtpFromText(title, body) {
   const text = `${title || ''}\n${body || ''}`.replace(/[０-９]/g, (ch) =>
     String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30),
   )
   if (!text.trim()) return ''
+  const kw =
+    /验证码|校验码|动态码|动态密码|短信码|短信验证|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP|verification\s*code|security\s*code/i
+  if (!kw.test(text)) return ''
   const nearAfter =
-    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|口令|密码|OTP|PIN|code|Code|CODE)[^\d]{0,16}(\d(?:[\s-]?\d){3,7})/i
+    /(?:验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|提取码|兑换码|OTP)[^\d]{0,16}(\d(?:[\s-]?\d){3,7})/i
   const nm = nearAfter.exec(text)
   if (nm) {
     const d = nm[1].replace(/\D/g, '')
     if (d.length >= 4 && d.length <= 8) return d
   }
   const nearBefore =
-    /(\d(?:[\s-]?\d){3,7})[^\d]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP|code)/i
+    /(\d(?:[\s-]?\d){3,7})[^\d]{0,8}(?:验证码|校验码|动态码|动态密码|登录码|OTP)/i
   const nb = nearBefore.exec(text)
   if (nb) {
     const d = nb[1].replace(/\D/g, '')
@@ -691,18 +1022,8 @@ function pickOtpFromText(title, body, packageName, appName) {
     const d = cn[1].replace(/\D/g, '')
     if (d.length >= 4 && d.length <= 8) return d
   }
-  const kw =
-    /验证码|校验码|动态码|动态密码|短信码|登录码|确认码|授权码|安全码|识别码|口令|密码|验证|校验|OTP|PIN|verification\s*code|security\s*code|\bcode\b/i
   const all = text.match(/(?<!\d)\d{4,8}(?!\d)/g) || []
-  if (kw.test(text) && all.length) return all.find((x) => x.length === 6) || all[0]
-  const smsLike =
-    /mms|sms|messaging|telephony|短信|信息|SMS|MMS/i.test(`${packageName || ''} ${appName || ''}`)
-  const compact = text.replace(/\s+/g, ' ').trim()
-  if ((smsLike || compact.length <= 120) && all.length) {
-    if (all.length === 1) return all[0]
-    return all.find((x) => x.length === 6) || all[0]
-  }
-  return ''
+  return all.find((x) => x.length === 6) || all[0] || ''
 }
 
 function svgIcon(paths, viewBox = '0 0 24 24') {
@@ -769,6 +1090,18 @@ function IconPhone() {
   ])
 }
 
+function IconChevronDown() {
+  return svgIcon([
+    h('path', {
+      d: 'M6 9l6 6 6-6',
+      stroke: 'currentColor',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    }),
+  ])
+}
+
 function IconBan() {
   return svgIcon([
     h('circle', {
@@ -797,23 +1130,362 @@ export default {
   created() {
     ensureStyles()
     this.blockArmedAt = 0
+    this.blockArmedKind = ''
+    this.copiedId = ''
+    this.copiedTimer = null
+    this.stickToBottom = true
+    this.unseenCount = 0
+    this.messages = []
+    this.total = 0
+    this.hasMore = false
+    this.loadingMore = false
+    this.threadKey = ''
+    this.scrollTop = 0
+    this.needScrollBottom = false
+    this.topLoadArmed = true
+    this.lastLoadAt = 0
+    this.threadExpanded = false
+    this.threadMaxPx = THREAD_COMPACT_MAX
+    this.expandedPreferred = THREAD_EXPANDED_DEFAULT
+    this.heightMap = {}
+    this.heightMapReady = false
+    this.resizeStartY = 0
+    this.resizeStartH = 0
+    this.resizing = false
+    this._onResizeMove = null
+    this._onResizeUp = null
+    this.syncFromPayload((this.event && this.event.payload) || {}, { initial: true })
+  },
+  mounted() {
+    if (typeof vueWatch === 'function') {
+      this._unwatchEvent = vueWatch(
+        () => this.event,
+        (ev) => this.syncFromPayload((ev && ev.payload) || {}),
+        { deep: true },
+      )
+    }
+    this.restoreThreadHeight()
+    this.flushScrollBottom()
+  },
+  updated() {
+    this.flushScrollBottom()
   },
   beforeUnmount() {
     if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
+    if (this.copiedTimer) clearTimeout(this.copiedTimer)
+    this.stopResize()
+    if (typeof this._unwatchEvent === 'function') this._unwatchEvent()
   },
   methods: {
-    handleBlockClick() {
+    storeKeyFromThread(key) {
+      const digest = String(key || '').split(':').pop() || ''
+      return `chat_${digest.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}`
+    },
+    pluginApi() {
+      return typeof plugin !== 'undefined' ? plugin : null
+    },
+    flushScrollBottom() {
+      if (!this.needScrollBottom) return
+      const el = this.$refs && this.$refs.thread
+      if (!el) return
+      this.needScrollBottom = false
+      el.scrollTop = el.scrollHeight
+      this.scrollTop = el.scrollTop
+    },
+    syncFromPayload(pl, opts = {}) {
+      const incoming = Array.isArray(pl.messages)
+        ? pl.messages.filter((m) => m && (m.text || m.speaker))
+        : []
+      const key = String(pl.threadKey || '')
+      if (key && key !== this.threadKey) {
+        this.messages = sortMessagesByTime(incoming)
+        this.threadKey = key
+        this.stickToBottom = true
+        this.unseenCount = 0
+        this.needScrollBottom = true
+        this.topLoadArmed = true
+        this.threadExpanded = false
+        this.threadMaxPx = THREAD_COMPACT_MAX
+        this.applyPreferredHeight()
+      } else if (incoming.length) {
+        let added = 0
+        let appendedTail = 0
+        const beforeLen = this.messages.length
+        const lastId = beforeLen ? this.messages[beforeLen - 1] && this.messages[beforeLen - 1].id : ''
+        for (const m of incoming) {
+          if (insertChronological(this.messages, m)) added += 1
+        }
+        if (added) {
+          if (lastId && this.messages[this.messages.length - 1] && this.messages[this.messages.length - 1].id !== lastId) {
+            appendedTail = 1
+          }
+          if (this.stickToBottom) {
+            this.unseenCount = 0
+            this.needScrollBottom = true
+          } else if (appendedTail) {
+            this.unseenCount += added
+          }
+        }
+      } else if (opts.initial && this.stickToBottom) {
+        this.needScrollBottom = true
+      }
+      this.total = Number(pl.threadCount) || this.messages.length
+      this.hasMore = pl.hasMore === true || this.messages.length < this.total
+    },
+    clampThreadHeight(px) {
+      const n = Number(px)
+      if (!Number.isFinite(n)) return THREAD_EXPANDED_DEFAULT
+      return Math.max(THREAD_COMPACT_MAX, Math.round(n))
+    },
+    currentTitle() {
+      const pl = (this.event && this.event.payload) || {}
+      return String(pl.title || this.event && this.event.title || '').trim()
+    },
+    heightMapKey() {
+      const title = this.currentTitle()
+      if (title) return `title:${title.toLowerCase()}`
+      const key = String(this.threadKey || '').trim()
+      return key ? `thread:${key}` : ''
+    },
+    applyPreferredHeight() {
+      const key = this.heightMapKey()
+      const px = key && this.heightMap ? this.heightMap[key] : 0
+      this.expandedPreferred = px ? this.clampThreadHeight(px) : THREAD_EXPANDED_DEFAULT
+    },
+    async restoreThreadHeight() {
+      const api = this.pluginApi()
+      if (!api || !api.storage || typeof api.storage.get !== 'function') return
+      try {
+        const saved = await api.storage.get(THREAD_HEIGHT_KEY)
+        const map = {}
+        if (saved && typeof saved === 'object') {
+          if (saved.heights && typeof saved.heights === 'object') {
+            for (const [k, v] of Object.entries(saved.heights)) {
+              if (k) map[k] = this.clampThreadHeight(v)
+            }
+          } else if (saved.px != null) {
+            // old global height — ignore so titles stay independent
+          }
+        }
+        this.heightMap = map
+        this.heightMapReady = true
+        this.applyPreferredHeight()
+        if (this.threadExpanded) {
+          this.threadMaxPx = this.expandedPreferred
+          this.$forceUpdate()
+        }
+      } catch {
+        this.heightMapReady = true
+      }
+    },
+    persistThreadHeight() {
+      const api = this.pluginApi()
+      if (!api || !api.storage || typeof api.storage.set !== 'function') return
+      const key = this.heightMapKey()
+      if (!key) return
+      this.heightMap = { ...(this.heightMap || {}), [key]: this.expandedPreferred }
+      api.storage.set(THREAD_HEIGHT_KEY, { v: 2, heights: this.heightMap }).catch(() => {})
+    },
+    expandThread() {
+      const next = this.clampThreadHeight(this.expandedPreferred || THREAD_EXPANDED_DEFAULT)
+      if (this.threadExpanded && this.threadMaxPx === next) return
+      this.threadExpanded = true
+      this.threadMaxPx = next
+      this.$forceUpdate()
+    },
+    startResize(e) {
+      if (!e || e.button != null && e.button !== 0) return
+      this.expandThread()
+      this.resizing = true
+      this.resizeStartY = e.clientY
+      this.resizeStartH = this.threadMaxPx
+      this._onResizeMove = (ev) => this.onResizeMove(ev)
+      this._onResizeUp = () => this.stopResize(true)
+      window.addEventListener('pointermove', this._onResizeMove)
+      window.addEventListener('pointerup', this._onResizeUp)
+      window.addEventListener('pointercancel', this._onResizeUp)
+      e.preventDefault()
+    },
+    onResizeMove(e) {
+      if (!this.resizing) return
+      // Drag the top handle: moving up grows the thread (card grows upward).
+      const next = this.clampThreadHeight(this.resizeStartH + (this.resizeStartY - e.clientY))
+      this.threadMaxPx = next
+      this.expandedPreferred = next
+      this.threadExpanded = true
+      this.$forceUpdate()
+    },
+    stopResize(persist) {
+      if (this._onResizeMove) window.removeEventListener('pointermove', this._onResizeMove)
+      if (this._onResizeUp) {
+        window.removeEventListener('pointerup', this._onResizeUp)
+        window.removeEventListener('pointercancel', this._onResizeUp)
+      }
+      this._onResizeMove = null
+      this._onResizeUp = null
+      if (this.resizing && persist) this.persistThreadHeight()
+      this.resizing = false
+      this.$forceUpdate()
+    },
+    visibleSlice() {
+      const all = this.messages
+      const viewH = this.threadMaxPx || THREAD_COMPACT_MAX
+      const count = Math.ceil(viewH / THREAD_ROW_EST) + THREAD_OVERSCAN * 2
+      if (this.stickToBottom || this.needScrollBottom) {
+        const start = Math.max(0, all.length - count)
+        return {
+          start,
+          end: all.length,
+          padTop: start * THREAD_ROW_EST,
+          padBottom: 0,
+          rows: all.slice(start),
+        }
+      }
+      const start = Math.max(0, Math.floor(this.scrollTop / THREAD_ROW_EST) - THREAD_OVERSCAN)
+      const end = Math.min(all.length, start + count)
+      return {
+        start,
+        end,
+        padTop: start * THREAD_ROW_EST,
+        padBottom: Math.max(0, (all.length - end) * THREAD_ROW_EST),
+        rows: all.slice(start, end),
+      }
+    },
+    async loadOlder() {
+      if (this.loadingMore || !this.hasMore || !this.threadKey) return
+      if (Date.now() - (this.lastLoadAt || 0) < 350) return
+      this.expandThread()
+      const api = this.pluginApi()
+      if (!api) return
+      const first = this.messages[0]
+      const beforeId = first && first.id
+      this.loadingMore = true
+      this.lastLoadAt = Date.now()
+      const el = this.$refs && this.$refs.thread
+      const prevH = el ? el.scrollHeight : 0
+      const prevTop = el ? el.scrollTop : 0
+      try {
+        let older = []
+        let total = this.total
+        let hasMore = false
+        const sidecar = api.sidecar
+        if (sidecar && typeof sidecar.request === 'function') {
+          try {
+            const page = await sidecar.request('loadThreadPage', {
+              threadKey: this.threadKey,
+              beforeId: beforeId || '',
+              limit: HISTORY_PAGE_SIZE,
+            })
+            if (page && Array.isArray(page.messages)) {
+              older = page.messages.filter((m) => m && (m.text || m.speaker))
+              total = Number(page.total) || total
+              hasMore = page.hasMore === true
+            }
+          } catch (e) {
+            console.warn('[smsforwarder-notify] loadThreadPage failed', e)
+          }
+        }
+        if (!older.length && api.storage && typeof api.storage.get === 'function') {
+          const stored = await api.storage.get(this.storeKeyFromThread(this.threadKey))
+          const all = sortMessagesByTime(
+            stored && Array.isArray(stored.messages)
+              ? stored.messages.filter((m) => m && (m.text || m.speaker))
+              : [],
+          )
+          const idx = beforeId ? all.findIndex((m) => m && m.id === beforeId) : all.length
+          const end = idx < 0 ? all.length : idx
+          const start = Math.max(0, end - HISTORY_PAGE_SIZE)
+          older = all.slice(start, end)
+          total = all.length || this.messages.length
+          hasMore = start > 0
+        }
+        let prepended = 0
+        if (older.length) {
+          for (const m of older) {
+            if (insertChronological(this.messages, m)) prepended += 1
+          }
+        }
+        if (prepended) this.expandThread()
+        this.total = total || this.messages.length
+        this.hasMore = hasMore
+        this.$forceUpdate()
+        await this.$nextTick()
+        const node = this.$refs && this.$refs.thread
+        if (node) {
+          if (prepended && prevH) node.scrollTop = node.scrollHeight - prevH + prevTop
+          else if (prepended) node.scrollTop = Math.max(prevTop, 8)
+          this.scrollTop = node.scrollTop
+        }
+      } catch (e) {
+        console.warn('[smsforwarder-notify] load older failed', e)
+      } finally {
+        this.loadingMore = false
+        this.$forceUpdate()
+      }
+    },
+    onThreadScroll(e) {
+      const el = e && e.target
+      if (!el) return
+      this.scrollTop = el.scrollTop
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+      const atBottom = gap < 8
+      this.stickToBottom = atBottom
+      if (atBottom) this.unseenCount = 0
+      else this.expandThread()
+      if (el.scrollTop < 48) this.loadOlder()
+      this.$forceUpdate()
+    },
+    onThreadWheel(e) {
+      if (!e || e.deltaY >= 0) return
+      this.expandThread()
+      const el = this.$refs && this.$refs.thread
+      if (!el) return
+      if (el.scrollTop <= 8) this.loadOlder()
+    },
+    jumpToLatest() {
+      this.stickToBottom = true
+      this.unseenCount = 0
+      this.needScrollBottom = true
+      this.$forceUpdate()
+      this.$nextTick(() => this.flushScrollBottom())
+    },
+    async copyBubble(text, id) {
+      const value = String(text || '').trim()
+      if (!value) return
+      try {
+        const api = this.pluginApi()
+        if (api && api.clipboard && typeof api.clipboard.writeText === 'function') {
+          await api.clipboard.writeText(value)
+        } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(value)
+        }
+        this.copiedId = id
+        if (this.copiedTimer) clearTimeout(this.copiedTimer)
+        this.copiedTimer = setTimeout(() => {
+          this.copiedId = ''
+          this.$forceUpdate()
+        }, 1200)
+        this.$forceUpdate()
+      } catch (e) {
+        console.warn('[smsforwarder-notify] copy bubble failed', e)
+      }
+    },
+    handleBlockClick(kind) {
       const now = Date.now()
-      if (this.blockArmedAt && now - this.blockArmedAt < 5000) {
+      if (this.blockArmedKind === kind && this.blockArmedAt && now - this.blockArmedAt < 5000) {
         if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
         this.blockArmedAt = 0
-        this.$emit('action', 'block-app')
+        this.blockArmedKind = ''
+        this.$emit('action', kind)
         return
       }
       this.blockArmedAt = now
+      this.blockArmedKind = kind
       if (this.blockArmedTimer) clearTimeout(this.blockArmedTimer)
       this.blockArmedTimer = setTimeout(() => {
         this.blockArmedAt = 0
+        this.blockArmedKind = ''
+        this.$forceUpdate()
       }, 5000)
       this.$forceUpdate()
     },
@@ -831,30 +1503,37 @@ export default {
       '通知'
     const timeMeta = buildTimeMeta(payload)
     const device = String(payload.device || '').trim()
-    const bodyText = String(event.body || payload.body || '')
+    const noticeKind = String(payload.noticeKind || '')
+    const messages = Array.isArray(this.messages) ? this.messages : []
+    const isChat = noticeKind === 'chat' || messages.length > 0
+    const bodyText = isChat ? '' : String(event.body || payload.body || '')
 
     let otp = payload.otp ? String(payload.otp) : ''
-    if (!otp) {
+    if (!otp && noticeKind !== 'chat') {
       otp =
-        pickOtpFromText(
-          payload.title || event.title,
-          payload.body || event.body,
-          payload.packageName,
-          payload.appName,
-        ) || ''
+        pickOtpFromText(payload.title || event.title, payload.body || event.body) || ''
     }
 
     const actions = Array.isArray(event.actions) ? event.actions.slice() : []
-    const hasCopyBody = actions.some((a) => a && a.id === 'copy-body')
     const hasCopyOtp = actions.some((a) => a && a.id === 'copy-otp')
     const hasBlock = actions.some((a) => a && a.id === 'block-app')
-    // only emit ids that exist on the bus event (resolve_action validates whitelist)
-    const copyActionId = otp && hasCopyOtp ? 'copy-otp' : hasCopyBody ? 'copy-body' : hasCopyOtp ? 'copy-otp' : ''
-    const copyLabel = copyActionId === 'copy-otp' ? '复制验证码' : '复制正文'
-    const dismiss = actions.find((a) => a && a.id === 'dismiss')
+    const hasBlockTitle = actions.some((a) => a && a.id === 'block-title')
+    const copyActionId = otp && hasCopyOtp ? 'copy-otp' : ''
     const av = avatarProps(appName, pkg)
+    const tagLabel = noticeKind === 'otp'
+      ? '验证码'
+      : isChat
+        ? `${this.total || messages.length}条`
+        : 'SMS'
 
     const children = [
+      isChat && this.threadExpanded
+        ? h('div', {
+            class: ['thread-resize', this.resizing ? 'is-active' : ''],
+            title: '拖动调整高度',
+            onPointerdown: (e) => this.startResize(e),
+          })
+        : null,
       h('div', { class: 'row-top' }, [
         h('div', { class: 'who' }, [
           h(
@@ -869,7 +1548,7 @@ export default {
           h('div', { class: 'meta-col' }, [
             h('div', { class: 'name-line' }, [
               h('h2', { class: 'sender', title: sender }, sender),
-              h('span', { class: 'tag' }, 'SMS'),
+              h('span', { class: 'tag' }, tagLabel),
             ]),
             renderTimeRow(timeMeta),
           ]),
@@ -896,16 +1575,112 @@ export default {
     if (!event.sticky) {
       children.push(
         h('div', {
+          key: payload.publishedAt || payload.threadCount || 'bar',
           class: ['bar', this.isHovered ? 'paused' : ''],
         }),
       )
     }
 
-    if (bodyText) {
+    if (isChat && messages.length) {
+      const slice = this.visibleSlice()
+      const threadKids = []
+      if (slice.padTop) {
+        threadKids.push(h('div', { style: { height: `${slice.padTop}px`, flexShrink: 0 } }))
+      }
+      slice.rows.forEach((m, i) => {
+        const abs = slice.start + i
+        const text = String(m.text || '').trim()
+        const name = String(m.speaker || '').trim()
+        const prev = abs > 0 ? messages[abs - 1] : null
+        const showName = Boolean(name && (!prev || String(prev.speaker || '') !== name))
+        const id = String(m.id || `${abs}-${text.slice(0, 12)}`)
+        const stamp = formatChatStamp(m.receivedAt)
+        if (shouldShowTimeDivider(m, prev) && stamp) {
+          const showUp = this.hasMore && i === 0
+          threadKids.push(
+            h('div', { class: 'time-divider', key: `t-${id}` }, [
+              showUp
+                ? h(
+                    'button',
+                    {
+                      class: 'thread-up',
+                      type: 'button',
+                      title: '查看更早的消息',
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        this.expandThread()
+                        this.loadOlder()
+                      },
+                    },
+                    '>',
+                  )
+                : null,
+              h('span', stamp),
+            ]),
+          )
+        }
+        threadKids.push(
+          h('div', { class: 'bubble-row', key: id }, [
+            showName ? h('div', { class: 'bubble-name', title: name }, name) : null,
+            text
+              ? h('div', { class: 'bubble-wrap' }, [
+                  h('div', { class: 'bubble' }, text),
+                  h(
+                    'button',
+                    {
+                      class: ['bubble-copy', this.copiedId === id ? 'is-ok' : ''],
+                      type: 'button',
+                      title: this.copiedId === id ? '已复制' : '复制这条',
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        this.copyBubble(text, id)
+                      },
+                    },
+                    [IconCopy()],
+                  ),
+                ])
+              : null,
+          ]),
+        )
+      })
+      if (slice.padBottom) {
+        threadKids.push(h('div', { style: { height: `${slice.padBottom}px`, flexShrink: 0 } }))
+      }
+      children.push(
+        h('div', { class: 'thread-shell' }, [
+          h(
+            'div',
+            {
+              class: 'thread',
+              ref: 'thread',
+              style: { maxHeight: `${this.threadMaxPx}px` },
+              onScroll: (e) => this.onThreadScroll(e),
+              onWheel: (e) => this.onThreadWheel(e),
+            },
+            [h('div', { class: 'thread-inner' }, threadKids)],
+          ),
+          !this.stickToBottom
+            ? h(
+                'button',
+                {
+                  class: ['jump-new', this.unseenCount > 0 ? '' : 'is-arrow'],
+                  type: 'button',
+                  title: this.unseenCount > 0 ? `有 ${this.unseenCount} 条新消息` : '回到最新',
+                  onClick: (e) => {
+                    e.stopPropagation()
+                    this.jumpToLatest()
+                  },
+                },
+                this.unseenCount > 0 ? `新消息 ${this.unseenCount}+` : [IconChevronDown()],
+              )
+            : null,
+        ]),
+      )
+    } else if (bodyText) {
       children.push(h('p', { class: 'msg' }, bodyText))
     }
 
-    if (otp) {
+    if (otp && !isChat) {
       children.push(h('div', { class: 'otp-chip' }, otp))
     }
 
@@ -919,40 +1694,63 @@ export default {
                 type: 'button',
                 onClick: () => this.$emit('action', copyActionId),
               },
-              [IconCopy(), copyLabel],
+              [IconCopy(), '复制验证码'],
             )
-          : h('div', { class: 'dev' }),
+          : h('div'),
         h('div', { class: 'foot-right' }, [
-          hasBlock
-            ? h(
-                'button',
-                {
-                  class: ['block-btn', this.blockArmedAt ? 'is-armed' : ''],
-                  type: 'button',
-                  title: isLockscreenSms ? `不再显示标题为「${sender}」的通知` : '不再显示该应用的通知',
-                  onClick: () => this.handleBlockClick(),
-                },
-                [
-                  IconBan(),
-                  this.blockArmedAt
-                    ? isLockscreenSms
+          h(
+            'div',
+            { class: 'dev', title: device || appName || '' },
+            [IconPhone(), h('span', { class: 'dev-name' }, device || appName || '设备')],
+          ),
+          h('div', { class: 'foot-actions' }, [
+            hasBlockTitle
+              ? h(
+                  'button',
+                  {
+                    class: [
+                      'block-btn',
+                      this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
+                    ],
+                    type: 'button',
+                    title: `不再显示标题含「${sender}」的通知`,
+                    onClick: () => this.handleBlockClick('block-title'),
+                  },
+                  [
+                    IconBan(),
+                    this.blockArmedKind === 'block-title' && this.blockArmedAt
                       ? '确认屏蔽标题？'
-                      : '确认屏蔽？'
-                    : isLockscreenSms
-                      ? '屏蔽这个标题'
-                      : '屏蔽此应用',
-                ],
-              )
-            : null,
-          device
-            ? h('div', { class: 'dev', title: device }, [
-                IconPhone(),
-                h('span', { class: 'dev-name' }, device),
-              ])
-            : h('div', { class: 'dev' }, [
-                IconPhone(),
-                h('span', { class: 'dev-name' }, appName || '设备'),
-              ]),
+                      : '屏蔽这个标题',
+                  ],
+                )
+              : null,
+            hasBlock
+              ? h(
+                  'button',
+                  {
+                    class: [
+                      'block-btn',
+                      this.blockArmedKind === 'block-app' && this.blockArmedAt ? 'is-armed' : '',
+                    ],
+                    type: 'button',
+                    title: isLockscreenSms
+                      ? `不再显示标题为「${sender}」的通知`
+                      : '不再显示该应用的通知',
+                    onClick: () => this.handleBlockClick('block-app'),
+                  },
+                  [
+                    IconBan(),
+                    this.blockArmedKind === 'block-app' && this.blockArmedAt
+                      ? isLockscreenSms
+                        ? '确认屏蔽标题？'
+                        : '确认屏蔽应用？'
+                      : isLockscreenSms
+                        ? '屏蔽这个标题'
+                        : '屏蔽此应用',
+                  ],
+                )
+              : null,
+          ]),
         ]),
       ]),
     )
