@@ -729,7 +729,7 @@ function formatChatStamp(raw, nowMs = Date.now()) {
 
 function messageTimeMs(m) {
   if (!m) return NaN
-  return parseTimeMs(m.receivedAt || m.webhookAt || m.publishedAt || m.at)
+  return parseTimeMs(m.receivedAt)
 }
 
 function timeSegmentIndex(ms, nowMs = Date.now()) {
@@ -745,6 +745,38 @@ function shouldShowTimeDivider(curr, prev, nowMs = Date.now()) {
   const prevMs = messageTimeMs(prev)
   if (!Number.isFinite(prevMs)) return true
   return timeSegmentIndex(currMs, nowMs) !== timeSegmentIndex(prevMs, nowMs)
+}
+
+function sortMessagesByTime(list) {
+  return [...list].sort((a, b) => {
+    const ta = messageTimeMs(a)
+    const tb = messageTimeMs(b)
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
+    return 0
+  })
+}
+
+function insertChronological(messages, msg) {
+  if (!msg || !msg.id) return false
+  if (messages.some((m) => m && m.id === msg.id)) return false
+  const t = messageTimeMs(msg)
+  if (!messages.length || !Number.isFinite(t)) {
+    messages.push(msg)
+    return true
+  }
+  const lastT = messageTimeMs(messages[messages.length - 1])
+  if (!Number.isFinite(lastT) || t >= lastT) {
+    messages.push(msg)
+    return true
+  }
+  let i = messages.length - 1
+  while (i >= 0) {
+    const mt = messageTimeMs(messages[i])
+    if (Number.isFinite(mt) && mt <= t) break
+    i -= 1
+  }
+  messages.splice(i + 1, 0, msg)
+  return true
 }
 
 function parseTimeMs(raw) {
@@ -1166,7 +1198,7 @@ export default {
         : []
       const key = String(pl.threadKey || '')
       if (key && key !== this.threadKey) {
-        this.messages = incoming.slice()
+        this.messages = sortMessagesByTime(incoming)
         this.threadKey = key
         this.stickToBottom = true
         this.unseenCount = 0
@@ -1176,20 +1208,21 @@ export default {
         this.threadMaxPx = THREAD_COMPACT_MAX
         this.applyPreferredHeight()
       } else if (incoming.length) {
-        const seen = new Set(this.messages.map((m) => m && m.id))
         let added = 0
+        let appendedTail = 0
+        const beforeLen = this.messages.length
+        const lastId = beforeLen ? this.messages[beforeLen - 1] && this.messages[beforeLen - 1].id : ''
         for (const m of incoming) {
-          if (m && m.id && !seen.has(m.id)) {
-            this.messages.push(m)
-            seen.add(m.id)
-            added += 1
-          }
+          if (insertChronological(this.messages, m)) added += 1
         }
         if (added) {
+          if (lastId && this.messages[this.messages.length - 1] && this.messages[this.messages.length - 1].id !== lastId) {
+            appendedTail = 1
+          }
           if (this.stickToBottom) {
             this.unseenCount = 0
             this.needScrollBottom = true
-          } else {
+          } else if (appendedTail) {
             this.unseenCount += added
           }
         }
@@ -1354,9 +1387,11 @@ export default {
         }
         if (!older.length && api.storage && typeof api.storage.get === 'function') {
           const stored = await api.storage.get(this.storeKeyFromThread(this.threadKey))
-          const all = stored && Array.isArray(stored.messages)
-            ? stored.messages.filter((m) => m && (m.text || m.speaker))
-            : []
+          const all = sortMessagesByTime(
+            stored && Array.isArray(stored.messages)
+              ? stored.messages.filter((m) => m && (m.text || m.speaker))
+              : [],
+          )
           const idx = beforeId ? all.findIndex((m) => m && m.id === beforeId) : all.length
           const end = idx < 0 ? all.length : idx
           const start = Math.max(0, end - HISTORY_PAGE_SIZE)
@@ -1366,16 +1401,9 @@ export default {
         }
         let prepended = 0
         if (older.length) {
-          const seen = new Set(this.messages.map((m) => m && m.id))
-          const prepend = []
           for (const m of older) {
-            if (m && m.id && !seen.has(m.id)) {
-              prepend.push(m)
-              seen.add(m.id)
-            }
+            if (insertChronological(this.messages, m)) prepended += 1
           }
-          prepended = prepend.length
-          if (prepended) this.messages = prepend.concat(this.messages)
         }
         if (prepended) this.expandThread()
         this.total = total || this.messages.length
@@ -1566,7 +1594,7 @@ export default {
         const prev = abs > 0 ? messages[abs - 1] : null
         const showName = Boolean(name && (!prev || String(prev.speaker || '') !== name))
         const id = String(m.id || `${abs}-${text.slice(0, 12)}`)
-        const stamp = formatChatStamp(m.receivedAt || m.webhookAt || m.publishedAt)
+        const stamp = formatChatStamp(m.receivedAt)
         if (shouldShowTimeDivider(m, prev) && stamp) {
           const showUp = this.hasMore && i === 0
           threadKids.push(

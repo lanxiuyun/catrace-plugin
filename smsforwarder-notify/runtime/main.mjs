@@ -796,8 +796,47 @@ function normalizeStoredMessage(m) {
     speaker,
     text,
     receivedAt: m.receivedAt || '',
+    webhookAt: m.webhookAt || '',
     otp: m.otp ? String(m.otp) : '',
   }
+}
+
+function messageTimeMs(m) {
+  if (!m) return NaN
+  const raw = m.receivedAt
+  if (raw == null || raw === '') return NaN
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e12 ? raw * 1000 : raw
+  const t = Date.parse(String(raw))
+  return Number.isFinite(t) ? t : NaN
+}
+
+function sortMessagesByTime(list) {
+  return [...list].sort((a, b) => {
+    const ta = messageTimeMs(a)
+    const tb = messageTimeMs(b)
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb
+    return 0
+  })
+}
+
+function insertChronological(messages, msg) {
+  const t = messageTimeMs(msg)
+  if (!messages.length || !Number.isFinite(t)) {
+    messages.push(msg)
+    return
+  }
+  const lastT = messageTimeMs(messages[messages.length - 1])
+  if (!Number.isFinite(lastT) || t >= lastT) {
+    messages.push(msg)
+    return
+  }
+  let i = messages.length - 1
+  while (i >= 0) {
+    const mt = messageTimeMs(messages[i])
+    if (Number.isFinite(mt) && mt <= t) break
+    i -= 1
+  }
+  messages.splice(i + 1, 0, msg)
 }
 
 function sliceTail(messages, count) {
@@ -840,7 +879,7 @@ async function persistThreads() {
       v: 1,
       key,
       messages: Array.isArray(session.messages)
-        ? session.messages.slice(-MAX_THREAD_MESSAGES)
+        ? sortMessagesByTime(session.messages).slice(-MAX_THREAD_MESSAGES)
         : [],
       lastAt: session.lastAt || 0,
       packageName: session.packageName || '',
@@ -888,9 +927,11 @@ async function hydrateSession(key) {
   const meta = threadIndex.get(key)
   if (!meta) return null
   const raw = await storageGet(meta.storeKey)
-  const messages = raw && Array.isArray(raw.messages)
-    ? raw.messages.map(normalizeStoredMessage).filter(Boolean)
-    : []
+  const messages = sortMessagesByTime(
+    raw && Array.isArray(raw.messages)
+      ? raw.messages.map(normalizeStoredMessage).filter(Boolean)
+      : [],
+  )
   session = {
     key,
     storeKey: meta.storeKey,
@@ -939,9 +980,11 @@ function loadThreads() {
         const key = String(t.key)
         const digest = key.split(':').pop() || key
         const storeKey = storageKeyForDigest(digest)
-        const messages = Array.isArray(t.messages)
-          ? t.messages.map(normalizeStoredMessage).filter(Boolean).slice(-MAX_THREAD_MESSAGES)
-          : []
+        const messages = sortMessagesByTime(
+          Array.isArray(t.messages)
+            ? t.messages.map(normalizeStoredMessage).filter(Boolean).slice(-MAX_THREAD_MESSAGES)
+            : [],
+        )
         const session = {
           key,
           storeKey,
@@ -993,13 +1036,14 @@ async function takeThreadSession(n, hash, otp) {
     id: String(hash || '').slice(0, 16) || `${Date.now().toString(36)}`,
     speaker: parsed.speaker,
     text: parsed.text || String(n.body || ''),
-    receivedAt: n.receivedAt || n.webhookAt || toIsoNow(),
+    receivedAt: n.receivedAt || '',
+    webhookAt: n.webhookAt || '',
     otp: otp || '',
   }
   const last = session.messages[session.messages.length - 1]
   if (msg.text || msg.speaker) {
     if (!last || last.id !== msg.id) {
-      session.messages.push(msg)
+      insertChronological(session.messages, msg)
       if (session.messages.length > MAX_THREAD_MESSAGES) {
         session.messages = session.messages.slice(-MAX_THREAD_MESSAGES)
       }
@@ -1018,7 +1062,9 @@ async function takeThreadSession(n, hash, otp) {
 }
 
 function pageFromSession(session, beforeId, limit = TOAST_PAGE_SIZE) {
-  const messages = Array.isArray(session && session.messages) ? session.messages : []
+  const messages = sortMessagesByTime(
+    Array.isArray(session && session.messages) ? session.messages : [],
+  )
   const size = Math.max(1, Math.min(100, Number(limit) || TOAST_PAGE_SIZE))
   if (!beforeId) {
     const page = sliceTail(messages, size)
