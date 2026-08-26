@@ -6,7 +6,7 @@ if (typeof h !== 'function') {
 }
 
 // bump id when CSS changes so toast window picks up new rules without full app reinstall
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v46'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-css-v47'
 const THREAD_ROW_EST = 56
 const THREAD_OVERSCAN = 6
 const HISTORY_PAGE_SIZE = 40
@@ -267,6 +267,9 @@ const CSS = `
   word-break: break-word;
   max-height: 10.5rem;
   overflow-y: auto;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
 }
 .sf-card .thread-shell {
   position: relative;
@@ -483,6 +486,9 @@ const CSS = `
   font-weight: 700;
   letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
 }
 .sf-card .copy-btn {
   flex: 0 0 auto;

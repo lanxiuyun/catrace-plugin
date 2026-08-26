@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v12'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v16'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -100,6 +100,7 @@ const CSS = `
   padding: 0.5rem 0.625rem; border-radius: 0.5rem;
   background: #f0fdfa; color: #134e4a; word-break: break-all; white-space: pre-wrap;
   border: 0.0625rem solid #ccfbf1; margin: 0;
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
 .sf-settings .copy-row {
   display: flex; align-items: flex-start; gap: 0.5rem;
@@ -346,13 +347,16 @@ const CSS = `
 .sf-settings .search-add .n-input { flex: 1; min-width: 0; }
 .sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
 .sf-settings .title-chips .n-tag { max-width: 100%; height: auto; white-space: normal; }
+.sf-settings .advanced-card { gap: 0; padding: 0; overflow: hidden; }
 .sf-settings .adv-toggle {
   border: 0; background: transparent; cursor: pointer;
-  padding: 0; text-align: left;
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; margin: 0;
+  padding: 1rem 1.25rem; text-align: left;
   font-size: 0.8125rem; font-weight: 700; color: #0d9488;
-  display: inline-flex; align-items: center; gap: 0.375rem;
+  gap: 0.375rem;
 }
-.sf-settings .adv-toggle:hover { color: #0f766e; }
+
 .sf-settings .adv-chevron {
   display: inline-flex; align-items: center; justify-content: center;
   width: 1rem; height: 1rem; line-height: 0;
@@ -362,23 +366,21 @@ const CSS = `
 }
 .sf-settings .adv-chevron svg { width: 0.875rem; height: 0.875rem; display: block; }
 .sf-settings .adv-toggle[aria-expanded="true"] .adv-chevron { transform: rotate(0deg); }
-.sf-settings .advanced-card { gap: 0; }
 .sf-settings .adv-collapse {
   display: grid; grid-template-rows: 0fr;
   margin-top: 0; opacity: 0;
   transition:
     grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-    margin-top 0.28s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.18s ease;
 }
 .sf-settings .adv-collapse.open {
   grid-template-rows: 1fr;
-  margin-top: 0.75rem; opacity: 1;
+  opacity: 1;
 }
 .sf-settings .adv-collapse-inner { min-height: 0; overflow: hidden; }
 .sf-settings .adv-body {
   display: flex; flex-direction: column; gap: 0.75rem;
-  padding-top: 0.25rem;
+  padding: 0 1.25rem 1rem;
 }
 @media (prefers-reduced-motion: reduce) {
   .sf-settings .adv-chevron,
