@@ -61,6 +61,32 @@ function ensureStyles() {
   document.head.appendChild(el)
 }
 
+function hexToRgba(hex, alpha) {
+  const m = String(hex || '').trim().match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+  if (!m) return null
+  let s = m[1]
+  if (s.length === 3) s = s.split('').map((c) => c + c).join('')
+  const r = parseInt(s.slice(0, 2), 16)
+  const g = parseInt(s.slice(2, 4), 16)
+  const b = parseInt(s.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function resolveTheme(event) {
+  const p = (event && event.payload) || {}
+  const accent =
+    typeof p.accent_color === 'string' && /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(p.accent_color.trim())
+      ? p.accent_color.trim().toLowerCase()
+      : ''
+  if (!accent) return null
+  return {
+    '--accent': accent,
+    '--title': accent,
+    '--body': hexToRgba(accent, 0.82),
+    '--bg': hexToRgba(accent, 0.1),
+  }
+}
+
 function clockIcon() {
   return h(
     'svg',
@@ -95,6 +121,7 @@ export default {
   render() {
     const event = this.event || {}
     const actions = event.actions || []
+    const theme = resolveTheme(event)
 
     const children = [
       h('div', { class: 'hdr' }, [
@@ -148,6 +175,6 @@ export default {
       )
     }
 
-    return h('div', { class: 'timer-card' }, children)
+    return h('div', { class: 'timer-card', style: theme || {} }, children)
   },
 }
