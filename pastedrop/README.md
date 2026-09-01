@@ -1,14 +1,14 @@
 # PasteDrop 剪贴板存图
 
-在**桌面**或**资源管理器**里按 `Ctrl+V`，如果剪贴板里是图片，直接把图片存成 PNG 文件，不用再开画图/另存为。源自独立工具 [PasteDrop](https://github.com/lanxiuyun/PasteDrop)。
+在**桌面**或**资源管理器**里按 `Ctrl+V`，如果剪贴板里是图片，直接存成文件，不用再开画图/另存为。源自独立工具 [PasteDrop](https://github.com/lanxiuyun/PasteDrop)。
 
 ## 它能干什么
 
 - 桌面按 `Ctrl+V` → 存到「桌面」
 - 资源管理器当前文件夹按 `Ctrl+V` → 存到当前文件夹
 - 剪贴板不是图片时，`Ctrl+V` 原样放行，不影响正常粘贴
-- 自动命名：`Pasted Image 2026-08-13 10-00-00.png`，同名自动加序号
-- 静默运行，无弹窗（可选：保存后弹一张卡片，可一键打开所在文件夹）
+- 自动命名：`Pasted Image 2026-08-13 10-00-00.png`（或 `.jpg`），同名自动加序号
+- 静默运行，无弹窗
 - 只在桌面/资源管理器生效，其他软件里粘贴行为不变
 
 ## 运行依赖
@@ -32,8 +32,7 @@
 |------|------|
 | 保存位置 | 桌面 + 资源管理器 / 仅桌面 / 仅资源管理器 |
 | 文件名前缀 | 默认 `Pasted Image` |
-| 保存后弹卡片 | 关 = 静默存（原生行为）；开 = 每张存完弹卡片 |
-| 卡片停留 | 0 = 不自动消失 |
+| 保存格式 | 自动（优先无损 PNG）/ PNG / JPG |
 
 ## 目录结构
 
@@ -42,7 +41,7 @@ pastedrop/
   manifest.json     # 插件元信息（sidecar = node runtime/main.mjs）
   settings.mjs      # 设置面板
   runtime/
-    main.mjs        # Node sidecar：宿主协议 + 监督 worker + 转 Toast
+    main.mjs        # Node sidecar：宿主协议 + 监督 worker
     main.ps1        # PowerShell worker：全局 Ctrl+V 钩子 + 剪贴板存图（零依赖）
 ```
 

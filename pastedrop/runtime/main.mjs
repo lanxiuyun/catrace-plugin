@@ -4,7 +4,7 @@
  * 本进程只做三件事：
  *   1. 与宿主走 sidecar 契约（ready/publish/log/response，config/resolved/shutdown/request）
  *   2. 监督 PowerShell worker（runtime/main.ps1，干全局键盘钩子 + 剪贴板存图的重活）
- *   3. 把 worker 的 `saved` 报告按配置转成 Toast，处理卡片按钮（打开文件夹）
+ *   3. 记录最近一次保存路径（供设置页展示）
  *
  * 为什么 worker 用 PowerShell：全局低级键盘钩子（WH_KEYBOARD_LL）需要真正的 Win32
  * 消息循环，Node 纯 JS 拿不到；PowerShell 是 Windows 标配（含 .NET / System.Windows.Forms
@@ -27,10 +27,8 @@ const DEFAULT_CONFIG = {
   /** both = 桌面 + 资源管理器当前文件夹（PasteDrop 原生行为） */
   saveScope: 'both',
   namePrefix: 'Pasted Image',
-  /** 保存后是否弹一张 Toast 卡片（原生 PasteDrop 是静默的） */
-  notifyOnSave: false,
-  /** 0 = 卡片不自动消失 */
-  toastAutoHideSec: 4,
+  /** auto = 原始 PNG 或无损转 PNG；png / jpg 强制格式 */
+  saveFormat: 'auto',
 }
 
 let config = { ...DEFAULT_CONFIG }
@@ -60,23 +58,14 @@ function respond(requestId, ok, result, error) {
   send(message)
 }
 
-function clampToastSec(value, fallback) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  const rounded = Math.round(n)
-  if (rounded <= 0) return 0
-  return Math.min(600, Math.max(3, rounded))
-}
-
 function normalizeConfig(input = {}) {
   const next = { ...config }
   if (input.saveScope === 'desktop' || input.saveScope === 'explorer' || input.saveScope === 'both') {
     next.saveScope = input.saveScope
   }
   if (typeof input.namePrefix === 'string') next.namePrefix = input.namePrefix.trim() || 'Pasted Image'
-  if (typeof input.notifyOnSave === 'boolean') next.notifyOnSave = input.notifyOnSave
-  if (typeof input.toastAutoHideSec === 'number') {
-    next.toastAutoHideSec = clampToastSec(input.toastAutoHideSec, DEFAULT_CONFIG.toastAutoHideSec)
+  if (input.saveFormat === 'auto' || input.saveFormat === 'png' || input.saveFormat === 'jpg') {
+    next.saveFormat = input.saveFormat
   }
   return next
 }
@@ -86,6 +75,7 @@ function workerEnv() {
     ...process.env,
     CATRACE_PD_SAVE_SCOPE: config.saveScope,
     CATRACE_PD_NAME_PREFIX: config.namePrefix,
+    CATRACE_PD_SAVE_FORMAT: config.saveFormat,
   }
 }
 
@@ -106,39 +96,6 @@ function notifyWorkerError(message) {
       actions: [{ id: 'dismiss', label: '知道了' }],
       payload: { auto_hide_ms: 15000, error: message },
       dedupeKey: 'pastedrop:worker-error',
-    },
-  })
-}
-
-function publishSaved(info) {
-  if (!config.notifyOnSave) return
-  const hideSec = clampToastSec(config.toastAutoHideSec, DEFAULT_CONFIG.toastAutoHideSec)
-  const sticky = hideSec <= 0
-  const payload = {
-    path: info.path,
-    folder: path.dirname(info.path),
-    fileName: info.fileName,
-    size: info.size,
-    savedAt: info.savedAt,
-    publishedAt: new Date().toISOString(),
-  }
-  if (!sticky) payload.auto_hide_ms = hideSec * 1000
-  send({
-    v: 1,
-    op: 'publish',
-    event: {
-      eventType: 'pastedrop.saved',
-      kind: 'pastedrop',
-      title: '图片已保存',
-      body: info.fileName,
-      level: 'success',
-      sticky,
-      actions: [
-        { id: 'open-folder', label: '打开文件夹' },
-        { id: 'dismiss', label: sticky ? '知道了' : '关闭' },
-      ],
-      payload,
-      dedupeKey: `pastedrop:saved:${info.path}`,
     },
   })
 }
@@ -212,6 +169,11 @@ function startWorker() {
     workerRestartTimer.unref?.()
   })
 
+  worker.stderr?.on('data', (chunk) => {
+    const text = String(chunk).trim()
+    if (text) log('worker stderr', { text }, 'warn')
+  })
+
   workerRl = readline.createInterface({ input: worker.stdout })
   workerRl.on('line', (line) => {
     if (generation !== workerGeneration) return
@@ -245,7 +207,6 @@ function startWorker() {
           savedAt: new Date().toISOString(),
         }
         log('image saved', { ...lastSaved })
-        publishSaved(lastSaved)
         break
       }
       case 'fatal':
@@ -256,6 +217,7 @@ function startWorker() {
         notifyWorkerError(lastWorkerError)
         break
       default:
+        if (message.op) log('worker message', message)
         break
     }
   })
@@ -295,6 +257,7 @@ function stopWorker() {
 function applyHostConfig(input) {
   const prevScope = config.saveScope
   const prevPrefix = config.namePrefix
+  const prevFormat = config.saveFormat
   config = normalizeConfig(input)
   log('config applied', { config })
 
@@ -304,7 +267,9 @@ function applyHostConfig(input) {
   }
 
   const workerRelevantChanged =
-    config.saveScope !== prevScope || config.namePrefix !== prevPrefix
+    config.saveScope !== prevScope ||
+    config.namePrefix !== prevPrefix ||
+    config.saveFormat !== prevFormat
 
   if (worker) {
     if (workerRelevantChanged) {
@@ -344,16 +309,6 @@ function handleRequest(message) {
       case 'setConfig': {
         applyHostConfig(params)
         respond(requestId, true, statusPayload())
-        break
-      }
-      case 'testToast': {
-        publishSaved({
-          path: path.join('C:', '测试', 'Pasted Image 2026-01-01 00-00-00.png'),
-          fileName: 'Pasted Image 2026-01-01 00-00-00.png',
-          size: 0,
-          savedAt: new Date().toISOString(),
-        })
-        respond(requestId, true, { sent: true })
         break
       }
       default:
@@ -422,12 +377,5 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       actionId: message.actionId,
       resolutionKind: message.resolutionKind,
     })
-    if (message.actionId === 'open-folder') {
-      const filePath =
-        message.payload?.path || message.event?.payload?.path || message.payload?.filePath || ''
-      if (filePath) {
-        spawn('explorer.exe', [`/select,"${filePath}"`], { windowsHide: true, stdio: 'ignore' }).unref?.()
-      }
-    }
   }
 })

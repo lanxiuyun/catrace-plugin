@@ -7,7 +7,6 @@
   "events": [
     "pastedrop",
     "kind:pastedrop",
-    "pastedrop.saved",
     "pastedrop.worker-error"
   ],
   "enabledByDefault": false,

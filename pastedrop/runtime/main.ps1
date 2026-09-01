@@ -45,11 +45,15 @@ public static class CatracePasteHook
     public const uint VK_RCONTROL = 0xA3;
     public const uint LLKHF_INJECTED = 0x10;
     public const uint GA_ROOT = 2;
+    public const uint OBJID_NATIVEOM = 0xFFFFFFF0;
+    public const uint OBJID_CLIENT = 0xFFFFFFFC;
     public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const int INPUT_KEYBOARD = 1;
+    public const uint CF_BITMAP = 2;
     public const uint CF_DIB = 3;
     public const uint CF_DIBV5 = 17;
+    public const uint CF_HDROP = 15;
     public static readonly UIntPtr INJECTED_MAGIC = new UIntPtr(0x5049464D);
     public const int WM_KEYFIRST = 0x0100;
     public const int WM_KEYLAST = 0x0108;
@@ -85,11 +89,28 @@ public static class CatracePasteHook
         public UIntPtr dwExtraInfo;
     }
 
+    // x64 上 INPUT 的 union 按 MOUSEINPUT 对齐为 32 字节，整结构 40 字节。
+    // 只塞 KEYBDINPUT 时 Marshal.SizeOf=32，SendInput 会直接失败（桌面/资源管理器粘贴全废）。
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT
+    {
+        public int dx, dy;
+        public uint mouseData, dwFlags, time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct INPUT
     {
         public uint type;
-        public KEYBDINPUT ki;
+        public INPUTUNION U;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -128,6 +149,10 @@ public static class CatracePasteHook
     static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
     [DllImport("user32.dll")]
     static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr FindWindowExW(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+    [DllImport("oleacc.dll")]
+    static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint dwObjectID, ref Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object ppvObject);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
     [DllImport("kernel32.dll")]
@@ -138,6 +163,8 @@ public static class CatracePasteHook
     static extern IntPtr GetClipboardData(uint uFormat);
     [DllImport("user32.dll")]
     static extern bool IsClipboardFormatAvailable(uint uFormat);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern uint RegisterClipboardFormatW(string lpszFormat);
     [DllImport("user32.dll")]
     static extern bool OpenClipboard(IntPtr hWndNewOwner);
     [DllImport("user32.dll")]
@@ -157,9 +184,15 @@ public static class CatracePasteHook
     static string _lastSavedFile;
     static string _scope;
     static string _namePrefix;
+    static string _saveFormat;
     static volatile bool _vKeyUpSeen = true;
+    static uint _pngFormat;
+    static uint _jfifFormat;
+    static uint _jpegFormat;
+    static uint _imagePngFormat;
+    static uint _imageJpegFormat;
 
-    static readonly string[] DesktopClasses = { "Progman", "WorkerW", "SHELLDLL_DefView", "SysListView32" };
+    static readonly string[] DesktopClasses = { "Progman", "WorkerW", "SHELLDLL_DefView", "SysListView32", "XamlExplorerHostIslandWindow" };
     static readonly string[] ExplorerClasses = { "CabinetWClass", "ExploreWClass" };
 
     public static int Install(string shutdownFile, string lastSavedFile)
@@ -170,6 +203,13 @@ public static class CatracePasteHook
         if (_scope != "desktop" && _scope != "explorer") _scope = "both";
         _namePrefix = Environment.GetEnvironmentVariable("CATRACE_PD_NAME_PREFIX");
         if (string.IsNullOrWhiteSpace(_namePrefix)) _namePrefix = "Pasted Image";
+        _saveFormat = (Environment.GetEnvironmentVariable("CATRACE_PD_SAVE_FORMAT") ?? "auto").Trim().ToLowerInvariant();
+        if (_saveFormat != "png" && _saveFormat != "jpg") _saveFormat = "auto";
+        _pngFormat = RegisterClipboardFormatW("PNG");
+        _jfifFormat = RegisterClipboardFormatW("JFIF");
+        _jpegFormat = RegisterClipboardFormatW("JPEG");
+        _imagePngFormat = RegisterClipboardFormatW("image/png");
+        _imageJpegFormat = RegisterClipboardFormatW("image/jpeg");
         _mainThread = GetCurrentThreadId();
         _proc = HookProc;
         _hook = SetWindowsHookExW(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0);
@@ -246,15 +286,15 @@ public static class CatracePasteHook
                 (kb.flags & LLKHF_INJECTED) == 0 &&
                 CtrlDown())
             {
-                // 低级键盘 hook 必须瞬间返回。这里不读剪贴板、不跑 COM、不写日志。
-                // 把 Ctrl+V 交给消息循环；消息循环再判断目标窗口/图片并决定是否补发 Ctrl+V。
-                // 按住 Ctrl 自动重复（WM_KEYDOWN 连续触发无 KeyUp）用 _vKeyUpSeen 抑制。
+                // 对齐原版 PasteDrop：只在「目标窗口 + 剪贴板是图片」时吞掉 Ctrl+V。
+                // 其它情况 CallNextHookEx 放行，绝不依赖 SendInput 补发（x64 INPUT 很容易发失败）。
+                // 钩子里只查 IsClipboardFormatAvailable，不读像素、不跑 COM。
                 if (!_vKeyUpSeen)
                     return CallNextHookEx(_hook, nCode, wParam, lParam);
                 _vKeyUpSeen = false;
 
                 IntPtr fg = GetForegroundWindow();
-                if (InScope(fg))
+                if (InScope(fg) && ClipboardHasImageFast())
                 {
                     PostThreadMessageW(_mainThread, WM_APP_PASTE, UIntPtr.Zero, fg);
                     return (IntPtr)1;
@@ -346,20 +386,52 @@ public static class CatracePasteHook
     {
         if (hwnd == IntPtr.Zero) return false;
         IntPtr root = GetAncestor(hwnd, GA_ROOT);
-        // PasteDrop 源码同样以 explorer.exe + root CabinetWClass 判定。
-        // 某些 Windows 11 XAML 子层前台 hwnd/root 不稳定，进程名作为兜底。
+        string rootCls = ClassName(root);
+        string cls = ClassName(hwnd);
+        if (rootCls == "CabinetWClass" || rootCls == "ExploreWClass" ||
+            cls == "CabinetWClass" || cls == "ExploreWClass" ||
+            HasAncestorClass(hwnd, ExplorerClasses))
+            return true;
         return ProcessNameOf(hwnd) == "explorer.exe" &&
-            (ClassName(root) == "CabinetWClass" ||
-             ClassName(hwnd) == "CabinetWClass" ||
-             HasAncestorClass(hwnd, ExplorerClasses));
+            (rootCls == "CabinetWClass" || HasAncestorClass(hwnd, ExplorerClasses));
     }
 
     static bool IsDesktopForeground(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero || ProcessNameOf(hwnd) != "explorer.exe") return false;
+        if (hwnd == IntPtr.Zero) return false;
+        if (IsExplorerForeground(hwnd)) return false;
         string cls = ClassName(hwnd);
-        return Array.IndexOf(DesktopClasses, cls) >= 0 &&
-            (cls == "Progman" || cls == "WorkerW" || HasAncestorClass(hwnd, DesktopClasses));
+        IntPtr root = GetAncestor(hwnd, GA_ROOT);
+        string rootCls = ClassName(root);
+        if (rootCls == "Shell_TrayWnd" || rootCls == "Shell_SecondaryTrayWnd" ||
+            cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd")
+            return false;
+        if (Array.IndexOf(DesktopClasses, cls) >= 0) return true;
+        if (Array.IndexOf(DesktopClasses, rootCls) >= 0) return true;
+        if (HasAncestorClass(hwnd, DesktopClasses)) return true;
+        if (ProcessNameOf(hwnd) == "explorer.exe" &&
+            (cls.IndexOf("XamlExplorerHost") >= 0 || rootCls.IndexOf("XamlExplorerHost") >= 0))
+            return true;
+        return false;
+    }
+
+    static bool ClipboardHasImageFast()
+    {
+        try
+        {
+            // 复制的是文件（含图片文件）时交给资源管理器自己粘贴。
+            if (IsClipboardFormatAvailable(CF_HDROP)) return false;
+            if (IsClipboardFormatAvailable(CF_DIBV5)) return true;
+            if (IsClipboardFormatAvailable(CF_DIB)) return true;
+            if (IsClipboardFormatAvailable(CF_BITMAP)) return true;
+            if (_pngFormat != 0 && IsClipboardFormatAvailable(_pngFormat)) return true;
+            if (_imagePngFormat != 0 && IsClipboardFormatAvailable(_imagePngFormat)) return true;
+            if (_jfifFormat != 0 && IsClipboardFormatAvailable(_jfifFormat)) return true;
+            if (_jpegFormat != 0 && IsClipboardFormatAvailable(_jpegFormat)) return true;
+            if (_imageJpegFormat != 0 && IsClipboardFormatAvailable(_imageJpegFormat)) return true;
+        }
+        catch { }
+        return false;
     }
 
     static bool ShouldInterceptTarget(IntPtr hwnd)
@@ -511,72 +583,194 @@ public static class CatracePasteHook
 
     static string ResolveSaveDirectory(IntPtr fg)
     {
-        if (IsDesktopForeground(fg))
-            return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        if (IsExplorerForeground(fg))
-            return GetExplorerFolder(fg);
-        return null;
+        IntPtr[] candidates = CollectCandidates(fg);
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            string cls = ClassName(candidates[i]);
+            if (Array.IndexOf(DesktopClasses, cls) >= 0)
+                return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        }
+        return GetExplorerFolder(candidates);
     }
 
-    static string GetExplorerFolder(IntPtr fg)
+    static IntPtr[] CollectCandidates(IntPtr fg)
     {
-        // 资源管理器窗口（CabinetWClass）在 Shell.Application.Windows() 里的 HWND 与
-        // GetForegroundWindow() 不是同一句柄——按 HWND 精确匹配会落空。
-        // 策略：枚举所有资源管理器窗口，挑出与前台「同 root 祖先」的窗口拿它的路径。
-        //（catrace-com-diag 实测：4 个 explorer 窗口 hwnd 各异，无一个等于 fg/root）
-        IntPtr root = fg == IntPtr.Zero ? IntPtr.Zero : GetAncestor(fg, GA_ROOT);
-        for (int attempt = 0; attempt < 3; attempt++)
+        IntPtr[] buf = new IntPtr[16];
+        int n = 0;
+        AddCandidate(buf, ref n, fg);
+        AddCandidate(buf, ref n, GetForegroundWindow());
+        IntPtr probe = fg != IntPtr.Zero ? fg : GetForegroundWindow();
+        uint pid;
+        uint tid = GetWindowThreadProcessId(probe, out pid);
+        if (tid != 0)
         {
-            string folder = GetExplorerFolderOnce(root);
+            GUITHREADINFO gti = new GUITHREADINFO();
+            gti.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+            if (GetGUIThreadInfo(tid, ref gti))
+            {
+                AddCandidate(buf, ref n, gti.hwndFocus);
+                AddCandidate(buf, ref n, gti.hwndActive);
+            }
+        }
+        IntPtr[] result = new IntPtr[n];
+        Array.Copy(buf, result, n);
+        return result;
+    }
+
+    static void AddCandidate(IntPtr[] buf, ref int n, IntPtr h)
+    {
+        if (h == IntPtr.Zero || n >= buf.Length) return;
+        for (int i = 0; i < n; i++) if (buf[i] == h) return;
+        buf[n++] = h;
+        IntPtr root = GetAncestor(h, GA_ROOT);
+        if (root == IntPtr.Zero || root == h || n >= buf.Length) return;
+        for (int i = 0; i < n; i++) if (buf[i] == root) return;
+        buf[n++] = root;
+    }
+
+    static string GetExplorerFolder(IntPtr[] candidates)
+    {
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            string folder = GetExplorerFolderOnce(candidates);
             if (!string.IsNullOrEmpty(folder)) return folder;
-            if (attempt < 2) Thread.Sleep(30);
+            if (attempt < 7) Thread.Sleep(30);
         }
         return null;
     }
 
-    static string GetExplorerFolderOnce(IntPtr root)
+    static string GetExplorerFolderOnce(IntPtr[] candidates)
     {
-        if (root == IntPtr.Zero) return null;
+        if (candidates == null || candidates.Length == 0) return null;
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            string fromOm = FolderFromHwnd(candidates[i]);
+            if (IsFilesystemPath(fromOm)) return fromOm;
+        }
+
         try
         {
             object shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application"));
-            object windows = shell.GetType().InvokeMember("Windows", System.Reflection.BindingFlags.GetProperty, null, shell, null);
-            System.Collections.IEnumerable enumerable = windows as System.Collections.IEnumerable;
-            if (enumerable == null) return null;
-            foreach (object w in enumerable)
+            object windows = shell.GetType().InvokeMember("Windows", System.Reflection.BindingFlags.InvokeMethod | System.Reflection.BindingFlags.GetProperty, null, shell, null);
+            if (windows == null) return null;
+            int count = 0;
+            try
             {
+                count = Convert.ToInt32(windows.GetType().InvokeMember("Count", System.Reflection.BindingFlags.GetProperty, null, windows, null));
+            }
+            catch { }
+            DebugLine("shell windows count=" + count);
+            for (int i = 0; i < count; i++)
+            {
+                object w = null;
+                try
+                {
+                    w = windows.GetType().InvokeMember("Item", System.Reflection.BindingFlags.InvokeMethod | System.Reflection.BindingFlags.GetProperty, null, windows, new object[] { i });
+                }
+                catch { }
                 if (w == null) continue;
                 try
                 {
                     object hwndValue = w.GetType().InvokeMember("HWND", System.Reflection.BindingFlags.GetProperty, null, w, null);
                     IntPtr hwnd = new IntPtr(Convert.ToInt64(hwndValue));
+                    DebugLine("shell hwnd=" + hwnd + " loc=" + Convert.ToString(w.GetType().InvokeMember("LocationURL", System.Reflection.BindingFlags.GetProperty, null, w, null)));
                     if (hwnd == IntPtr.Zero) continue;
-                    // 1) 前台/root 祖先链上的窗口（拿当前文件夹）；
-                    // 2) 与前台/root 有 IsChild 关系的窗口。
-                    bool match =
-                        hwnd == root ||
-                        IsChild(hwnd, root) ||
-                        IsChild(root, hwnd) ||
-                        GetAncestor(hwnd, GA_ROOT) == root;
+                    bool match = false;
+                    for (int c = 0; c < candidates.Length; c++)
+                    {
+                        IntPtr cand = candidates[c];
+                        if (cand == IntPtr.Zero) continue;
+                        if (SameWindow(hwnd, cand) || IsChild(hwnd, cand) || IsChild(cand, hwnd) ||
+                            SameWindow(GetAncestor(hwnd, GA_ROOT), GetAncestor(cand, GA_ROOT)))
+                        {
+                            match = true;
+                            break;
+                        }
+                    }
                     if (!match) continue;
-                    object doc = w.GetType().InvokeMember("Document", System.Reflection.BindingFlags.GetProperty, null, w, null);
-                    if (doc == null) continue;
-                    object folder = doc.GetType().InvokeMember("Folder", System.Reflection.BindingFlags.GetProperty, null, doc, null);
-                    if (folder == null) continue;
-                    object self = folder.GetType().InvokeMember("Self", System.Reflection.BindingFlags.GetProperty, null, folder, null);
-                    if (self == null) continue;
-                    object path = self.GetType().InvokeMember("Path", System.Reflection.BindingFlags.GetProperty, null, self, null);
-                    if (path != null && !string.IsNullOrEmpty(Convert.ToString(path))) return Convert.ToString(path);
-                    // 兜底：Path 为空时解析 LocationURL（仅 file: scheme），对齐 PasteDrop。
-                    object loc = w.GetType().InvokeMember("LocationURL", System.Reflection.BindingFlags.GetProperty, null, w, null);
-                    string local = ParseLocationUrl(Convert.ToString(loc));
-                    if (local != null) return local;
+                    string pathText = FolderFromBrowser(w);
+                    if (IsFilesystemPath(pathText)) return pathText;
                 }
                 catch { }
             }
         }
+        catch (Exception ex)
+        {
+            DebugLine("shell windows failed " + ex.Message);
+        }
+        return null;
+    }
+
+    static string FolderFromHwnd(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return null;
+        IntPtr root = GetAncestor(hwnd, GA_ROOT);
+        IntPtr tab = FindWindowExW(root, IntPtr.Zero, "ShellTabWindowClass", null);
+        IntPtr dui = FindWindowExW(root, IntPtr.Zero, "DUIViewWndClassName", null);
+        IntPtr[] probes = { hwnd, root, tab, dui };
+        Guid iid = new Guid("00020400-0000-0000-C000-000000000046");
+        uint[] ids = { OBJID_NATIVEOM, OBJID_CLIENT };
+        for (int i = 0; i < probes.Length; i++)
+        {
+            if (probes[i] == IntPtr.Zero) continue;
+            for (int k = 0; k < ids.Length; k++)
+            {
+                object disp = null;
+                Guid riid = iid;
+                int hr = -1;
+                try
+                {
+                    hr = AccessibleObjectFromWindow(probes[i], ids[k], ref riid, out disp);
+                    if (hr != 0 || disp == null)
+                    {
+                        DebugLine("om miss hwnd=" + probes[i] + " id=" + ids[k].ToString("X") + " hr=" + hr);
+                        continue;
+                    }
+                    string path = FolderFromBrowser(disp);
+                    DebugLine("om hit hwnd=" + probes[i] + " path=" + path);
+                    if (IsFilesystemPath(path)) return path;
+                }
+                catch (Exception ex)
+                {
+                    DebugLine("om throw hwnd=" + probes[i] + " " + ex.Message);
+                }
+            }
+        }
+        return null;
+    }
+
+    static string FolderFromBrowser(object w)
+    {
+        if (w == null) return null;
+        try
+        {
+            object loc = w.GetType().InvokeMember("LocationURL", System.Reflection.BindingFlags.GetProperty, null, w, null);
+            string local = ParseLocationUrl(Convert.ToString(loc));
+            if (IsFilesystemPath(local)) return local;
+        }
+        catch { }
+        try
+        {
+            object doc = w.GetType().InvokeMember("Document", System.Reflection.BindingFlags.GetProperty, null, w, null);
+            if (doc == null) return null;
+            object folder = doc.GetType().InvokeMember("Folder", System.Reflection.BindingFlags.GetProperty, null, doc, null);
+            if (folder == null) return null;
+            object self = folder.GetType().InvokeMember("Self", System.Reflection.BindingFlags.GetProperty, null, folder, null);
+            if (self == null) return null;
+            object path = self.GetType().InvokeMember("Path", System.Reflection.BindingFlags.GetProperty, null, self, null);
+            string pathText = path == null ? null : Convert.ToString(path);
+            if (IsFilesystemPath(pathText)) return pathText;
+        }
         catch { }
         return null;
+    }
+
+    static bool SameWindow(IntPtr a, IntPtr b)
+    {
+        if (a == IntPtr.Zero || b == IntPtr.Zero) return false;
+        if (a == b) return true;
+        return unchecked((uint)a.ToInt64()) == unchecked((uint)b.ToInt64());
     }
 
     static string ParseLocationUrl(string locationUrl)
@@ -591,57 +785,263 @@ public static class CatracePasteHook
         catch { return null; }
     }
 
+    static bool IsFilesystemPath(string dir)
+    {
+        if (string.IsNullOrEmpty(dir)) return false;
+        if (dir.StartsWith("::")) return false;
+        try
+        {
+            string full = Path.GetFullPath(dir);
+            return full.Length >= 3 && full[1] == ':';
+        }
+        catch { return false; }
+    }
+
+    static System.Drawing.Bitmap ToPngSafe(System.Drawing.Bitmap src)
+    {
+        if (src == null) return null;
+        if (src.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+            return src;
+        var clone = new System.Drawing.Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = System.Drawing.Graphics.FromImage(clone))
+            g.DrawImage(src, 0, 0, src.Width, src.Height);
+        src.Dispose();
+        return clone;
+    }
+
     static void SendCtrlV()
     {
-        // 对齐 PasteDrop 用 SendInput（keybd_event 无返回值、不报错，可靠性更差）。
         var inputs = new INPUT[4];
         inputs[0].type = INPUT_KEYBOARD;
-        inputs[0].ki.wVk = (ushort)VK_CONTROL;
-        inputs[0].ki.dwExtraInfo = INJECTED_MAGIC;
+        inputs[0].U.ki.wVk = (ushort)VK_CONTROL;
+        inputs[0].U.ki.dwExtraInfo = INJECTED_MAGIC;
         inputs[1].type = INPUT_KEYBOARD;
-        inputs[1].ki.wVk = (ushort)VK_V;
-        inputs[1].ki.dwExtraInfo = INJECTED_MAGIC;
+        inputs[1].U.ki.wVk = (ushort)VK_V;
+        inputs[1].U.ki.dwExtraInfo = INJECTED_MAGIC;
         inputs[2].type = INPUT_KEYBOARD;
-        inputs[2].ki.wVk = (ushort)VK_V;
-        inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-        inputs[2].ki.dwExtraInfo = INJECTED_MAGIC;
+        inputs[2].U.ki.wVk = (ushort)VK_V;
+        inputs[2].U.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs[2].U.ki.dwExtraInfo = INJECTED_MAGIC;
         inputs[3].type = INPUT_KEYBOARD;
-        inputs[3].ki.wVk = (ushort)VK_CONTROL;
-        inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-        inputs[3].ki.dwExtraInfo = INJECTED_MAGIC;
-        SendInput(4, inputs, Marshal.SizeOf(typeof(INPUT)));
+        inputs[3].U.ki.wVk = (ushort)VK_CONTROL;
+        inputs[3].U.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs[3].U.ki.dwExtraInfo = INJECTED_MAGIC;
+        uint sent = SendInput(4, inputs, Marshal.SizeOf(typeof(INPUT)));
+        if (sent != 4) DebugLine("SendInput failed sent=" + sent + " size=" + Marshal.SizeOf(typeof(INPUT)) + " err=" + Marshal.GetLastWin32Error());
     }
 
     static void HandlePaste(IntPtr fg)
     {
-        if (fg == IntPtr.Zero) { SendCtrlV(); return; }
+        if (fg == IntPtr.Zero) fg = GetForegroundWindow();
+        DebugLine("handle fg=" + fg + " cls=" + ClassName(fg) + " root=" + ClassName(GetAncestor(fg, GA_ROOT)) + " fmt=" + _saveFormat);
         string dir = ResolveSaveDirectory(fg);
-        if (string.IsNullOrEmpty(dir)) { SendCtrlV(); return; }
+        if (!IsFilesystemPath(dir))
+        {
+            DebugLine("resolve save dir failed fg=" + fg);
+            SendCtrlV();
+            return;
+        }
         System.Drawing.Bitmap bmp = null;
-        try { bmp = GrabClipboardImage(); } catch { }
-        if (bmp == null) { SendCtrlV(); return; }
         try
         {
             Directory.CreateDirectory(dir);
             string baseName = _namePrefix + " " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss");
-            string path = Path.Combine(dir, baseName + ".png");
-            int seq = 1;
-            while (File.Exists(path))
+            byte[] pngBytes = FirstPngBytes();
+            byte[] jpgBytes = FirstJpegBytes();
+            string path = null;
+
+            if (_saveFormat == "jpg")
             {
-                path = Path.Combine(dir, baseName + " (" + seq + ").png");
-                seq++;
+                if (jpgBytes != null) path = WriteBytes(dir, baseName, ".jpg", jpgBytes);
+                else
+                {
+                    bmp = GrabBitmapRetry();
+                    if (bmp != null) path = UniquePath(dir, baseName, ".jpg");
+                    if (bmp != null && path != null) SaveJpeg(bmp, path, 95L);
+                }
             }
-            bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-            // 只把路径写进文件（可能含中文），Node 端补全其余字段。
+            else if (_saveFormat == "png")
+            {
+                if (pngBytes != null) path = WriteBytes(dir, baseName, ".png", pngBytes);
+                else
+                {
+                    bmp = GrabBitmapRetry();
+                    if (bmp != null)
+                    {
+                        bmp = ToPngSafe(bmp);
+                        path = UniquePath(dir, baseName, ".png");
+                        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                }
+            }
+            else
+            {
+                // auto：有原始 PNG 就原样写（零再编码）；否则把位图无损存 PNG；再不行才用原始 JPEG。
+                if (pngBytes != null) path = WriteBytes(dir, baseName, ".png", pngBytes);
+                else
+                {
+                    bmp = GrabBitmapRetry();
+                    if (bmp != null)
+                    {
+                        bmp = ToPngSafe(bmp);
+                        path = UniquePath(dir, baseName, ".png");
+                        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    else if (jpgBytes != null) path = WriteBytes(dir, baseName, ".jpg", jpgBytes);
+                }
+            }
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                DebugLine("save produced no file");
+                SendCtrlV();
+                return;
+            }
             File.WriteAllText(_lastSavedFile, path, Encoding.UTF8);
             Console.Out.WriteLine("{\"op\":\"saved\"}");
             Console.Out.Flush();
+            DebugLine("saved " + path);
             return;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            DebugLine("save failed " + ex.Message);
+        }
         finally { if (bmp != null) bmp.Dispose(); }
-        // 保存失败：图片没存也没粘贴，补发 Ctrl+V 走原生粘贴（对齐 PasteDrop）。
         SendCtrlV();
+    }
+
+    static System.Drawing.Bitmap GrabBitmapRetry()
+    {
+        System.Drawing.Bitmap bmp = null;
+        for (int i = 0; i < 6 && bmp == null; i++)
+        {
+            try { bmp = GrabClipboardImage(); } catch { }
+            if (bmp == null && i < 5) Thread.Sleep(40);
+        }
+        return bmp;
+    }
+
+    static string UniquePath(string dir, string baseName, string ext)
+    {
+        string path = Path.Combine(dir, baseName + ext);
+        int seq = 1;
+        while (File.Exists(path))
+        {
+            path = Path.Combine(dir, baseName + " (" + seq + ")" + ext);
+            seq++;
+        }
+        return path;
+    }
+
+    static string WriteBytes(string dir, string baseName, string ext, byte[] bytes)
+    {
+        string path = UniquePath(dir, baseName, ext);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    static bool LooksLikePng(byte[] b)
+    {
+        return b != null && b.Length > 8 && b[0] == 137 && b[1] == 80 && b[2] == 78 && b[3] == 71;
+    }
+
+    static bool LooksLikeJpeg(byte[] b)
+    {
+        return b != null && b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF;
+    }
+
+    static byte[] FirstPngBytes()
+    {
+        byte[] b = ReadNamedBytes("PNG");
+        if (LooksLikePng(b)) return b;
+        b = ReadFormatBytes(_pngFormat);
+        if (LooksLikePng(b)) return b;
+        b = ReadFormatBytes(_imagePngFormat);
+        return LooksLikePng(b) ? b : null;
+    }
+
+    static byte[] FirstJpegBytes()
+    {
+        string[] names = { "JFIF", "JPEG", "image/jpeg" };
+        for (int i = 0; i < names.Length; i++)
+        {
+            byte[] named = ReadNamedBytes(names[i]);
+            if (LooksLikeJpeg(named)) return named;
+        }
+        uint[] fmts = { _jfifFormat, _jpegFormat, _imageJpegFormat };
+        for (int i = 0; i < fmts.Length; i++)
+        {
+            byte[] raw = ReadFormatBytes(fmts[i]);
+            if (LooksLikeJpeg(raw)) return raw;
+        }
+        return null;
+    }
+
+    static byte[] ReadNamedBytes(string name)
+    {
+        try
+        {
+            object data = System.Windows.Forms.Clipboard.GetData(name);
+            System.IO.MemoryStream ms = data as System.IO.MemoryStream;
+            if (ms != null && ms.Length > 0)
+            {
+                ms.Position = 0;
+                return ms.ToArray();
+            }
+            return data as byte[];
+        }
+        catch { return null; }
+    }
+
+    static byte[] ReadFormatBytes(uint format)
+    {
+        if (format == 0) return null;
+        try
+        {
+            if (!IsClipboardFormatAvailable(format)) return null;
+            if (!OpenClipboard(IntPtr.Zero)) return null;
+            try
+            {
+                IntPtr hMem = GetClipboardData(format);
+                if (hMem == IntPtr.Zero) return null;
+                IntPtr ptr = GlobalLock(hMem);
+                if (ptr == IntPtr.Zero) return null;
+                try
+                {
+                    int size = GlobalSize(hMem);
+                    if (size <= 0) return null;
+                    byte[] buf = new byte[size];
+                    Marshal.Copy(ptr, buf, 0, size);
+                    return buf;
+                }
+                finally { GlobalUnlock(hMem); }
+            }
+            finally { CloseClipboard(); }
+        }
+        catch { return null; }
+    }
+
+    static void SaveJpeg(System.Drawing.Bitmap bmp, string path, long quality)
+    {
+        System.Drawing.Imaging.ImageCodecInfo codec = null;
+        System.Drawing.Imaging.ImageCodecInfo[] codecs = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders();
+        for (int i = 0; i < codecs.Length; i++)
+        {
+            if (codecs[i].FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid)
+            {
+                codec = codecs[i];
+                break;
+            }
+        }
+        if (codec == null)
+        {
+            bmp.Save(path, System.Drawing.Imaging.ImageFormat.Jpeg);
+            return;
+        }
+        var ep = new System.Drawing.Imaging.EncoderParameters(1);
+        ep.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
+        bmp.Save(path, codec, ep);
     }
 }
 "@ -ReferencedAssemblies System.Windows.Forms,System.Drawing

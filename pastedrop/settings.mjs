@@ -2,12 +2,12 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, onMounted } = vue
-const { NAlert, NButton, NInput, NSelect, NSwitch, useMessage } = naive
+const { NAlert, NButton, NInput, NSelect, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing')
 }
-if (!NAlert || !NButton || !NInput || !NSelect || !NSwitch || !useMessage) {
+if (!NAlert || !NButton || !NInput || !NSelect || !useMessage) {
   throw new Error('Catrace plugin naive runtime missing')
 }
 if (!plugin || !plugin.config || !plugin.sidecar) {
@@ -30,11 +30,7 @@ const CSS = `
 .pd-settings .hint { margin:0; color:#94a3b8; font-size:0.6875rem; line-height:1.4; }
 .pd-settings .row { display:flex; align-items:center; gap:0.5rem; }
 .pd-settings .row .n-input { flex:1; min-width:0; }
-.pd-settings .row-inline { display:flex; align-items:center; gap:0.5rem; }
-.pd-settings .row-inline .n-input { width:5.5rem; flex:0 0 auto; }
-.pd-settings .unit { font-size:0.75rem; color:#64748b; }
 .pd-settings .actions { display:flex; flex-wrap:wrap; gap:0.5rem; }
-.pd-settings .switch-row { display:flex; align-items:center; gap:0.5rem; }
 .pd-settings .status-line { font-size:0.75rem; color:#475569; line-height:1.5; }
 .pd-settings .status-line .tag {
   display:inline-block; padding:0.0625rem 0.375rem; border-radius:0.375rem;
@@ -52,11 +48,16 @@ const SAVE_SCOPE_OPTIONS = [
   { label: '仅资源管理器当前文件夹', value: 'explorer' },
 ]
 
+const SAVE_FORMAT_OPTIONS = [
+  { label: '自动（优先无损 PNG）', value: 'auto' },
+  { label: 'PNG', value: 'png' },
+  { label: 'JPG', value: 'jpg' },
+]
+
 const DEFAULT_CONFIG = {
   saveScope: 'both',
   namePrefix: 'Pasted Image',
-  notifyOnSave: false,
-  toastAutoHideSec: 4,
+  saveFormat: 'auto',
 }
 
 function ensureStyles() {
@@ -71,14 +72,6 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
-function clampToastSec(value, fallback) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  const rounded = Math.round(n)
-  if (rounded <= 0) return 0
-  return Math.min(600, Math.max(3, rounded))
-}
-
 function normalizeConfig(input = {}) {
   return {
     saveScope:
@@ -89,9 +82,10 @@ function normalizeConfig(input = {}) {
       typeof input.namePrefix === 'string' && input.namePrefix.trim()
         ? input.namePrefix.trim()
         : DEFAULT_CONFIG.namePrefix,
-    notifyOnSave:
-      typeof input.notifyOnSave === 'boolean' ? input.notifyOnSave : DEFAULT_CONFIG.notifyOnSave,
-    toastAutoHideSec: clampToastSec(input.toastAutoHideSec, DEFAULT_CONFIG.toastAutoHideSec),
+    saveFormat:
+      input.saveFormat === 'png' || input.saveFormat === 'jpg' || input.saveFormat === 'auto'
+        ? input.saveFormat
+        : DEFAULT_CONFIG.saveFormat,
   }
 }
 
@@ -103,8 +97,7 @@ export default {
     const busy = ref('')
     const saveScope = ref(DEFAULT_CONFIG.saveScope)
     const namePrefix = ref(DEFAULT_CONFIG.namePrefix)
-    const notifyOnSave = ref(DEFAULT_CONFIG.notifyOnSave)
-    const toastAutoHideSec = ref(DEFAULT_CONFIG.toastAutoHideSec)
+    const saveFormat = ref(DEFAULT_CONFIG.saveFormat)
     /** @type {import('vue').Ref<object|null>} */
     const status = ref(null)
     let saveTimer = null
@@ -113,8 +106,7 @@ export default {
       return normalizeConfig({
         saveScope: saveScope.value,
         namePrefix: namePrefix.value,
-        notifyOnSave: notifyOnSave.value,
-        toastAutoHideSec: toastAutoHideSec.value,
+        saveFormat: saveFormat.value,
       })
     }
 
@@ -127,12 +119,10 @@ export default {
         typeof cfg.namePrefix === 'string' && cfg.namePrefix.trim()
           ? cfg.namePrefix.trim()
           : DEFAULT_CONFIG.namePrefix
-      notifyOnSave.value =
-        typeof cfg.notifyOnSave === 'boolean' ? cfg.notifyOnSave : DEFAULT_CONFIG.notifyOnSave
-      toastAutoHideSec.value = clampToastSec(
-        cfg.toastAutoHideSec,
-        DEFAULT_CONFIG.toastAutoHideSec,
-      )
+      saveFormat.value =
+        cfg.saveFormat === 'png' || cfg.saveFormat === 'jpg' || cfg.saveFormat === 'auto'
+          ? cfg.saveFormat
+          : DEFAULT_CONFIG.saveFormat
     }
 
     async function run(key, task) {
@@ -150,8 +140,7 @@ export default {
       const cfg = currentConfig()
       saveScope.value = cfg.saveScope
       namePrefix.value = cfg.namePrefix
-      notifyOnSave.value = cfg.notifyOnSave
-      toastAutoHideSec.value = cfg.toastAutoHideSec
+      saveFormat.value = cfg.saveFormat
       await plugin.config.set(cfg)
       try {
         await plugin.sidecar.request('setConfig', cfg)
@@ -179,14 +168,6 @@ export default {
     async function refreshStatus() {
       await run('status', async () => {
         status.value = await plugin.sidecar.request('getStatus')
-      })
-    }
-
-    async function testToast() {
-      await run('test', async () => {
-        await persistAndSync({ quiet: true })
-        await plugin.sidecar.request('testToast')
-        message.success('已发送测试通知')
       })
     }
 
@@ -238,7 +219,7 @@ export default {
             h(
               'p',
               { class: 'hint' },
-              '拦截范围内且剪贴板是图片时，直接把图片存成 PNG；其他情况原样放行粘贴。',
+              '拦截范围内且剪贴板是图片时，把图片存成文件；其他情况原样放行粘贴。',
             ),
           ]),
           h('div', { class: 'field' }, [
@@ -257,38 +238,22 @@ export default {
               '例如「Pasted Image 2026-08-13 10-00-00.png」，同名会自动加序号。',
             ),
           ]),
-        ]),
-
-        h('section', { class: 'card' }, [
-          h('h3', '通知'),
-          h('div', { class: 'switch-row' }, [
-            h(NSwitch, {
-              value: notifyOnSave.value,
+          h('div', { class: 'field' }, [
+            h('span', { class: 'label' }, '保存格式'),
+            h(NSelect, {
+              value: saveFormat.value,
+              options: SAVE_FORMAT_OPTIONS,
               'onUpdate:value': (v) => {
-                notifyOnSave.value = !!v
+                saveFormat.value = v
                 scheduleSave()
               },
             }),
-            h('span', { class: 'label' }, '保存后弹卡片'),
+            h(
+              'p',
+              { class: 'hint' },
+              '自动：剪贴板自带 PNG 就原样写出（不重编码）；否则无损存 PNG。JPG 体积更小但有损。',
+            ),
           ]),
-          h('p', { class: 'hint' }, '原生 PasteDrop 是静默的；打开后每存一张图弹一张卡片，可一键打开所在文件夹。'),
-          notifyOnSave.value
-            ? h('div', { class: 'field' }, [
-                h('span', { class: 'label' }, '卡片停留'),
-                h('div', { class: 'row-inline' }, [
-                  h(NInput, {
-                    value: String(toastAutoHideSec.value ?? DEFAULT_CONFIG.toastAutoHideSec),
-                    'onUpdate:value': (v) => {
-                      toastAutoHideSec.value = clampToastSec(v, DEFAULT_CONFIG.toastAutoHideSec)
-                      scheduleSave()
-                    },
-                    placeholder: '4',
-                  }),
-                  h('span', { class: 'unit' }, '秒'),
-                ]),
-                h('p', { class: 'hint' }, '0 表示不自动消失'),
-              ])
-            : null,
         ]),
 
         h('section', { class: 'card' }, [
@@ -319,7 +284,6 @@ export default {
             : null,
           h('div', { class: 'actions' }, [
             button('刷新状态', 'status', refreshStatus),
-            button('测试通知', 'test', testToast),
           ]),
           h('p', { class: 'hint' }, '本插件跑一个 PowerShell 小子进程装全局键盘钩子，启用即信任其全部代码。'),
         ]),
