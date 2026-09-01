@@ -21,6 +21,7 @@ description: >
 动手前，至少扫一遍（作为范本）：
 
 - `timer/` — background 调度 + settings CRUD + sticky 动作回传
+- `heatmap/` — 仅 settings：`plugin.activity.getRecords` 翻日作息回顾
 - `bt-music/` — sidecar（OS 设备事件）+ settings 三卡 + `plugin.sidecar.request` RPC
 - `sidecar-echo/` — sidecar JSONL 端到端最小闭环
 - `github-notify/runtime/main.mjs` — sidecar config/state 落盘、shutdown、去重
@@ -85,7 +86,7 @@ description: >
 
 ### settings.mjs
 
-- Naive 白名单：`NAlert NButton NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**无 `NInputNumber`** → `NInput` + `Number()` 钳制。
+- Naive 白名单：`NAlert NButton NDatePicker NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**无 `NInputNumber`** → `NInput` + `Number()` 钳制。
 - `useMessage/useDialog` 必须在 `setup()` 内。
 - 根节点**零外 padding / 零 max-width**（宿主 `.plugin-detail` 管边距）；内部间距可以有。
 - 用户配置 `plugin.config.get/set`（整包）；需要 sidecar 同步时：`await plugin.config.set(cfg); await plugin.sidecar.request('setConfig', cfg)`（`bt-music/settings.mjs:194`）。

@@ -12,6 +12,13 @@ Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事
 
 ## 有哪些插件
 
+### 🟪 作息回顾（heatmap）
+翻日期回看往日的专注和休息。Dashboard 过 0 点只显示今天，这里可以翻昨天。
+
+- 环形表盘 / 单轴时间线 / 作息流卡片。
+- 读宿主已落库的记录。需要带 `plugin.activity.getRecords` 的 Catrace。
+- 无 Toast、无 sidecar。默认关闭，启用后才能查。
+
 ### ⏰ 定时提醒（timer）
 Catrace 自带的基础插件，开箱即用。
 
