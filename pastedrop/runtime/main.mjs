@@ -171,7 +171,9 @@ function startWorker() {
 
   worker.stderr?.on('data', (chunk) => {
     const text = String(chunk).trim()
-    if (text) log('worker stderr', { text }, 'warn')
+    if (!text) return
+    const level = /fail|fatal|error/i.test(text) ? 'warn' : 'info'
+    log('worker stderr', { text }, level)
   })
 
   workerRl = readline.createInterface({ input: worker.stdout })

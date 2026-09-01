@@ -14,6 +14,7 @@
 # 配置来自环境变量（Node sidecar spawn 时注入）：
 #   CATRACE_PD_SAVE_SCOPE    both | desktop | explorer
 #   CATRACE_PD_NAME_PREFIX   文件名前缀
+#   CATRACE_PD_SAVE_FORMAT   auto | png | jpg
 
 $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -201,8 +202,7 @@ public static class CatracePasteHook
         _lastSavedFile = lastSavedFile;
         _scope = (Environment.GetEnvironmentVariable("CATRACE_PD_SAVE_SCOPE") ?? "both").Trim().ToLowerInvariant();
         if (_scope != "desktop" && _scope != "explorer") _scope = "both";
-        _namePrefix = Environment.GetEnvironmentVariable("CATRACE_PD_NAME_PREFIX");
-        if (string.IsNullOrWhiteSpace(_namePrefix)) _namePrefix = "Pasted Image";
+        _namePrefix = SanitizePrefix(Environment.GetEnvironmentVariable("CATRACE_PD_NAME_PREFIX"));
         _saveFormat = (Environment.GetEnvironmentVariable("CATRACE_PD_SAVE_FORMAT") ?? "auto").Trim().ToLowerInvariant();
         if (_saveFormat != "png" && _saveFormat != "jpg") _saveFormat = "auto";
         _pngFormat = RegisterClipboardFormatW("PNG");
@@ -243,12 +243,9 @@ public static class CatracePasteHook
         {
             if (msg.message == WM_APP_PASTE)
             {
-                try
-                {
-                    IntPtr captured = msg.lParam;
-                    if (ShouldInterceptTarget(captured)) HandlePaste(captured);
-                    else SendCtrlV();
-                }
+                // 钩子已经确认「范围内 + 剪贴板像图片」才投递；这里不要再用 GetImage() 否决，
+                // 否则企业微信等只放 PNG 格式的来源会吞掉 Ctrl+V 却走补发、图存不下来。
+                try { HandlePaste(msg.lParam); }
                 catch { SendCtrlV(); }
                 continue;
             }
@@ -264,6 +261,22 @@ public static class CatracePasteHook
             UnhookWindowsHookEx(_hook);
             _hook = IntPtr.Zero;
         }
+    }
+
+    static string SanitizePrefix(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "Pasted Image";
+        char[] bad = Path.GetInvalidFileNameChars();
+        var sb = new StringBuilder(raw.Trim().Length);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            char ch = raw[i];
+            if (ch == '.' && sb.Length == 0) continue;
+            if (Array.IndexOf(bad, ch) >= 0) continue;
+            sb.Append(ch);
+        }
+        string cleaned = sb.ToString().Trim();
+        return cleaned.Length == 0 ? "Pasted Image" : cleaned;
     }
 
     static void DebugLine(string s)
@@ -434,43 +447,6 @@ public static class CatracePasteHook
         return false;
     }
 
-    static bool ShouldInterceptTarget(IntPtr hwnd)
-    {
-        if (!InScope(hwnd)) return false;
-        return ClipboardHasImage();
-    }
-
-    static bool ClipboardHasImage()
-    {
-        try
-        {
-            System.Drawing.Bitmap bmp = (System.Drawing.Bitmap)System.Windows.Forms.Clipboard.GetImage();
-            if (bmp != null) { bmp.Dispose(); return true; }
-        }
-        catch { }
-        try
-        {
-            object png = System.Windows.Forms.Clipboard.GetData("PNG");
-            if (png is System.IO.MemoryStream || png is byte[]) return true;
-        }
-        catch { }
-        return ClipboardHasDib();
-    }
-
-    static bool ClipboardHasDib()
-    {
-        try
-        {
-            if (!OpenClipboard(IntPtr.Zero)) return false;
-            try
-            {
-                return IsClipboardFormatAvailable(CF_DIBV5) || IsClipboardFormatAvailable(CF_DIB);
-            }
-            finally { CloseClipboard(); }
-        }
-        catch { return false; }
-    }
-
     static System.Drawing.Bitmap GrabClipboardImage()
     {
         // 企业微信等来源只放 PNG 自定义格式，GetImage() 可能拿不到 → 先试 PNG。
@@ -481,17 +457,15 @@ public static class CatracePasteHook
             if (ms != null && ms.Length > 0)
             {
                 ms.Position = 0;
-                var bmp = new System.Drawing.Bitmap(ms);
-                return bmp;
+                using (var decoded = new System.Drawing.Bitmap(ms))
+                    return new System.Drawing.Bitmap(decoded);
             }
             byte[] bytes = png as byte[];
             if (bytes != null && bytes.Length > 0)
             {
                 using (var s = new System.IO.MemoryStream(bytes))
-                {
-                    var bmp = new System.Drawing.Bitmap(s);
-                    return bmp;
-                }
+                using (var decoded = new System.Drawing.Bitmap(s))
+                    return new System.Drawing.Bitmap(decoded);
             }
         }
         catch { }
@@ -660,7 +634,6 @@ public static class CatracePasteHook
                 count = Convert.ToInt32(windows.GetType().InvokeMember("Count", System.Reflection.BindingFlags.GetProperty, null, windows, null));
             }
             catch { }
-            DebugLine("shell windows count=" + count);
             for (int i = 0; i < count; i++)
             {
                 object w = null;
@@ -674,7 +647,6 @@ public static class CatracePasteHook
                 {
                     object hwndValue = w.GetType().InvokeMember("HWND", System.Reflection.BindingFlags.GetProperty, null, w, null);
                     IntPtr hwnd = new IntPtr(Convert.ToInt64(hwndValue));
-                    DebugLine("shell hwnd=" + hwnd + " loc=" + Convert.ToString(w.GetType().InvokeMember("LocationURL", System.Reflection.BindingFlags.GetProperty, null, w, null)));
                     if (hwnd == IntPtr.Zero) continue;
                     bool match = false;
                     for (int c = 0; c < candidates.Length; c++)
@@ -722,13 +694,8 @@ public static class CatracePasteHook
                 try
                 {
                     hr = AccessibleObjectFromWindow(probes[i], ids[k], ref riid, out disp);
-                    if (hr != 0 || disp == null)
-                    {
-                        DebugLine("om miss hwnd=" + probes[i] + " id=" + ids[k].ToString("X") + " hr=" + hr);
-                        continue;
-                    }
+                    if (hr != 0 || disp == null) continue;
                     string path = FolderFromBrowser(disp);
-                    DebugLine("om hit hwnd=" + probes[i] + " path=" + path);
                     if (IsFilesystemPath(path)) return path;
                 }
                 catch (Exception ex)
@@ -792,7 +759,8 @@ public static class CatracePasteHook
         try
         {
             string full = Path.GetFullPath(dir);
-            return full.Length >= 3 && full[1] == ':';
+            if (full.StartsWith("\\\\")) return true;
+            return full.Length >= 3 && char.IsLetter(full[0]) && full[1] == ':';
         }
         catch { return false; }
     }
@@ -800,8 +768,6 @@ public static class CatracePasteHook
     static System.Drawing.Bitmap ToPngSafe(System.Drawing.Bitmap src)
     {
         if (src == null) return null;
-        if (src.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-            return src;
         var clone = new System.Drawing.Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = System.Drawing.Graphics.FromImage(clone))
             g.DrawImage(src, 0, 0, src.Width, src.Height);
@@ -833,7 +799,6 @@ public static class CatracePasteHook
     static void HandlePaste(IntPtr fg)
     {
         if (fg == IntPtr.Zero) fg = GetForegroundWindow();
-        DebugLine("handle fg=" + fg + " cls=" + ClassName(fg) + " root=" + ClassName(GetAncestor(fg, GA_ROOT)) + " fmt=" + _saveFormat);
         string dir = ResolveSaveDirectory(fg);
         if (!IsFilesystemPath(dir))
         {
@@ -900,7 +865,6 @@ public static class CatracePasteHook
             File.WriteAllText(_lastSavedFile, path, Encoding.UTF8);
             Console.Out.WriteLine("{\"op\":\"saved\"}");
             Console.Out.Flush();
-            DebugLine("saved " + path);
             return;
         }
         catch (Exception ex)
