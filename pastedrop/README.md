@@ -1,6 +1,6 @@
 # PasteDrop 剪贴板存图
 
-在**桌面**或**资源管理器**里按 `Ctrl+V`，如果剪贴板里是图片，直接存成文件，不用再开画图/另存为。源自独立工具 [PasteDrop](https://github.com/lanxiuyun/PasteDrop)。
+在**桌面**或**资源管理器**里按 `Ctrl+V`，如果剪贴板里是图片，直接存成文件，不用再开画图/另存为。思路源自独立工具 [PasteDrop](https://github.com/lanxiuyun/PasteDrop)；本插件是 PowerShell 钩子实现，不再附带 Python 源码。
 
 ## 它能干什么
 
