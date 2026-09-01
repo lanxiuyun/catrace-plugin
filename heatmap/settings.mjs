@@ -25,18 +25,30 @@ const VIEWS = [
 const STYLE_ID = 'catrace-plugin-heatmap-settings-css'
 const CSS = `
 .hm {
-  width: 100%; box-sizing: border-box;
+  width: 100%; min-width: 0; box-sizing: border-box;
   display: flex; flex-direction: column; gap: 0.875rem;
   color: #4c1d95;
+  container-type: inline-size; container-name: hm;
 }
 .hm *, .hm *::before, .hm *::after { box-sizing: border-box; }
 .hm-bar {
-  display: flex; align-items: center; gap: 0.75rem 1.25rem; flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "nav nav"
+    "stats seg";
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  width: 100%; min-width: 0;
   padding: 0.625rem 0.875rem 0.625rem 0.75rem; background: #fff;
   border: 0.0625rem solid #efeaf8; border-radius: 1.25rem;
   box-shadow: 0 0.5rem 1.25rem rgba(76, 29, 149, 0.045);
 }
-.hm-nav { display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap; }
+.hm-nav {
+  grid-area: nav;
+  display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap;
+  min-width: 0;
+}
 .hm-picker { width: 10.5rem; flex-shrink: 0; }
 .hm-picker .n-input {
   --n-height: 2.25rem !important;
@@ -69,8 +81,9 @@ const CSS = `
 }
 .hm-today:hover:not(:disabled) { background: #ebe4f8 !important; }
 .hm-stats {
+  grid-area: stats;
   display: flex; align-items: center; gap: 1.25rem;
-  flex: 1; justify-content: flex-end; min-width: 0;
+  flex-wrap: nowrap; white-space: nowrap;
 }
 .hm-stat {
   display: inline-flex; align-items: center; gap: 0.45rem;
@@ -82,9 +95,10 @@ const CSS = `
 }
 .hm-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex-shrink: 0; }
 .hm-seg {
+  grid-area: seg;
   display: inline-flex; align-items: center; gap: 0.125rem;
   padding: 0.1875rem; background: #f3f0fa;
-  border-radius: 999px; flex-shrink: 0;
+  border-radius: 999px; justify-self: end;
 }
 .hm-seg button {
   font-size: 0.8125rem; font-weight: 600; color: #6b7280;
@@ -163,9 +177,16 @@ const CSS = `
 .hm-flow-time { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 9.5rem; color: #2e1065; }
 .hm-flow-name { flex: 1; color: #6b7280; font-size: 0.875rem; }
 .hm-flow-dur { font-weight: 700; font-variant-numeric: tabular-nums; color: #2e1065; }
-@media (max-width: 52rem) {
-  .hm-stats { justify-content: flex-start; flex-basis: 100%; order: 3; }
-  .hm-seg { margin-left: auto; }
+@container hm (max-width: 42rem) {
+  .hm-bar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "nav"
+      "stats"
+      "seg";
+  }
+  .hm-seg { width: 100%; justify-self: stretch; }
+  .hm-seg button { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hm-ring path, .hm-axis i, .hm-flow-item { transition: none; }
