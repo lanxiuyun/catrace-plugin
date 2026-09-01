@@ -65,6 +65,16 @@ function wantsResetOnRest(r) {
   return !!(r && r.reset_on_rest)
 }
 
+function isValidHexColor(s) {
+  if (typeof s !== 'string') return false
+  return /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(s.trim())
+}
+
+function normalizeAccentColor(s) {
+  const v = String(s || '').trim().toLowerCase()
+  return isValidHexColor(v) ? v : ''
+}
+
 const BUILTIN_EYE_ID = '__builtin_eye__'
 
 function builtinEyeRule() {
@@ -82,6 +92,10 @@ function builtinEyeRule() {
     last_fired_at: null,
     last_daily_keys: [],
     builtin: 'eye',
+    accent_color: '',
+    sound_enabled: false,
+    sound_path: '',
+    sound_volume: 0.8,
   }
 }
 
@@ -126,6 +140,10 @@ function sanitizeSettings(raw) {
       last_fired_at: r && r.last_fired_at != null ? Number(r.last_fired_at) : null,
       last_daily_keys: keys,
       builtin: (r && r.builtin) || null,
+      accent_color: normalizeAccentColor(r && r.accent_color),
+      sound_enabled: !!(r && r.sound_enabled),
+      sound_path: (r && r.sound_path) || '',
+      sound_volume: clamp(Number(r && r.sound_volume) || 0.8, 0, 1),
     }
   })
   ensureBuiltinEyeRule(s)
@@ -250,6 +268,17 @@ async function publishDue(rule, locale) {
   const mode = rule.mode === 'daily' ? 'daily' : 'interval'
   const sticky = !!rule.sticky
   const cardSec = clamp(Number(rule.card_duration_sec) || DEFAULT_CARD_SEC, MIN_CARD_SEC, MAX_CARD_SEC)
+
+  if (rule.sound_enabled) {
+    try {
+      const pluginDir = await plugin.path.getPluginDir()
+      const soundPath = (rule.sound_path || '').trim() || `${pluginDir}/assets/notify.wav`
+      await plugin.audio.play(soundPath, { volume: clamp(Number(rule.sound_volume) || 0.8, 0, 1) })
+    } catch (e) {
+      await plugin.log.warn('timer audio play failed', { ruleId: rule.id, error: String(e) })
+    }
+  }
+
   await plugin.events.publish({
     eventType: 'reminder.timer.due',
     kind: 'timer',
@@ -267,6 +296,7 @@ async function publishDue(rule, locale) {
       mode,
       auto_hide_ms: sticky ? 0 : cardSec * 1000,
       card_duration_sec: cardSec,
+      accent_color: normalizeAccentColor(rule.accent_color),
     },
     dedupeKey: `reminder.timer.due:${rule.id}`,
   })

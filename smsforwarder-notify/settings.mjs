@@ -1,13 +1,13 @@
 /** smsforwarder-notify settings — webhook / filter / status / guide. */
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted } = vue
-const { NButton, NInput, NSwitch, NTag, NPopconfirm, useMessage } = naive
+const { h, ref, computed, onMounted, onBeforeUnmount } = vue
+const { NButton, NInput, NSwitch, NTag, NPopconfirm, NSelect, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
-if (!NButton || !NInput || !NSwitch || !NTag || !useMessage) {
+if (!NButton || !NInput || !NSwitch || !NTag || !NSelect || !useMessage) {
   throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
 }
 if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
@@ -26,7 +26,7 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v16'
 const CSS = `
 .sf-settings {
   width: 100%; box-sizing: border-box;
@@ -40,6 +40,24 @@ const CSS = `
   border-radius: 0.875rem;
   background: #fff;
   display: flex; flex-direction: column; gap: 0.75rem;
+}
+.sf-settings .card.is-error {
+  border-color: #fecaca;
+  background: #fff5f5;
+  border-left: 0.25rem solid #ef4444;
+  box-shadow: 0 0.125rem 0.5rem rgba(220, 38, 38, 0.08);
+}
+.sf-settings .card.is-error h2 { color: #991b1b; display: inline-flex; align-items: center; gap: 0.375rem; }
+.sf-settings .card.is-error h2::before {
+  content: '!';
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.125rem; height: 1.125rem; border-radius: 999px;
+  background: #dc2626; color: #fff;
+  font-size: 0.6875rem; font-weight: 800; line-height: 1;
+}
+.sf-settings .status.is-error {
+  background: #fff;
+  border: 0.0625rem solid #fecaca;
 }
 .sf-settings .head {
   display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
@@ -66,7 +84,12 @@ const CSS = `
   padding: 0.625rem 0.75rem; border-radius: 0.5rem; background: #f0fdfa;
   font-size: 0.75rem; color: #424a53;
 }
+.sf-settings .status.is-error {
+  background: #fef2f2; color: #7f1d1d;
+}
 .sf-settings .status strong { color: #0d9488; font-weight: 650; }
+.sf-settings .status.is-error strong { color: #dc2626; }
+.sf-settings .status.is-error span { color: #991b1b; }
 .sf-settings .switch-pair {
   display: inline-flex; align-items: center; gap: 0.5rem;
   font-size: 0.8125rem; color: #424a53; font-weight: 500;
@@ -77,6 +100,7 @@ const CSS = `
   padding: 0.5rem 0.625rem; border-radius: 0.5rem;
   background: #f0fdfa; color: #134e4a; word-break: break-all; white-space: pre-wrap;
   border: 0.0625rem solid #ccfbf1; margin: 0;
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
 .sf-settings .copy-row {
   display: flex; align-items: flex-start; gap: 0.5rem;
@@ -154,15 +178,241 @@ const CSS = `
 .sf-settings .mms-tag:hover { opacity: 0.85; }
 .sf-settings .mms-tag.is-selected { box-shadow: 0 0 0 0.125rem #d97706 inset; }
 .sf-settings .mms-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
+.sf-settings .kw-add { display: flex; gap: 0.5rem; align-items: center; }
+.sf-settings .kw-add .n-input { flex: 1; min-width: 0; }
+.sf-settings .filter-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
+.sf-settings .adv-section-title {
+  margin: 0.25rem 0 0; font-size: 0.875rem; font-weight: 750; color: #134e4a;
+}
+.sf-settings .adv-grid-2,
+.sf-settings .adv-grid-3 {
+  display: grid; gap: 0.75rem; grid-template-columns: 1fr;
+}
+@media (min-width: 48rem) {
+  .sf-settings .adv-grid-2 { grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .sf-settings .adv-grid-3 { grid-template-columns: 1fr 1fr 1fr; align-items: stretch; }
+}
+.sf-settings .adv-tile {
+  padding: 1rem;
+  border: 0.0625rem solid #ccfbf1; border-radius: 1rem;
+  background: #fff; min-width: 0;
+  display: flex; flex-direction: column; gap: 0.625rem;
+}
+.sf-settings .adv-tile-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+}
+.sf-settings .adv-tile-title { margin: 0; font-size: 0.875rem; font-weight: 750; color: #134e4a; }
+.sf-settings .adv-tile-desc { margin: 0; font-size: 0.75rem; line-height: 1.55; color: #5b6b6a; }
+.sf-settings .adv-chip-box {
+  min-height: 5.5rem;
+  padding: 0.5rem;
+  border: 0.0625rem solid #e5e7eb; border-radius: 0.5rem;
+  background: #fafafa;
+  display: flex; flex-wrap: wrap; gap: 0.375rem; align-content: flex-start;
+}
+.sf-settings .adv-chip-input { flex: 1 1 8rem; min-width: 8rem; }
+.sf-settings .chip-text {
+  min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.4;
+}
+.sf-settings .chip-pkg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sf-settings .adv-tile-foot {
+  margin-top: auto; padding-top: 0.5rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+  font-size: 0.6875rem; color: #8b949e;
+}
+.sf-settings .adv-status-dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #14b8a6; display: inline-block;
+}
+.sf-settings .adv-metric { display: flex; align-items: center; gap: 0.5rem; }
+.sf-settings .adv-metric .n-input { flex: 1; min-width: 0; }
+.sf-settings .filter-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+}
+.sf-settings .filter-composer {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem;
+  background: #f0fdfa;
+}
+.sf-settings .filter-composer-title { margin: 0; font-size: 0.8125rem; font-weight: 750; color: #0f766e; }
+.sf-settings .filter-form {
+  display: grid; gap: 0.5rem 0.75rem;
+  grid-template-columns: 1fr;
+}
+.sf-settings .filter-form > .field { min-width: 0; }
+@media (min-width: 40rem) {
+  .sf-settings .filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 72rem) {
+  .sf-settings .filter-form { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+.sf-settings .filter-form .label { font-size: 0.6875rem; }
+.sf-settings .filter-add {
+  display: flex; justify-content: flex-end;
+}
+.sf-settings .filter-list-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+  font-size: 0.75rem; color: #5b6b6a;
+}
+.sf-settings .filter-list {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  max-height: 16rem; overflow-y: auto;
+}
+.sf-settings .filter-item {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border: 0.0625rem solid #e2e8f0; border-radius: 0.75rem; background: #fff;
+}
+.sf-settings .filter-item.is-off { opacity: 0.55; }
+.sf-settings .filter-item.is-warn { border-color: #fde68a; background: #fffbeb; }
+.sf-settings .filter-tags { display: flex; align-items: center; gap: 0.375rem; flex-wrap: wrap; min-width: 0; flex: 1; }
+.sf-settings .filter-tag {
+  display: inline-flex; align-items: center;
+  padding: 0.125rem 0.5rem; border-radius: 999px;
+  font-size: 0.6875rem; font-weight: 700;
+}
+.sf-settings .filter-tag.is-hide { background: #ccfbf1; color: #0f766e; }
+.sf-settings .filter-tag.is-muted { background: #f1f5f9; color: #475569; }
+.sf-settings .filter-tag.is-match { background: #e0f2fe; color: #0369a1; }
+.sf-settings .filter-quote {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem; color: #0f172a; background: #f8fafc;
+  padding: 0.125rem 0.375rem; border-radius: 0.375rem;
+}
+.sf-settings .filter-scope { font-size: 0.6875rem; color: #64748b; }
+.sf-settings .filter-warn { margin: 0; width: 100%; font-size: 0.6875rem; color: #b45309; }
+.sf-settings .block-box {
+  border: 0.0625rem solid #ccfbf1; border-radius: 0.75rem; overflow: hidden; background: #fff;
+}
+.sf-settings .block-search { padding: 0.5rem 0.625rem; border-bottom: 0.0625rem solid #f0fdfa; }
+.sf-settings .block-list { max-height: 16rem; overflow-y: auto; }
+.sf-settings .block-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 0.0625rem solid #f0fdfa;
+}
+.sf-settings .block-row:last-child { border-bottom: 0; }
+.sf-settings .block-row:hover { background: #f0fdfa; }
+.sf-settings .block-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0.125rem; }
+.sf-settings .block-title { font-size: 0.8125rem; font-weight: 600; color: #134e4a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sf-settings .block-sub {
+  font-size: 0.6875rem; color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sf-settings .block-count { font-size: 0.75rem; font-weight: 600; color: #8b949e; }
+.sf-settings .block-split {
+  display: grid; gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 56rem) {
+  .sf-settings .block-split { grid-template-columns: 1fr 1fr; align-items: stretch; }
+}
+.sf-settings .pane {
+  padding: 1rem 1.125rem;
+  border: 0.0625rem solid #99f6e4;
+  border-radius: 1rem;
+  background: #fff;
+  display: flex; flex-direction: column; gap: 0.75rem; min-width: 0;
+  max-height: 22rem; overflow: hidden;
+}
+.sf-settings .pane-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-right: 0.25rem; margin-right: -0.25rem;
+}
+.sf-settings .pane-body:empty { display: none; }
+.sf-settings .pane-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+}
+.sf-settings .pane-title {
+  margin: 0; font-size: 0.9375rem; font-weight: 750; color: #134e4a;
+  display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.sf-settings .pane-title .count { color: #8b949e; font-weight: 600; font-size: 0.8125rem; }
+.sf-settings .pane-hint { font-size: 0.75rem; color: #94a3b8; font-weight: 500; }
+.sf-settings .seg {
+  display: inline-flex; padding: 0.1875rem; border-radius: 0.5rem;
+  background: #f1f5f9; gap: 0.125rem;
+}
+.sf-settings .seg-btn {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 0.25rem 0.625rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-weight: 600; color: #64748b;
+}
+.sf-settings .seg-btn.is-on { background: #fff; color: #0f172a; box-shadow: 0 0.0625rem 0.125rem rgba(15,23,42,0.08); }
+.sf-settings .search-add {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.sf-settings .search-add .n-input { flex: 1; min-width: 0; }
+.sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
+.sf-settings .title-chips .n-tag { max-width: 100%; height: auto; white-space: normal; }
+.sf-settings .advanced-card { gap: 0; padding: 0; overflow: hidden; }
+.sf-settings .adv-toggle {
+  border: 0; background: transparent; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; margin: 0;
+  padding: 1rem 1.25rem; text-align: left;
+  font-size: 0.8125rem; font-weight: 700; color: #0d9488;
+  gap: 0.375rem;
+}
+
+.sf-settings .adv-chevron {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1rem; height: 1rem; line-height: 0;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center;
+  transform: rotate(-90deg);
+}
+.sf-settings .adv-chevron svg { width: 0.875rem; height: 0.875rem; display: block; }
+.sf-settings .adv-toggle[aria-expanded="true"] .adv-chevron { transform: rotate(0deg); }
+.sf-settings .adv-collapse {
+  display: grid; grid-template-rows: 0fr;
+  margin-top: 0; opacity: 0;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
+}
+.sf-settings .adv-collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.sf-settings .adv-collapse-inner { min-height: 0; overflow: hidden; }
+.sf-settings .adv-body {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  padding: 0 1.25rem 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-settings .adv-chevron,
+  .sf-settings .adv-collapse { transition: none; }
+}
 `
 
 function ensureStyles() {
   if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
+  for (const id of [
+    'catrace-plugin-smsforwarder-notify-settings-css',
+    'catrace-plugin-smsforwarder-notify-settings-css-v2',
+    'catrace-plugin-smsforwarder-notify-settings-css-v3',
+    'catrace-plugin-smsforwarder-notify-settings-css-v4',
+    'catrace-plugin-smsforwarder-notify-settings-css-v5',
+    'catrace-plugin-smsforwarder-notify-settings-css-v6',
+    'catrace-plugin-smsforwarder-notify-settings-css-v7',
+    'catrace-plugin-smsforwarder-notify-settings-css-v8',
+    'catrace-plugin-smsforwarder-notify-settings-css-v9',
+    'catrace-plugin-smsforwarder-notify-settings-css-v10',
+    'catrace-plugin-smsforwarder-notify-settings-css-v11',
+  ]) {
+    const old = document.getElementById(id)
+    if (old) old.remove()
+  }
+  let el = document.getElementById(STYLE_ID)
+  if (!el) {
+    el = document.createElement('style')
+    el.id = STYLE_ID
+    document.head.appendChild(el)
+  }
   el.textContent = CSS
-  document.head.appendChild(el)
 }
 
 function clamp(n, min, max, fallback) {
@@ -182,9 +432,38 @@ function normalizePath(raw) {
   return p
 }
 
-/** Stable sort for blacklist entries: digits/letters first, then CJK by pinyin. */
+/** Skip leading whitespace / punctuation so `"短信"` sorts as 短信, not before digits. */
+function firstSignificantChar(value) {
+  const str = String(value || '')
+  for (const ch of str) {
+    if (/\s/u.test(ch)) continue
+    if (/[\p{P}\p{S}]/u.test(ch)) continue
+    return ch
+  }
+  return ''
+}
+
+function blacklistSortRank(value) {
+  const ch = firstSignificantChar(value)
+  if (!ch) return 3
+  if (/\d/u.test(ch)) return 0
+  if (/\p{Script=Latin}/u.test(ch)) return 1
+  if (/\p{Script=Han}/u.test(ch)) return 2
+  return 3
+}
+
+/** Digits, then Latin, then CJK by pinyin. Leading quotes/brackets do not change the group. */
+function compareBlacklist(a, b) {
+  const sa = String(a || '')
+  const sb = String(b || '')
+  const ra = blacklistSortRank(sa)
+  const rb = blacklistSortRank(sb)
+  if (ra !== rb) return ra - rb
+  return sa.localeCompare(sb, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })
+}
+
 function sortBlacklist(list) {
-  return [...list].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { sensitivity: 'base' }))
+  return [...list].sort(compareBlacklist)
 }
 
 function blacklistToText(list) {
@@ -211,10 +490,14 @@ const DEFAULT_CONFIG = {
   cardDurationSec: DEFAULT_CARD_SEC,
   dedupeWindowSec: DEFAULT_DEDUPE_SEC,
   appBlacklist: [],
+  appBlacklistPaused: [],
   mmsTitleBlacklist: [],
+  filters: [],
   hideSensitiveBody: false,
   enableOtpAction: true,
   onlyPushWhenActive: false,
+  mergeChatThreads: true,
+  chatApps: ['QQ', '微信', 'WeChat', 'TIM', 'Telegram', 'Discord', 'WhatsApp', 'com.tencent.mobileqq', 'com.tencent.mm'],
 }
 
 const JSON_TEMPLATE = `{
@@ -233,6 +516,124 @@ const TABS = [
   { id: 'settings', label: '设置' },
   { id: 'tutorial', label: '教程' },
 ]
+
+const MAX_FILTERS = 50
+const FILTER_ACTION_OPTIONS = [
+  { label: '不看（屏蔽）', value: 'hide' },
+]
+const FILTER_FIELD_OPTIONS = [
+  { label: '标题', value: 'title' },
+  { label: '正文', value: 'body' },
+  { label: '应用名', value: 'app' },
+  { label: '包名', value: 'package' },
+  { label: '任意位置', value: 'any' },
+]
+const FILTER_MATCH_OPTIONS = [
+  { label: '包含文本', value: 'contains' },
+  { label: '完全等于', value: 'equals' },
+  { label: '开头是', value: 'startsWith' },
+  { label: '正则匹配', value: 'regex' },
+]
+const FILTER_FIELDS = new Set(FILTER_FIELD_OPTIONS.map((o) => o.value))
+const FILTER_MATCHES = new Set(FILTER_MATCH_OPTIONS.map((o) => o.value))
+
+function newFilterId() {
+  return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeFilter(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const field = FILTER_FIELDS.has(raw.field) ? raw.field : 'title'
+  const match = FILTER_MATCHES.has(raw.match) ? raw.match : 'contains'
+  const value = String(raw.value || '').trim().slice(0, match === 'regex' ? 80 : 200)
+  const id = String(raw.id || '').trim().slice(0, 64) || newFilterId()
+  const appContains = String(raw.appContains || raw.app || '').trim().slice(0, 100)
+  return {
+    id,
+    enabled: raw.enabled !== false,
+    field,
+    match,
+    value,
+    appContains,
+  }
+}
+
+function normalizeFilters(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  const seen = new Set()
+  for (const raw of input) {
+    if (out.length >= MAX_FILTERS) break
+    const f = normalizeFilter(raw)
+    if (!f) continue
+    if (seen.has(f.id)) f.id = newFilterId()
+    seen.add(f.id)
+    out.push(f)
+  }
+  return out
+}
+
+function persistableFilters(list) {
+  return normalizeFilters(list)
+}
+
+function chevronIcon() {
+  return h(
+    'svg',
+    {
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      'aria-hidden': 'true',
+    },
+    [
+      h('path', {
+        d: 'M6 9l6 6 6-6',
+        stroke: 'currentColor',
+        'stroke-width': '1.8',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+      }),
+    ],
+  )
+}
+
+function filterTagLabel(f) {
+  const value = String(f && f.value ? f.value : '').trim()
+  const app = String(f && f.appContains ? f.appContains : '').trim()
+  if (app) return `${value} · ${app}`
+  return value
+}
+
+function optionLabel(options, value, fallback) {
+  const hit = options.find((o) => o.value === value)
+  return hit ? hit.label : fallback
+}
+
+function filterPreview(f) {
+  const value = String(f && f.value ? f.value : '').trim()
+  const app = String(f && f.appContains ? f.appContains : '').trim()
+  const field = optionLabel(FILTER_FIELD_OPTIONS, f && f.field, '标题')
+  const match = optionLabel(FILTER_MATCH_OPTIONS, f && f.match, '包含文本')
+  const core = `不看 ${field} ${match}「${value || '…'}」`
+  return app ? `${core}（仅限 ${app}）` : core
+}
+
+function filterRegexError(match, value) {
+  if (match !== 'regex') return ''
+  const v = String(value || '').trim()
+  if (!v) return ''
+  try {
+    void new RegExp(v, 'i')
+    return ''
+  } catch {
+    return '正则无效，这条不会生效'
+  }
+}
+
+function filterIssue(f) {
+  if (!String(f && f.value ? f.value : '').trim()) return '还没填内容，这条不会生效'
+  return filterRegexError(f && f.match, f && f.value)
+}
 
 const DOWNLOAD_LINKS = [
   {
@@ -281,11 +682,11 @@ const FAQ = [
   ],
   [
     '重复通知刷屏',
-    '在「设置」里调大「去重窗口」（默认 5 秒）。',
+    '在「高级」里调大「相同通知最短间隔」（默认 5 秒）。只想不看某个标题：在卡片上点「屏蔽这个标题」，或在「不看这些标题」里添加。',
   ],
   [
     '验证码没有复制按钮',
-    '正文或标题需包含「验证码 / 校验码 / 动态码 / OTP」等关键词，且出现独立的 4–8 位数字；开启「隐私模式」时不提供复制按钮。',
+    '正文或标题需包含「验证码 / 校验码 / 动态码 / OTP」等关键词，且出现独立的 4–8 位数字。',
   ],
   [
     '端口被占用',
@@ -313,12 +714,28 @@ export default {
     const mmsTitleBlacklist = ref([])
     const mmsTitleQuery = ref('')
     const mmsSelected = ref(new Set())
+    const filters = ref([])
+    const keywordDraft = ref('')
+    const filterDraft = ref({
+      field: 'title',
+      match: 'contains',
+      value: '',
+      appContains: '',
+    })
+    const appDraft = ref('')
+    const appQuery = ref('')
+    const titleQuery = ref('')
+    const pausedApps = ref([])
     const hideSensitiveBody = ref(false)
     const enableOtpAction = ref(true)
     const onlyPushWhenActive = ref(false)
+    const mergeChatThreads = ref(true)
+    const chatAppsText = ref(blacklistToText(DEFAULT_CONFIG.chatApps))
+    const chatAppDraft = ref('')
     const status = ref(null)
     const webhookInfo = ref(null)
     const activeTab = ref('overview')
+    const showAdvanced = ref(false)
     let saveTimer = null
 
     const headerEnabled = computed(() => enabled.value !== false)
@@ -347,6 +764,193 @@ export default {
       mmsSelected.value = new Set()
     }
 
+    const blockedAppRows = computed(() => {
+      const q = appQuery.value.trim().toLowerCase()
+      return textToBlacklist(blacklistText.value)
+        .map((item) => {
+          const label = String(item || '').trim()
+          return {
+            key: `app:${label.toLowerCase()}`,
+            title: label,
+            tokens: [label],
+          }
+        })
+        .filter((row) => !q || row.title.toLowerCase().includes(q))
+        .sort((a, b) => compareBlacklist(a.title, b.title))
+    })
+
+    const titleBlocks = computed(() => {
+      const out = []
+      for (const f of filters.value) {
+        if (!f || !f.value) continue
+        out.push({
+          kind: 'filter',
+          id: f.id,
+          title: String(f.value).trim(),
+          sub: String(f.appContains || '').trim(),
+        })
+      }
+      for (const t of mmsTitleBlacklist.value) {
+        const label = String(t || '').trim()
+        if (!label) continue
+        out.push({ kind: 'mms', id: `mms:${label}`, title: label, sub: '锁屏短信' })
+      }
+      out.sort((a, b) => compareBlacklist(a.title, b.title))
+      const q = titleQuery.value.trim().toLowerCase()
+      if (!q) return out
+      return out.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) || String(r.sub || '').toLowerCase().includes(q),
+      )
+    })
+
+    function addChatApp() {
+      const value = String(chatAppDraft.value || '').trim()
+      if (!value) return
+      const list = textToBlacklist(chatAppsText.value)
+      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
+        list.push(value)
+        chatAppsText.value = sortBlacklist(list).join('\n')
+        scheduleSave()
+      }
+      chatAppDraft.value = ''
+    }
+
+    function removeChatApp(name) {
+      const drop = String(name || '').toLowerCase()
+      chatAppsText.value = textToBlacklist(chatAppsText.value)
+        .filter((x) => String(x).toLowerCase() !== drop)
+        .join('\n')
+      scheduleSave()
+    }
+
+    function addBlockedApp() {
+      const value = String(appDraft.value || '').trim()
+      if (!value) return
+      const list = textToBlacklist(blacklistText.value)
+      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
+        list.push(value)
+        blacklistText.value = sortBlacklist(list).join('\n')
+        scheduleSave()
+      }
+      appDraft.value = ''
+    }
+
+    function removeBlockedApp(row) {
+      const drop = String(row && row.title ? row.title : '').toLowerCase()
+      if (!drop) return
+      const list = textToBlacklist(blacklistText.value).filter(
+        (x) => String(x).toLowerCase() !== drop,
+      )
+      blacklistText.value = list.join('\n')
+      pausedApps.value = sortBlacklist(
+        pausedApps.value.filter((x) => String(x).toLowerCase() !== drop),
+      )
+      scheduleSave()
+    }
+
+    function patchFilter(idx, patch) {
+      const next = filters.value.slice()
+      if (!next[idx]) return
+      next[idx] = { ...next[idx], ...patch }
+      filters.value = next
+      scheduleSave()
+    }
+
+    function addKeywordFilter() {
+      const value = String(keywordDraft.value || '').trim()
+      if (!value) return
+      const dup = filters.value.some(
+        (f) =>
+          f &&
+          String(f.value || '').toLowerCase() === value.toLowerCase() &&
+          (f.match === 'contains' || f.match === 'equals'),
+      )
+      if (dup) {
+        keywordDraft.value = ''
+        return
+      }
+      if (filters.value.length >= MAX_FILTERS) return
+      filters.value = [
+        ...filters.value,
+        {
+          id: newFilterId(),
+          enabled: true,
+          field: 'any',
+          match: 'contains',
+          value,
+          appContains: '',
+        },
+      ]
+      keywordDraft.value = ''
+      scheduleSave()
+    }
+
+    function addCustomFilter() {
+      const field = FILTER_FIELDS.has(filterDraft.value.field) ? filterDraft.value.field : 'title'
+      const match = FILTER_MATCHES.has(filterDraft.value.match)
+        ? filterDraft.value.match
+        : 'contains'
+      const value = String(filterDraft.value.value || '').trim()
+      const appContains = String(filterDraft.value.appContains || '').trim()
+      if (!value) {
+        message.warning('先填要拦截的内容')
+        return
+      }
+      const regexErr = filterRegexError(match, value)
+      if (regexErr) {
+        message.warning(regexErr)
+        return
+      }
+      if (filters.value.length >= MAX_FILTERS) {
+        message.warning(`最多 ${MAX_FILTERS} 条`)
+        return
+      }
+      const dup = filters.value.some(
+        (f) =>
+          f &&
+          String(f.field || '') === field &&
+          String(f.match || '') === match &&
+          String(f.value || '').toLowerCase() === value.toLowerCase() &&
+          String(f.appContains || '').toLowerCase() === appContains.toLowerCase(),
+      )
+      if (dup) {
+        message.warning('已经有同样的规则了')
+        return
+      }
+      filters.value = [
+        ...filters.value,
+        {
+          id: newFilterId(),
+          enabled: true,
+          field,
+          match,
+          value,
+          appContains,
+        },
+      ]
+      filterDraft.value = { field, match, value: '', appContains }
+      scheduleSave()
+    }
+
+    function removeFilter(id) {
+      filters.value = filters.value.filter((f) => f && f.id !== id)
+      scheduleSave()
+    }
+
+    function removeTitleBlock(item) {
+      if (!item) return
+      if (item.kind === 'filter') {
+        removeFilter(item.id)
+        return
+      }
+      const label = String(item.title || item.label || '')
+      mmsTitleBlacklist.value = mmsTitleBlacklist.value.filter(
+        (t) => String(t).toLowerCase() !== label.toLowerCase(),
+      )
+      scheduleSave()
+    }
+
     function removeSelectedMmsTitles() {
       const sel = mmsSelected.value
       if (!sel.size) return
@@ -371,12 +975,16 @@ export default {
           DEFAULT_DEDUPE_SEC,
         ),
         appBlacklist: textToBlacklist(blacklistText.value),
+        appBlacklistPaused: sortBlacklist(pausedApps.value),
         mmsTitleBlacklist: sortBlacklist(
           Array.isArray(mmsTitleBlacklist.value) ? mmsTitleBlacklist.value : [],
         ),
-        hideSensitiveBody: hideSensitiveBody.value === true,
+        filters: persistableFilters(filters.value),
+        hideSensitiveBody: false,
         enableOtpAction: enableOtpAction.value !== false,
         onlyPushWhenActive: onlyPushWhenActive.value === true,
+        mergeChatThreads: mergeChatThreads.value !== false,
+        chatApps: textToBlacklist(chatAppsText.value),
       }
     }
 
@@ -394,14 +1002,22 @@ export default {
         DEFAULT_DEDUPE_SEC,
       )
       blacklistText.value = blacklistToText(cfg.appBlacklist)
+      pausedApps.value = sortBlacklist(
+        Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
+      )
       mmsTitleBlacklist.value = sortBlacklist(
         Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
       )
       mmsSelected.value = new Set()
       mmsTitleQuery.value = ''
-      hideSensitiveBody.value = cfg.hideSensitiveBody === true
+      filters.value = normalizeFilters(cfg.filters)
+      hideSensitiveBody.value = false
       enableOtpAction.value = cfg.enableOtpAction !== false
       onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
+      mergeChatThreads.value = cfg.mergeChatThreads !== false
+      chatAppsText.value = blacklistToText(
+        Array.isArray(cfg.chatApps) && cfg.chatApps.length ? cfg.chatApps : DEFAULT_CONFIG.chatApps,
+      )
     }
 
     async function run(key, task) {
@@ -545,6 +1161,22 @@ export default {
       })
     }
 
+    async function clearChatHistory() {
+      await run('clear-chat', async () => {
+        if (plugin.sidecar?.request) {
+          await plugin.sidecar.request('clearChatHistory', {})
+        }
+        if (plugin.storage && typeof plugin.storage.remove === 'function') {
+          try {
+            await plugin.storage.remove('chatThreads')
+          } catch {
+            /* sidecar already cleared */
+          }
+        }
+        message.success('对话历史已清空')
+      })
+    }
+
     async function sendTest() {
       await run('test', async () => {
         const cfg = currentConfig()
@@ -561,6 +1193,10 @@ export default {
           }
         }
         const sticky = cfg.cardDurationSec <= 0
+        const now = Date.now()
+        const lagMs = 5 * 60 * 1000
+        const phoneIso = new Date(now - lagMs).toISOString()
+        const pcIso = new Date(now).toISOString()
         await plugin.events.publish({
           eventType: 'smsforwarder-notify.notification',
           kind: 'smsforwarder-notify',
@@ -569,22 +1205,27 @@ export default {
           level: 'info',
           sticky,
           actions: [
-            { id: 'copy-body', label: '复制正文' },
             { id: 'copy-otp', label: '复制验证码' },
             ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
-            { id: 'block-app', label: '拉黑此应用' },
+            { id: 'block-title', label: '屏蔽这个标题' },
+            { id: 'block-app', label: '屏蔽此应用' },
           ],
           payload: {
             packageName: 'com.example.test',
             appName: '测试 App',
             title: '测试通知',
             body: '这是一条 SmsForwarder 测试消息，验证码 123456',
-            receivedAt: new Date().toLocaleString(),
+            // phone 5 min earlier; PC receive / toast now → 延迟 ~5 分
+            receivedAt: phoneIso,
+            webhookAt: pcIso,
+            publishedAt: pcIso,
+            shownAt: pcIso,
             otp: '123456',
+            noticeKind: 'otp',
             auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000,
             card_duration_sec: cfg.cardDurationSec,
           },
-          dedupeKey: `smsforwarder-notify:test:${Date.now()}`,
+          dedupeKey: `smsforwarder-notify:test:${now}`,
         })
         message.success('已发送测试通知')
       })
@@ -618,7 +1259,42 @@ export default {
       }
     }
 
+    /** Reload blacklist / switches when toast block-app (or other window) writes config. */
+    async function reloadConfigFromStore() {
+      try {
+        const raw = await plugin.config.get()
+        if (!raw || typeof raw !== 'object') return
+        // Keep local edits if user is mid-type: only refresh lists + toggles that
+        // toast actions mutate; full applyConfig would stomp port/token drafts.
+        const cfg = raw
+        blacklistText.value = blacklistToText(cfg.appBlacklist)
+        pausedApps.value = sortBlacklist(
+          Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
+        )
+        mmsTitleBlacklist.value = sortBlacklist(
+          Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
+        )
+        filters.value = normalizeFilters(cfg.filters)
+        // Drop selections that no longer exist
+        if (mmsSelected.value.size) {
+          const set = new Set(mmsTitleBlacklist.value)
+          mmsSelected.value = new Set([...mmsSelected.value].filter((t) => set.has(t)))
+        }
+      } catch (e) {
+        console.warn('[smsforwarder-notify] reload config failed', e)
+      }
+    }
+
+    function onPluginConfigChanged(ev) {
+      const id = ev && ev.detail && ev.detail.pluginId
+      if (id && id !== PLUGIN_ID) return
+      void reloadConfigFromStore()
+    }
+
     onMounted(() => {
+      if (typeof window !== 'undefined') {
+        window.addEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
+      }
       run('boot', async () => {
         loading.value = true
         try {
@@ -641,6 +1317,14 @@ export default {
         }
       })
     })
+
+    if (typeof onBeforeUnmount === 'function') {
+      onBeforeUnmount(() => {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
+        }
+      })
+    }
 
     expose({
       headerEnabled,
@@ -740,13 +1424,13 @@ export default {
         ),
       ])
 
-      const overviewCard = h('div', { class: 'card' }, [
+      const overviewCard = h('div', { class: ['card', { 'is-error': !!st.error }] }, [
         h('div', { class: 'head' }, [h('h2', '服务状态')]),
         loading.value
           ? h('p', { class: 'desc' }, '加载中…')
           : h(
               'div',
-              { class: 'status' },
+              { class: ['status', { 'is-error': !!st.error }] },
               statusRows.flatMap(([k, v]) => [h('strong', k), h('span', String(v))]),
             ),
         h('div', { class: 'actions' }, [
@@ -789,33 +1473,26 @@ export default {
       ])
 
       const settingsCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '连接配置')]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '端口'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(port.value),
-                'onUpdate:value': (v) => {
-                  port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
-                  scheduleSave()
-                },
-              }),
-            ]),
-            h('p', { class: 'hint' }, `${MIN_PORT}–${MAX_PORT}`),
+        h('div', { class: 'head' }, [h('h2', '连接')]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '电脑接收地址'),
+          h('div', { class: 'copy-row' }, [
+            h('pre', { class: 'mono' }, primaryUrl),
+            copyBtn('复制', primaryUrl, 'copy-url'),
           ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '路径'),
-            h(NInput, {
-              value: path.value,
-              placeholder: '/webhook',
-              'onUpdate:value': (v) => {
-                path.value = v
-                scheduleSave()
-              },
-            }),
-          ]),
+          urls.length > 1
+            ? h(
+                'div',
+                { class: 'url-list' },
+                urls.slice(1).map((u) =>
+                  h('div', { class: 'copy-row', key: u }, [
+                    h('pre', { class: 'mono' }, u),
+                    copyBtn('复制', u, `copy-url-${u}`),
+                  ]),
+                ),
+              )
+            : null,
+          h('p', { class: 'hint' }, '填到手机 SmsForwarder 的 Webhook。详细步骤见「教程」。'),
         ]),
         h('div', { class: 'field' }, [
           h('div', { class: 'label' }, 'Token'),
@@ -841,6 +1518,7 @@ export default {
               },
               { default: () => (showToken.value ? '隐藏' : '显示') },
             ),
+            copyBtn('复制', authHeader.replace(/^Authorization:\s*/i, ''), 'copy-token'),
             NPopconfirm
               ? h(
                   NPopconfirm,
@@ -875,39 +1553,18 @@ export default {
           ]),
           h('p', { class: 'hint' }, 'SmsForwarder 请求头：Authorization: Bearer <token>'),
         ]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, 'Toast 停留'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(cardDurationSec.value),
-                'onUpdate:value': (v) => {
-                  cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'unit' }, '秒（0=常驻）'),
-            ]),
-          ]),
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '去重窗口'),
-            h('div', { class: 'row-inline' }, [
-              h(NInput, {
-                class: 'num',
-                value: String(dedupeWindowSec.value),
-                'onUpdate:value': (v) => {
-                  dedupeWindowSec.value = clamp(
-                    v,
-                    MIN_DEDUPE_SEC,
-                    MAX_DEDUPE_SEC,
-                    DEFAULT_DEDUPE_SEC,
-                  )
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'unit' }, '秒'),
-            ]),
+        h('div', { class: 'field' }, [
+          h('div', { class: 'label' }, '卡片显示多久'),
+          h('div', { class: 'row-inline' }, [
+            h(NInput, {
+              class: 'num',
+              value: String(cardDurationSec.value),
+              'onUpdate:value': (v) => {
+                cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
+                scheduleSave()
+              },
+            }),
+            h('span', { class: 'unit' }, '秒（0=不自动关掉）'),
           ]),
         ]),
         h('div', { class: 'actions' }, [
@@ -924,12 +1581,43 @@ export default {
         ]),
       ])
 
-      const filterCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '过滤与推送')]),
-        h('div', { class: 'row' }, [
-          h('div', { class: 'field' }, [
-            h('div', { class: 'label' }, '仅电脑活跃时推送'),
-            h('div', { class: 'row-inline' }, [
+      const chatApps = textToBlacklist(chatAppsText.value)
+      const clearChatBtn = NPopconfirm
+        ? h(
+            NPopconfirm,
+            { onPositiveClick: clearChatHistory },
+            {
+              trigger: () =>
+                h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    type: 'error',
+                    text: true,
+                    loading: busy.value === 'clear-chat',
+                  },
+                  { default: () => '清空聊天记录' },
+                ),
+              default: () => '清空本机保存的全部会话气泡？',
+            },
+          )
+        : h(
+            NButton,
+            {
+              size: 'tiny',
+              type: 'error',
+              text: true,
+              loading: busy.value === 'clear-chat',
+              onClick: clearChatHistory,
+            },
+            { default: () => '清空聊天记录' },
+          )
+
+      const advancedBody = [
+        h('div', { class: 'adv-grid-2' }, [
+          h('div', { class: 'adv-tile' }, [
+            h('div', { class: 'adv-tile-head' }, [
+              h('h3', { class: 'adv-tile-title' }, '活跃时推送'),
               h(NSwitch, {
                 value: onlyPushWhenActive.value,
                 'onUpdate:value': (v) => {
@@ -937,115 +1625,418 @@ export default {
                   scheduleSave()
                 },
               }),
-              h('span', { class: 'switch-pair' }, onlyPushWhenActive.value ? '已开启' : '已关闭'),
             ]),
             h(
               'p',
-              { class: 'hint' },
-              '开启后，电脑处于空闲（无键鼠操作）时收到的通知先暂存，回到活跃状态后再补推。闲时不会丢失通知。',
+              { class: 'adv-tile-desc' },
+              '电脑有键鼠操作时才实时推送；空闲时先暂存，回来后一次性补推。',
+            ),
+            h('div', { class: 'adv-tile-foot' }, [
+              h('span', [
+                h('span', { class: 'adv-status-dot' }),
+                ' ',
+                onlyPushWhenActive.value ? '已开启（空闲先存）' : '已关闭（随时推送）',
+              ]),
+            ]),
+          ]),
+          h('div', { class: 'adv-tile' }, [
+            h('div', { class: 'adv-tile-head' }, [
+              h('h3', { class: 'adv-tile-title' }, '聊天小窗'),
+              h(NSwitch, {
+                value: mergeChatThreads.value,
+                'onUpdate:value': (v) => {
+                  mergeChatThreads.value = v !== false
+                  scheduleSave()
+                },
+              }),
+            ]),
+            h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗：弹出只显示最新一条，新消息往上顶；往上滚加载本机历史。'),
+            h('div', { class: 'adv-chip-box' }, [
+              ...chatApps.map((name) =>
+                h(
+                  NTag,
+                  {
+                    key: name,
+                    size: 'small',
+                    round: true,
+                    closable: true,
+                    onClose: () => removeChatApp(name),
+                  },
+                  { default: () => h('span', { class: 'chip-text' }, name) },
+                ),
+              ),
+              h(NInput, {
+                class: 'adv-chip-input',
+                size: 'small',
+                bordered: true,
+                value: chatAppDraft.value,
+                placeholder: '+ 输入名字按回车添加',
+                'onUpdate:value': (v) => {
+                  chatAppDraft.value = v
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addChatApp()
+                },
+              }),
+            ]),
+            h('div', { class: 'adv-tile-foot' }, [
+              h('span', '输入应用名或包名后按回车添加'),
+              clearChatBtn,
+            ]),
+          ]),
+        ]),
+        h('h3', { class: 'adv-section-title' }, '频控与 Webhook'),
+        h('div', { class: 'adv-grid-3' }, [
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, '相同通知最短间隔'),
+            h('div', { class: 'adv-metric' }, [
+              h(NInput, {
+                value: String(dedupeWindowSec.value),
+                'onUpdate:value': (v) => {
+                  dedupeWindowSec.value = clamp(
+                    v,
+                    MIN_DEDUPE_SEC,
+                    MAX_DEDUPE_SEC,
+                    DEFAULT_DEDUPE_SEC,
+                  )
+                  scheduleSave()
+                },
+              }),
+              h('span', { class: 'unit' }, '秒'),
+            ]),
+            h('p', { class: 'hint' }, '完全不一样的通知，短时间内再来一次就不重复。'),
+          ]),
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, 'Webhook 监听端口'),
+            h(NInput, {
+              value: String(port.value),
+              'onUpdate:value': (v) => {
+                port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
+                scheduleSave()
+              },
+            }),
+            h('p', { class: 'hint' }, `端口范围：${MIN_PORT} – ${MAX_PORT}`),
+          ]),
+          h('div', { class: 'adv-tile' }, [
+            h('h3', { class: 'adv-tile-title' }, 'Webhook 路由路径'),
+            h(NInput, {
+              value: path.value,
+              placeholder: '/webhook',
+              'onUpdate:value': (v) => {
+                path.value = v
+                scheduleSave()
+              },
+            }),
+            h('p', { class: 'hint' }, '接收 SmsForwarder POST 的 HTTP 路径。'),
+          ]),
+        ]),
+        h('div', { class: 'filter-head' }, [
+          h('h3', { class: 'adv-section-title' }, '自定义过滤规则'),
+          h(
+            'p',
+            { class: 'hint' },
+            '比「不看这些标题」更细：可指定应用、正文或正则。命中就不弹。',
+          ),
+        ]),
+        h('div', { class: 'filter-composer' }, [
+          h('p', { class: 'filter-composer-title' }, '新建规则'),
+          h('div', { class: 'filter-form' }, [
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '动作'),
+              h(NSelect, {
+                value: 'hide',
+                options: FILTER_ACTION_OPTIONS,
+                size: 'small',
+                disabled: true,
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '匹配字段'),
+              h(NSelect, {
+                value: filterDraft.value.field,
+                options: FILTER_FIELD_OPTIONS,
+                size: 'small',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = {
+                    ...filterDraft.value,
+                    field: FILTER_FIELDS.has(v) ? v : 'title',
+                  }
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '匹配逻辑'),
+              h(NSelect, {
+                value: filterDraft.value.match,
+                options: FILTER_MATCH_OPTIONS,
+                size: 'small',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = {
+                    ...filterDraft.value,
+                    match: FILTER_MATCHES.has(v) ? v : 'contains',
+                  }
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '关键词 / 正则'),
+              h(NInput, {
+                size: 'small',
+                value: filterDraft.value.value,
+                placeholder:
+                  filterDraft.value.match === 'regex'
+                    ? '例如 DSH Desktop.*交流群'
+                    : '例如：DSH Desktop 交流群',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = { ...filterDraft.value, value: v }
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addCustomFilter()
+                },
+              }),
+            ]),
+            h('div', { class: 'field' }, [
+              h('div', { class: 'label' }, '仅限应用（可选）'),
+              h(NInput, {
+                size: 'small',
+                value: filterDraft.value.appContains,
+                placeholder: 'QQ / com.tencent.mobileqq',
+                'onUpdate:value': (v) => {
+                  filterDraft.value = { ...filterDraft.value, appContains: v }
+                },
+                onKeyup: (e) => {
+                  if (e && e.key === 'Enter') addCustomFilter()
+                },
+              }),
+            ]),
+          ]),
+          filterRegexError(filterDraft.value.match, filterDraft.value.value)
+            ? h('p', { class: 'filter-warn' }, filterRegexError(filterDraft.value.match, filterDraft.value.value))
+            : null,
+          h('div', { class: 'filter-add' }, [
+            h(
+              NButton,
+              {
+                size: 'small',
+                type: 'primary',
+                disabled: filters.value.length >= MAX_FILTERS,
+                onClick: addCustomFilter,
+              },
+              { default: () => '添加到规则列表' },
             ),
           ]),
         ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, 'App 黑名单（一行一个包名或 App 名，自动排序）'),
+        h('div', { class: 'filter-list-head' }, [
+          h('span', `已生效规则（${filters.value.length}）`),
+          h('span', { class: 'hint' }, '从上到下匹配'),
+        ]),
+        filters.value.length
+          ? h(
+              'div',
+              { class: 'filter-list' },
+              filters.value.map((f, idx) => {
+                const issue = filterIssue(f)
+                return h(
+                  'div',
+                  {
+                    class: ['filter-item', { 'is-off': f.enabled === false, 'is-warn': !!issue }],
+                    key: f.id,
+                  },
+                  [
+                    h('div', { class: 'filter-tags' }, [
+                      h('span', { class: 'filter-tag is-hide' }, '不看'),
+                      h('span', { class: 'filter-tag is-muted' }, optionLabel(FILTER_FIELD_OPTIONS, f.field, '标题')),
+                      h('span', { class: 'filter-tag is-match' }, optionLabel(FILTER_MATCH_OPTIONS, f.match, '包含文本')),
+                      h('span', { class: 'filter-quote' }, `"${f.value || '…'}"`),
+                      f.appContains ? h('span', { class: 'filter-scope' }, `仅限 ${f.appContains}`) : null,
+                    ]),
+                    issue ? h('p', { class: 'filter-warn' }, issue) : null,
+                    h(NSwitch, {
+                      size: 'small',
+                      value: f.enabled !== false,
+                      'onUpdate:value': (v) => patchFilter(idx, { enabled: v === true }),
+                    }),
+                    h(
+                      NButton,
+                      {
+                        size: 'tiny',
+                        quaternary: true,
+                        type: 'error',
+                        onClick: () => {
+                          filters.value = filters.value.filter((_, i) => i !== idx)
+                          scheduleSave()
+                        },
+                      },
+                      { default: () => '删除' },
+                    ),
+                  ],
+                )
+              }),
+            )
+          : h('p', { class: 'filter-empty' }, '还没有自定义规则。常见群名直接在上面「不看这些标题」里加就行。'),
+      ]
+
+      const appPane = h('div', { class: 'pane' }, [
+        h('div', { class: 'pane-head' }, [
+          h('h3', { class: 'pane-title' }, [
+            '不看这些应用',
+            h('span', { class: 'count' }, `(${blockedAppRows.value.length})`),
+          ]),
+        ]),
+        h('div', { class: 'search-add' }, [
           h(NInput, {
-            value: blacklistText.value,
-            type: 'textarea',
-            rows: 4,
-            placeholder: 'com.example.ads\n某广告 App',
+            size: 'small',
+            value: appDraft.value || appQuery.value,
+            placeholder: '搜索或输入包名，按 Enter 添加…',
             'onUpdate:value': (v) => {
-              blacklistText.value = v
-              scheduleSave()
+              appDraft.value = v
+              appQuery.value = v
             },
-            onBlur: () => {
-              blacklistText.value = textToBlacklist(blacklistText.value).join('\n')
+            onKeyup: (e) => {
+              if (e && e.key === 'Enter') addBlockedApp()
             },
           }),
           h(
-            'p',
-            { class: 'hint' },
-            '这里用于屏蔽普通 App 通知，不会影响手机锁屏时收到的短信。',
+            NButton,
+            { size: 'small', secondary: true, onClick: addBlockedApp },
+            { default: () => '添加' },
           ),
         ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '已屏蔽的通知标题'),
-          mmsTitleBlacklist.value.length
-            ? h('div', { class: 'mms-toolbar' }, [
-                h(NInput, {
-                  class: 'mms-search',
-                  value: mmsTitleQuery.value,
-                  size: 'small',
-                  clearable: true,
-                  placeholder: '查找标题',
-                  'onUpdate:value': (v) => {
-                    mmsTitleQuery.value = v
-                  },
-                }),
-                h(
-                  NButton,
-                  {
-                    size: 'small',
-                    secondary: true,
-                    disabled: !shownMmsTitles.value.length,
-                    onClick: selectAllShown,
-                  },
-                  { default: () => '全选当前' },
-                ),
-                h(
-                  NButton,
-                  {
-                    size: 'small',
-                    secondary: true,
-                    disabled: !mmsSelectedCount.value,
-                    onClick: clearMmsSelection,
-                  },
-                  { default: () => '取消选择' },
-                ),
-                mmsSelectedCount.value
-                  ? h(
-                      NButton,
-                      {
-                        size: 'small',
-                        type: 'error',
-                        secondary: true,
-                        onClick: removeSelectedMmsTitles,
-                      },
-                      { default: () => `删除选中 (${mmsSelectedCount.value})` },
-                    )
-                  : null,
-              ])
-            : null,
-          mmsTitleBlacklist.value.length
+        h(
+          'div',
+          { class: 'pane-body' },
+          blockedAppRows.value.length
             ? h(
                 'div',
-                { class: 'mms-tags' },
-                shownMmsTitles.value.map((t) =>
+                { class: 'title-chips' },
+                blockedAppRows.value.map((row) =>
                   h(
                     NTag,
                     {
-                      key: t,
+                      key: row.key,
                       size: 'small',
                       round: true,
-                      bordered: false,
-                      type: mmsSelected.value.has(t) ? 'error' : 'warning',
-                      class: ['mms-tag', { 'is-selected': mmsSelected.value.has(t) }],
-                      onClick: () => toggleMmsTitle(t),
+                      type: 'info',
+                      closable: true,
+                      onClose: () => removeBlockedApp(row),
                     },
-                    { default: () => t },
+                    {
+                      default: () =>
+                        h('span', { class: 'chip-text chip-pkg', title: row.title }, row.title),
+                    },
                   ),
-                ).concat(
-                  shownMmsTitles.value.length === 0 && mmsTitleQuery.value.trim()
-                    ? [h('p', { class: 'mms-empty' }, '没有匹配的标题')]
-                    : [],
                 ),
               )
-            : h('pre', { class: 'mono' }, '暂无。可在通知卡片上点击「屏蔽这个标题」。'),
+            : h(
+                'p',
+                { class: 'filter-empty' },
+                appQuery.value.trim() ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。',
+              ),
+        ),
+      ])
+
+      const titlePane = h('div', { class: 'pane' }, [
+        h('div', { class: 'pane-head' }, [
+          h('h3', { class: 'pane-title' }, [
+            '不看这些标题',
+            h('span', { class: 'count' }, `(${titleBlocks.value.length})`),
+          ]),
+          h('span', { class: 'pane-hint' }, '支持文本模糊或精准匹配'),
+        ]),
+        h('div', { class: 'search-add' }, [
+          h(NInput, {
+            size: 'small',
+            value: keywordDraft.value || titleQuery.value,
+            placeholder: '搜索或输入消息标题关键字，按 Enter 添加…',
+            'onUpdate:value': (v) => {
+              keywordDraft.value = v
+              titleQuery.value = v
+            },
+            onKeyup: (e) => {
+              if (e && e.key === 'Enter') addKeywordFilter()
+            },
+          }),
           h(
-            'p',
-            { class: 'hint' },
-            '以后遇到相同标题的通知，将不再显示。为避免误操作，只能从通知卡片添加。',
+            NButton,
+            {
+              size: 'small',
+              secondary: true,
+              disabled: filters.value.length >= MAX_FILTERS,
+              onClick: addKeywordFilter,
+            },
+            { default: () => '添加' },
           ),
         ]),
+        h(
+          'div',
+          { class: 'pane-body' },
+          titleBlocks.value.length
+            ? h(
+                'div',
+                { class: 'title-chips' },
+                titleBlocks.value.map((item) =>
+                  h(
+                    NTag,
+                    {
+                      key: item.id,
+                      size: 'small',
+                      round: true,
+                      type: 'warning',
+                      closable: true,
+                      onClose: () => removeTitleBlock(item),
+                    },
+                    {
+                      default: () => [
+                        h('span', { class: 'chip-text' }, item.title),
+                        item.sub === '锁屏短信'
+                          ? h(
+                              NTag,
+                              { size: 'tiny', round: true, bordered: false },
+                              { default: () => '锁屏短信' },
+                            )
+                          : null,
+                      ],
+                    },
+                  ),
+                ),
+              )
+            : h(
+                'p',
+                { class: 'filter-empty' },
+                titleQuery.value.trim() ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。',
+              ),
+        ),
+      ])
+
+      const filterCard = h('div', { class: 'block-split' }, [appPane, titlePane])
+
+      const advancedCard = h('div', { class: 'card advanced-card' }, [
+        h(
+          'button',
+          {
+            class: 'adv-toggle',
+            type: 'button',
+            'aria-expanded': String(showAdvanced.value),
+            'aria-controls': 'smsforwarder-advanced-settings',
+            onClick: () => {
+              showAdvanced.value = !showAdvanced.value
+            },
+          },
+          [
+            '高级',
+            h('span', { class: 'adv-chevron', 'aria-hidden': 'true' }, [chevronIcon()]),
+          ],
+        ),
+        h(
+          'div',
+          {
+            id: 'smsforwarder-advanced-settings',
+            class: ['adv-collapse', { open: showAdvanced.value }],
+            'aria-hidden': String(!showAdvanced.value),
+            inert: !showAdvanced.value,
+          },
+          [h('div', { class: 'adv-collapse-inner' }, [h('div', { class: 'adv-body' }, advancedBody)])],
+        ),
       ])
 
       const urlRows = urls.length ? urls : [primaryUrl]
@@ -1203,7 +2194,7 @@ export default {
 
       let panel
       if (activeTab.value === 'settings') {
-        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard])
+        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard, advancedCard])
       } else if (activeTab.value === 'tutorial') {
         panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, faqCard])
       } else {

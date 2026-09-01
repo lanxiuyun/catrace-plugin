@@ -10,6 +10,7 @@ const {
   NPopconfirm,
   NRadioButton,
   NRadioGroup,
+  NSlider,
   NSwitch,
   NTag,
   NTooltip,
@@ -18,7 +19,7 @@ const {
 if (typeof h !== 'function') {
   throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
 }
-if (!NButton || !NSwitch || !NInput || !NPopconfirm || !NRadioGroup || !NTag || !NTooltip) {
+if (!NButton || !NSwitch || !NInput || !NPopconfirm || !NRadioGroup || !NTag || !NTooltip || !NSlider) {
   throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
 }
 if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
@@ -373,6 +374,38 @@ const CSS = `
   font-size: 0.75rem;
   color: #a89bc4;
 }
+.timer-settings .ed-color-input {
+  width: 2rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0.0625rem solid #ddd6fe;
+  border-radius: 0.375rem;
+  background: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.timer-settings .ed-color-input::-webkit-color-swatch-wrapper {
+  padding: 0.125rem;
+}
+.timer-settings .ed-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.25rem;
+}
+.timer-settings .ed-color-input::-moz-color-swatch {
+  border: none;
+  border-radius: 0.25rem;
+}
+.timer-settings .ed-sound-path {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.timer-settings .ed-sound-path .ed-sound-input {
+  flex: 1;
+  min-width: 8rem;
+  max-width: 16rem;
+}
 .timer-settings .ed-foot {
   display: flex;
   justify-content: flex-end;
@@ -478,6 +511,16 @@ function applyEyeFixed(rule) {
   return rule
 }
 
+function isValidHexColor(s) {
+  if (typeof s !== 'string') return false
+  return /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(s.trim())
+}
+
+function normalizeAccentColor(s) {
+  const v = String(s || '').trim().toLowerCase()
+  return isValidHexColor(v) ? v : ''
+}
+
 function createRule(partial = {}) {
   return {
     id: newRuleId(),
@@ -493,6 +536,10 @@ function createRule(partial = {}) {
     last_fired_at: null,
     last_daily_keys: [],
     builtin: null,
+    accent_color: '',
+    sound_enabled: false,
+    sound_path: '',
+    sound_volume: 0.8,
     ...partial,
   }
 }
@@ -504,6 +551,10 @@ function builtinEyeRule() {
       body: '远眺一下，放松眼睛。',
       sticky: false,
       card_duration_sec: 25,
+      accent_color: '',
+      sound_enabled: false,
+      sound_path: '',
+      sound_volume: 0.8,
     }),
   )
 }
@@ -571,6 +622,10 @@ function portableSettings(settings) {
         builtin: eye ? 'eye' : r.builtin || null,
         last_fired_at: null,
         last_daily_keys: [],
+        accent_color: normalizeAccentColor(r.accent_color),
+        sound_enabled: !!r.sound_enabled,
+        sound_path: (r.sound_path || '').trim(),
+        sound_volume: clamp(Number(r.sound_volume) || 0.8, 0, 1),
       }
     }),
   }
@@ -774,6 +829,10 @@ export default {
       sticky: false,
       card_duration_sec: DEFAULT_CARD_SEC,
       daily_times: [],
+      accent_color: '',
+      sound_enabled: false,
+      sound_path: '',
+      sound_volume: 0.8,
     })
 
     let saveTimer = null
@@ -825,6 +884,10 @@ export default {
                   last_fired_at: r.last_fired_at ?? null,
                   last_daily_keys: Array.isArray(r.last_daily_keys) ? [...r.last_daily_keys] : [],
                   builtin: r.builtin || null,
+                  accent_color: normalizeAccentColor(r.accent_color),
+                  sound_enabled: !!r.sound_enabled,
+                  sound_path: (r.sound_path || '').trim(),
+                  sound_volume: clamp(Number(r.sound_volume) || 0.8, 0, 1),
                 })
                 if (isEyeRule(rule)) applyEyeFixed(rule)
                 return rule
@@ -910,6 +973,10 @@ export default {
         sticky: false,
         card_duration_sec: DEFAULT_CARD_SEC,
         daily_times: [],
+        accent_color: '',
+        sound_enabled: false,
+        sound_path: '',
+        sound_volume: 0.8,
       }
       draftHour.value = 9
       draftMinute.value = 0
@@ -929,6 +996,10 @@ export default {
         sticky: !!rule.sticky,
         card_duration_sec: rule.card_duration_sec || DEFAULT_CARD_SEC,
         daily_times: eye ? [] : [...(rule.daily_times || [])],
+        accent_color: normalizeAccentColor(rule.accent_color),
+        sound_enabled: !!rule.sound_enabled,
+        sound_path: (rule.sound_path || '').trim(),
+        sound_volume: clamp(Number(rule.sound_volume) || 0.8, 0, 1),
       }
       draftHour.value = 9
       draftMinute.value = 0
@@ -978,6 +1049,10 @@ export default {
       const resetOnRest = mode === 'interval' && !!form.value.reset_on_rest
       const sticky = !!form.value.sticky
       const cardSec = clamp(form.value.card_duration_sec || DEFAULT_CARD_SEC, MIN_CARD_SEC, MAX_CARD_SEC)
+      const accentColor = normalizeAccentColor(form.value.accent_color)
+      const soundEnabled = !!form.value.sound_enabled
+      const soundPath = (form.value.sound_path || '').trim()
+      const soundVolume = clamp(Number(form.value.sound_volume) || 0.8, 0, 1)
       if (editingId.value && editingId.value !== '__new__') {
         const id = editingId.value
         const editingRule = settings.value.rules.find((r) => r.id === id)
@@ -990,6 +1065,10 @@ export default {
           rule.card_duration_sec = cardSec
           if (eye) {
             rule.interval_minutes = clamp(form.value.interval_minutes, MIN_INTERVAL, MAX_INTERVAL)
+            rule.accent_color = accentColor
+            rule.sound_enabled = soundEnabled
+            rule.sound_path = soundPath
+            rule.sound_volume = soundVolume
             applyEyeFixed(rule)
           } else {
             rule.title = title
@@ -997,6 +1076,10 @@ export default {
             rule.interval_minutes = clamp(form.value.interval_minutes, MIN_INTERVAL, MAX_INTERVAL)
             rule.reset_on_rest = resetOnRest
             rule.daily_times = [...form.value.daily_times]
+            rule.accent_color = accentColor
+            rule.sound_enabled = soundEnabled
+            rule.sound_path = soundPath
+            rule.sound_volume = soundVolume
           }
         })
       } else {
@@ -1016,6 +1099,10 @@ export default {
               card_duration_sec: cardSec,
               daily_times: [...form.value.daily_times],
               enabled: true,
+              accent_color: accentColor,
+              sound_enabled: soundEnabled,
+              sound_path: soundPath,
+              sound_volume: soundVolume,
             }),
           )
         })
@@ -1053,6 +1140,17 @@ export default {
             title: '定时提醒',
             body: '这是一条测试通知。',
           })
+        if (r.sound_enabled) {
+          try {
+            const pluginDir = await plugin.path.getPluginDir()
+            const soundPath = (r.sound_path || '').trim() || `${pluginDir}/assets/notify.wav`
+            await plugin.audio.play(soundPath, {
+              volume: clamp(Number(r.sound_volume) || 0.8, 0, 1),
+            })
+          } catch (e) {
+            console.warn('[timer settings] test audio failed', e)
+          }
+        }
         await plugin.events.publish({
           eventType: 'reminder.timer.due',
           kind: 'timer',
@@ -1076,6 +1174,7 @@ export default {
               MIN_CARD_SEC,
               MAX_CARD_SEC,
             ),
+            accent_color: normalizeAccentColor(r.accent_color),
           },
           dedupeKey: `reminder.timer.due:${r.id}`,
         })
@@ -1285,6 +1384,122 @@ export default {
             ]),
       ])
 
+      const colorRight = h('div', { class: 'ed-main' }, [
+        h('input', {
+          type: 'color',
+          class: 'ed-color-input',
+          value: form.value.accent_color || '#7c3aed',
+          onInput: (e) => {
+            const v = e.target.value
+            form.value = { ...form.value, accent_color: /^#/.test(v) ? v : `#${v}` }
+          },
+        }),
+        form.value.accent_color
+          ? h(
+              NButton,
+              {
+                size: 'small',
+                onClick: () => {
+                  form.value = { ...form.value, accent_color: '' }
+                },
+              },
+              { default: () => '恢复默认' },
+            )
+          : null,
+      ])
+
+      const soundRight = h('div', { class: 'ed-main' }, [
+        h('span', { class: 'ed-switch-pair' }, [
+          h(NSwitch, {
+            value: !!form.value.sound_enabled,
+            size: 'small',
+            'onUpdate:value': (v) => {
+              form.value = { ...form.value, sound_enabled: !!v }
+            },
+          }),
+          '触发时播放提示音',
+        ]),
+      ])
+
+      const soundEnabled = !!form.value.sound_enabled
+
+      async function playPreview() {
+        try {
+          const pluginDir = await plugin.path.getPluginDir()
+          const soundPath =
+            (form.value.sound_path || '').trim() || `${pluginDir}/assets/notify.wav`
+          await plugin.audio.play(soundPath, {
+            volume: clamp(Number(form.value.sound_volume) || 0.8, 0, 1),
+          })
+          showToast('ok', '正在预览')
+        } catch (e) {
+          console.warn('[timer settings] preview audio failed', e)
+          showToast('err', '预览失败')
+        }
+      }
+
+      async function pickSoundFile() {
+        try {
+          const path = await plugin.dialog.showOpenDialog({
+            filters: [
+              { name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'flac'] },
+              { name: 'All', extensions: ['*'] },
+            ],
+          })
+          if (path) {
+            form.value = { ...form.value, sound_path: path }
+          }
+        } catch (e) {
+          console.warn('[timer settings] pick sound failed', e)
+          showToast('err', '选择文件失败')
+        }
+      }
+
+      const soundVolumeRight = soundEnabled
+        ? h('div', { class: 'ed-main' }, [
+            h(NSlider, {
+              value: form.value.sound_volume,
+              min: 0,
+              max: 1,
+              step: 0.05,
+              style: { width: '8rem' },
+              'onUpdate:value': (v) => {
+                form.value = { ...form.value, sound_volume: clamp(v, 0, 1) }
+              },
+            }),
+            h('span', { class: 'ed-unit' }, `${Math.round(form.value.sound_volume * 100)}%`),
+          ])
+        : null
+
+      const soundPathRight = soundEnabled
+        ? h('div', { class: 'ed-main ed-sound-path' }, [
+            h(NInput, {
+              value: form.value.sound_path || '使用默认提示音',
+              size: 'small',
+              disabled: true,
+              class: 'ed-sound-input',
+            }),
+            h(
+              NButton,
+              { size: 'small', onClick: pickSoundFile },
+              { default: () => (form.value.sound_path ? '更换' : '选择') },
+            ),
+            form.value.sound_path
+              ? h(
+                  NButton,
+                  {
+                    size: 'small',
+                    onClick: () => {
+                      form.value = { ...form.value, sound_path: '' }
+                    },
+                  },
+                  { default: () => '恢复默认' },
+                )
+              : null,
+            h(NButton, { size: 'small', onClick: playPreview }, { default: () => '预览' }),
+          ])
+        : null
+
       return h('div', { class: 'rule-editor' }, [
         h('div', { class: 'ed-line' }, [
           lab('标题'),
@@ -1347,6 +1562,10 @@ export default {
             : triggerRight,
         ]),
         h('div', { class: 'ed-line' }, [lab('通知'), notifyRight]),
+        h('div', { class: 'ed-line' }, [lab('颜色'), colorRight]),
+        h('div', { class: 'ed-line' }, [lab('提示音'), soundRight]),
+        soundVolumeRight ? h('div', { class: 'ed-line' }, [lab('音量'), soundVolumeRight]) : null,
+        soundPathRight ? h('div', { class: 'ed-line' }, [lab('音频'), soundPathRight]) : null,
         h('div', { class: 'ed-foot' }, [
           h(NButton, { size: 'small', onClick: closeEditor }, { default: () => '取消' }),
           h(

@@ -1,0 +1,8 @@
+{
+  "id": "heatmap",
+  "name": "作息回顾",
+  "version": "0.1.1",
+  "description": "翻日期回看往日的专注和休息",
+  "settings": "settings.mjs",
+  "enabledByDefault": false
+}

@@ -15,6 +15,7 @@
 | `notify-demo/` | 按间隔弹 Toast 的极简 demo | 最小 background 插件 |
 | `sidecar-echo/` | 完整 sidecar demo：生命周期、JSONL publish/log、自定义 Toast UI、action round-trip | sidecar 协议端到端最小闭环 |
 | `smsforwarder-notify/` | 接收 Android SmsForwarder Webhook 转发到 Toast（Node sidecar） | sidecar 起本地 HTTP 服务 |
+| `heatmap/` | 作息回顾（按日读 `plugin.activity.getRecords`） | 仅 settings；翻日期三种视图 |
 | `timer/` | 第一方**定时提醒**（settings + scheduling） | background 调度 + 规则 CRUD + sticky 动作回传的范本 |
 
 ## 包结构约定
@@ -87,7 +88,7 @@
 
 ### settings.mjs — 设置面板
 
-- 只用白名单 Naive 组件：`NAlert NButton NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**没有 `NInputNumber`**，数字用 `NInput` + `Number(...)` 钳制。
+- 只用白名单 Naive 组件：`NAlert NButton NDatePicker NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**没有 `NInputNumber`**，数字用 `NInput` + `Number(...)` 钳制。
 - 根节点**不要**写外层 `padding` / `max-width`（宿主 `.plugin-detail` 已负责，会双倍缩进）；内部小组件间距可以有。
 - 用户配置走 `plugin.config`（整包）；侧配置同时推 sidecar：`plugin.config.set` 后 `plugin.sidecar.request('setConfig', cfg)`（见 `bt-music/settings.mjs:194`）。
 - `useMessage` / `useDialog` 必须在 `setup()` 内调用。
