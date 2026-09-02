@@ -240,11 +240,25 @@ export default {
       await run('test', async () => {
         const cfg = currentConfig()
         const sticky = cfg.cardDurationSec <= 0
+        const snippet = [
+          '这次把桌面通知和插件运行时一起收了一轮，方便过 0 点之后还能回看当天作息，也避免钩子用着用着就停。',
+          '',
+          '· 更新 plugin-demo 指针（钩子防卸与默认前缀）',
+          '· PasteDrop 存图改到后台 STA 线程，避免 WH_KEYBOARD_LL 超时被系统悄悄卸钩',
+          '· 每 15 秒重装键盘钩子兜底；设置页状态每 2 秒刷新',
+          '· 默认文件名前缀改为 PasteDrop，空前缀回退同样生效',
+          '· 历史作息可视化：环形表盘 / 单轴时间线 / 作息流卡片，可翻昨天',
+          '· 插件 API 增加 plugin.activity.getRecords({ from, to })，最长 31 天',
+          '· GitHub 通知：Release 丢掉下载表格，正文加长且卡片内可滚动',
+          '· Toast 不再 4 行截断 changelog，标题优先用 tag_name',
+          '',
+          '已知限制：Linux 不做全局 Ctrl+V 拦截；macOS PasteDrop 仍未合入。',
+        ].join('\n')
         await plugin.events.publish({
           eventType: 'github-notify.notification',
           kind: 'github-notify',
-          title: 'PR · octocat/Hello-World',
-          body: 'Fix readme typo（测试通知）',
+          title: 'Release · lanxiuyun/Catrace',
+          body: `v26.9.3\n${snippet}`,
           level: 'info',
           sticky,
           actions: [
@@ -253,12 +267,14 @@ export default {
           ],
           payload: {
             notification_id: `test-${Date.now()}`,
-            repo: 'octocat/Hello-World',
-            subject_type: 'PullRequest',
-            subject_title: 'Fix readme typo（测试通知）',
-            reason: 'review_requested',
-            reason_label: '请求评审',
-            html_url: 'https://github.com/notifications',
+            repo: 'lanxiuyun/Catrace',
+            subject_type: 'Release',
+            subject_title: 'v26.9.3',
+            body_snippet: snippet,
+            body_author: 'github-actions[bot]',
+            reason: 'subscribed',
+            reason_label: '订阅',
+            html_url: 'https://github.com/lanxiuyun/Catrace/releases',
             updated_at: new Date().toISOString(),
             auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000,
             card_duration_sec: cfg.cardDurationSec,

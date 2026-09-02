@@ -37,21 +37,18 @@ const CSS = `
 }
 .gh-card .bar.paused { animation-play-state: paused; }
 @keyframes gh-card-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-.gh-card .body {
-  margin: 0; font-size: 0.8125rem; line-height: 1.45; color: var(--body);
+.gh-card .snippet {
+  margin: 0; font-size: 0.75rem; line-height: 1.5; color: var(--body);
+  white-space: pre-wrap; word-break: break-word; overflow: visible;
+}
+.gh-card .block { margin: 0; min-width: 0; }
+.gh-card .plain {
+  margin: 0; font-size: 0.8125rem; line-height: 1.5; color: var(--body);
   white-space: pre-wrap; word-break: break-word;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5;
-  overflow: hidden;
 }
 .gh-card .subj {
   margin: 0 0 0.25rem; font-size: 0.8125rem; font-weight: 600; color: var(--title);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.gh-card .snippet {
-  margin: 0; font-size: 0.75rem; line-height: 1.45; color: var(--body);
-  white-space: pre-wrap; word-break: break-word;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
-  overflow: hidden;
 }
 .gh-card .meta {
   display: flex; flex-wrap: wrap; gap: 0.375rem 0.625rem;
@@ -69,11 +66,30 @@ const CSS = `
 
 function ensureStyles() {
   if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
+  let el = document.getElementById(STYLE_ID)
+  if (!el) {
+    el = document.createElement('style')
+    el.id = STYLE_ID
+    document.head.appendChild(el)
+  }
   el.textContent = CSS
-  document.head.appendChild(el)
+}
+
+function trimLead(snippet, subjectTitle) {
+  const lines = String(snippet || '').split('\n')
+  if (!lines.length) return ''
+  const first = lines[0].trim()
+  const ver = String(subjectTitle || '').replace(/^v/i, '').trim()
+  const dup =
+    /^what'?s\s+new/i.test(first) ||
+    /^更新/i.test(first) ||
+    (ver && first.replace(/^v/i, '').includes(ver))
+  if (dup) {
+    let i = 1
+    while (i < lines.length && !lines[i].trim()) i += 1
+    return lines.slice(i).join('\n')
+  }
+  return snippet
 }
 
 function formatTime(iso) {
@@ -132,28 +148,25 @@ export default {
     }
 
     const subjectTitle = payload.subject_title || ''
-    const snippet = payload.body_snippet || ''
+    const snippet = trimLead(payload.body_snippet || '', subjectTitle)
     const author = payload.body_author || ''
     if (subjectTitle || snippet || event.body) {
-      if (snippet) {
+      if (payload.body_snippet) {
         children.push(
-          h('div', { class: 'body' }, [
+          h('div', { class: 'block' }, [
             subjectTitle ? h('p', { class: 'subj' }, subjectTitle) : null,
-            h(
-              'p',
-              { class: 'snippet' },
-              author ? `${author}: ${snippet}` : snippet,
-            ),
+            snippet ? h('p', { class: 'snippet' }, snippet) : null,
           ]),
         )
       } else {
-        children.push(h('p', { class: 'body' }, event.body || subjectTitle))
+        children.push(h('p', { class: 'plain' }, event.body || subjectTitle))
       }
     }
 
-    if (reason || when) {
+    if (author || reason || when) {
       children.push(
         h('div', { class: 'meta' }, [
+          author ? h('span', author) : null,
           reason ? h('span', reason) : null,
           when ? h('span', when) : null,
         ]),

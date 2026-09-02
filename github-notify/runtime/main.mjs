@@ -217,21 +217,55 @@ function authHeaders() {
 }
 
 /** Strip markdown-ish noise for toast body. */
+function dropDownloadSections(s) {
+  return String(s).replace(
+    /^#{1,6}[^\n]*(下载|download)[^\n]*\n(?:(?!^#{1,6}\s)[\s\S])*/gim,
+    '',
+  )
+}
+
+function flattenMarkdownTables(s) {
+  const lines = String(s).split('\n')
+  const out = []
+  let headers = null
+  for (const line of lines) {
+    if (!/^\s*\|/.test(line)) {
+      headers = null
+      out.push(line)
+      continue
+    }
+    const cells = line.split('|').map((c) => c.trim()).filter((c) => c.length > 0)
+    if (cells.length && cells.every((c) => /^:?-+:?$/.test(c))) continue
+    if (!headers) {
+      headers = cells
+      continue
+    }
+    if (headers.length >= 2 && cells.length >= 2) out.push(`· ${cells[0]}：${cells[1]}`)
+    else out.push(`· ${cells.join(' · ')}`)
+  }
+  return out.join('\n')
+}
+
+function pickReleaseBody(raw) {
+  const full = String(raw || '')
+  const withoutDl = dropDownloadSections(full).trim()
+  return withoutDl.length >= 12 ? withoutDl : full
+}
+
 function plainSnippet(raw, maxLen = 180) {
   let s = String(raw || '')
-  // HTML comments / zero-width
   s = s.replace(/<!--[\s\S]*?-->/g, '')
-  // fenced code → short marker
   s = s.replace(/```[\s\S]*?```/g, '[代码]')
-  // images
   s = s.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-  // links keep label
   s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-  // headings / quotes / lists
+  s = flattenMarkdownTables(s)
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1')
+  s = s.replace(/__([^_]+)__/g, '$1')
   s = s.replace(/^#{1,6}\s+/gm, '')
   s = s.replace(/^>\s?/gm, '')
   s = s.replace(/^[-*+]\s+/gm, '· ')
   s = s.replace(/`([^`]+)`/g, '$1')
+  s = s.replace(/<[^>]+>/g, '')
   s = s.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n')
   s = s.replace(/[ \t]+\n/g, '\n').trim()
   if (!s) return ''
@@ -246,8 +280,14 @@ function plainSnippet(raw, maxLen = 180) {
 async function fetchBodySnippet(item) {
   const subject = item.subject || {}
   const urls = []
-  if (subject.latest_comment_url) urls.push(subject.latest_comment_url)
-  if (subject.url) urls.push(subject.url)
+  // Release 正文在 subject.url；latest_comment 往往只有短标题。
+  if (subject.type === 'Release') {
+    if (subject.url) urls.push(subject.url)
+    if (subject.latest_comment_url) urls.push(subject.latest_comment_url)
+  } else {
+    if (subject.latest_comment_url) urls.push(subject.latest_comment_url)
+    if (subject.url) urls.push(subject.url)
+  }
 
   for (const url of urls) {
     if (typeof url !== 'string' || !url.startsWith('https://api.github.com/')) continue
@@ -258,27 +298,28 @@ async function fetchBodySnippet(item) {
       clearTimeout(t)
       if (!res.ok) continue
       const data = await res.json()
-      // comment / review comment / issue / PR / commit / release / discussion
-      const raw =
+      let raw =
         data.body ||
-        data.body_html ||
         data.commit?.message ||
         data.message ||
         data.pull_request?.body ||
         ''
-      const snippet = plainSnippet(raw)
+      if (subject.type === 'Release') raw = pickReleaseBody(raw)
+      const maxLen = subject.type === 'Release' ? 1200 : 480
+      const snippet = plainSnippet(raw, maxLen)
       if (snippet) {
         return {
           snippet,
           author: data.user?.login || data.author?.login || data.actor?.login || '',
           html_url: data.html_url || '',
+          headline: data.tag_name || data.name || '',
         }
       }
     } catch {
       /* try next url */
     }
   }
-  return { snippet: '', author: '', html_url: '' }
+  return { snippet: '', author: '', html_url: '', headline: '' }
 }
 
 async function toEvent(item) {
@@ -286,7 +327,6 @@ async function toEvent(item) {
   const subject = item.subject || {}
   const typeLabel = subjectTypeLabel(subject.type)
   const reason = reasonLabel(item.reason)
-  const title = subject.title || 'GitHub 通知'
   let htmlUrl = htmlUrlFrom(item)
   const updatedAt = itemUpdatedAt(item) || new Date().toISOString()
   const cardSec = clampInt(config.cardDurationSec, 0, 600, 10)
@@ -294,8 +334,9 @@ async function toEvent(item) {
 
   const detail = await fetchBodySnippet(item)
   if (detail.html_url) htmlUrl = detail.html_url
+  const title =
+    (subject.type === 'Release' && detail.headline) || subject.title || 'GitHub 通知'
 
-  // body: title first line, then snippet
   let body = title
   if (detail.snippet) {
     const who = detail.author ? `${detail.author}: ` : ''
