@@ -24,11 +24,12 @@ if (Test-Path $script:ShutdownFile) { Remove-Item $script:ShutdownFile -Force }
 if (Test-Path $script:LastSavedFile) { Remove-Item $script:LastSavedFile -Force }
 
 Add-Type -TypeDefinition @"
-using System;
-using System.IO;
-using System.Text;
-using System.Threading;
-using System.Runtime.InteropServices;
+    using System;
+    using System.IO;
+    using System.Text;
+    using System.Threading;
+    using System.Collections.Generic;
+    using System.Runtime.InteropServices;
 
 public static class CatracePasteHook
 {
@@ -39,6 +40,7 @@ public static class CatracePasteHook
     public const uint WM_SYSKEYUP = 0x0105;
     public const uint WM_APP = 0x8000;
     public const uint WM_APP_PASTE = WM_APP + 1;
+    public const uint WM_APP_REHOOK = WM_APP + 2;
     public const uint WM_QUIT = 0x0012;
     public const uint VK_V = 0x56;
     public const uint VK_CONTROL = 0x11;
@@ -181,6 +183,10 @@ public static class CatracePasteHook
     static IntPtr _hook;
     static uint _mainThread;
     static volatile bool _running;
+    static readonly object _pasteLock = new object();
+    static readonly Queue<IntPtr> _pasteQueue = new Queue<IntPtr>();
+    static AutoResetEvent _pasteSignal;
+    static Thread _pasteThread;
     static string _shutdownFile;
     static string _lastSavedFile;
     static string _scope;
@@ -214,23 +220,38 @@ public static class CatracePasteHook
         _proc = HookProc;
         _hook = SetWindowsHookExW(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0);
         if (_hook == IntPtr.Zero) return Marshal.GetLastWin32Error();
+        _pasteSignal = new AutoResetEvent(false);
+        _pasteThread = new Thread(PasteLoop);
+        _pasteThread.SetApartmentState(ApartmentState.STA);
+        _pasteThread.IsBackground = true;
+        _pasteThread.Name = "PasteDropSave";
+        _pasteThread.Start();
         _running = true;
         return 0;
     }
 
     public static void Run()
     {
-        // 独立 watchdog 只负责关停信号。主线程用阻塞 GetMessage，持续、及时地
-        // 泵送 WH_KEYBOARD_LL 消息；不再每 60ms 轮询，避免全局键盘输入卡顿。
+        // 独立 watchdog：关停信号 + 定期请主线程重装钩子。
+        // WH_KEYBOARD_LL 若回调超过 LowLevelHooksTimeout（常见 300ms），Windows 会
+        // 悄悄卸钩、进程仍活着 → Ctrl+V 再也不进 HookProc。存盘绝不能堵这条泵线程。
         var watchdog = new Thread(() =>
         {
+            int ticks = 0;
             while (_running)
             {
                 if (File.Exists(_shutdownFile))
                 {
                     _running = false;
+                    try { if (_pasteSignal != null) _pasteSignal.Set(); } catch { }
                     PostThreadMessageW(_mainThread, WM_QUIT, UIntPtr.Zero, IntPtr.Zero);
                     break;
+                }
+                ticks++;
+                if (ticks >= 75)
+                {
+                    ticks = 0;
+                    PostThreadMessageW(_mainThread, WM_APP_REHOOK, UIntPtr.Zero, IntPtr.Zero);
                 }
                 Thread.Sleep(200);
             }
@@ -243,10 +264,13 @@ public static class CatracePasteHook
         {
             if (msg.message == WM_APP_PASTE)
             {
-                // 钩子已经确认「范围内 + 剪贴板像图片」才投递；这里不要再用 GetImage() 否决，
-                // 否则企业微信等只放 PNG 格式的来源会吞掉 Ctrl+V 却走补发、图存不下来。
-                try { HandlePaste(msg.lParam); }
-                catch { SendCtrlV(); }
+                EnqueuePaste(msg.lParam);
+                continue;
+            }
+            if (msg.message == WM_APP_REHOOK)
+            {
+                try { ReinstallHook(); }
+                catch (Exception ex) { DebugLine("rehook throw " + ex.Message); }
                 continue;
             }
             TranslateMessage(ref msg);
@@ -256,6 +280,8 @@ public static class CatracePasteHook
 
     public static void Uninstall()
     {
+        _running = false;
+        try { if (_pasteSignal != null) _pasteSignal.Set(); } catch { }
         if (_hook != IntPtr.Zero)
         {
             UnhookWindowsHookEx(_hook);
@@ -263,9 +289,50 @@ public static class CatracePasteHook
         }
     }
 
+    static void EnqueuePaste(IntPtr fg)
+    {
+        lock (_pasteLock)
+        {
+            while (_pasteQueue.Count > 8) _pasteQueue.Dequeue();
+            _pasteQueue.Enqueue(fg);
+        }
+        if (_pasteSignal != null) _pasteSignal.Set();
+    }
+
+    static void PasteLoop()
+    {
+        while (true)
+        {
+            if (_pasteSignal != null) _pasteSignal.WaitOne();
+            if (!_running) break;
+            IntPtr fg = IntPtr.Zero;
+            lock (_pasteLock)
+            {
+                if (_pasteQueue.Count > 0) fg = _pasteQueue.Dequeue();
+            }
+            if (fg == IntPtr.Zero) continue;
+            try { HandlePaste(fg); }
+            catch { try { SendCtrlV(); } catch { } }
+        }
+    }
+
+    static void ReinstallHook()
+    {
+        if (_proc == null || !_running) return;
+        IntPtr next = SetWindowsHookExW(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0);
+        if (next == IntPtr.Zero)
+        {
+            DebugLine("rehook failed err=" + Marshal.GetLastWin32Error());
+            return;
+        }
+        IntPtr old = _hook;
+        _hook = next;
+        if (old != IntPtr.Zero && old != next) UnhookWindowsHookEx(old);
+    }
+
     static string SanitizePrefix(string raw)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return "Pasted Image";
+        if (string.IsNullOrWhiteSpace(raw)) return "PasteDrop";
         char[] bad = Path.GetInvalidFileNameChars();
         var sb = new StringBuilder(raw.Trim().Length);
         for (int i = 0; i < raw.Length; i++)
@@ -276,7 +343,7 @@ public static class CatracePasteHook
             sb.Append(ch);
         }
         string cleaned = sb.ToString().Trim();
-        return cleaned.Length == 0 ? "Pasted Image" : cleaned;
+        return cleaned.Length == 0 ? "PasteDrop" : cleaned;
     }
 
     static void DebugLine(string s)
@@ -798,6 +865,7 @@ public static class CatracePasteHook
 
     static void HandlePaste(IntPtr fg)
     {
+        // 跑在 STA 后台线程，不要回到装 WH_KEYBOARD_LL 的泵线程。
         if (fg == IntPtr.Zero) fg = GetForegroundWindow();
         string dir = ResolveSaveDirectory(fg);
         if (!IsFilesystemPath(dir))

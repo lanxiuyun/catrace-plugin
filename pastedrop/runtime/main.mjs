@@ -26,7 +26,7 @@ const isWindows = process.platform === 'win32'
 const DEFAULT_CONFIG = {
   /** both = 桌面 + 资源管理器当前文件夹（PasteDrop 原生行为） */
   saveScope: 'both',
-  namePrefix: 'Pasted Image',
+  namePrefix: 'PasteDrop',
   /** auto = 原始 PNG 或无损转 PNG；png / jpg 强制格式 */
   saveFormat: 'auto',
 }
@@ -63,7 +63,7 @@ function normalizeConfig(input = {}) {
   if (input.saveScope === 'desktop' || input.saveScope === 'explorer' || input.saveScope === 'both') {
     next.saveScope = input.saveScope
   }
-  if (typeof input.namePrefix === 'string') next.namePrefix = input.namePrefix.trim() || 'Pasted Image'
+  if (typeof input.namePrefix === 'string') next.namePrefix = input.namePrefix.trim() || 'PasteDrop'
   if (input.saveFormat === 'auto' || input.saveFormat === 'png' || input.saveFormat === 'jpg') {
     next.saveFormat = input.saveFormat
   }
@@ -134,7 +134,7 @@ function startWorker() {
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Sta', '-File', path.join('runtime', 'main.ps1')],
     {
-      cwd: process.cwd(), // manifest cwd: "." → 插件目录
+      cwd: process.cwd(),
       env: workerEnv(),
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -145,7 +145,7 @@ function startWorker() {
   worker.on('error', (error) => {
     if (generation !== workerGeneration) return
     workerOk = false
-    lastWorkerError = `powershell 启动失败：${error.message}`
+    lastWorkerError = `worker 启动失败：${error.message}`
     log('worker failed to start', { error: lastWorkerError }, 'error')
     notifyWorkerError(error.message)
     worker = null
@@ -240,10 +240,14 @@ function stopWorker() {
   } catch {}
   const killTimer = setTimeout(() => {
     try {
-      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
-        windowsHide: true,
-        stdio: 'ignore',
-      }).unref?.()
+      if (isWindows) {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        }).unref?.()
+      } else {
+        child.kill('SIGKILL')
+      }
     } catch {}
   }, 1500)
   killTimer.unref?.()

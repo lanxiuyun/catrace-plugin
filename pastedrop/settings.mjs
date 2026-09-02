@@ -1,7 +1,7 @@
 /** PasteDrop 剪贴板存图 — 设置面板。 */
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, onMounted } = vue
+const { h, ref, onMounted, onBeforeUnmount } = vue
 const { NAlert, NButton, NInput, NSelect, useMessage } = naive
 
 if (typeof h !== 'function' || typeof ref !== 'function') {
@@ -56,7 +56,7 @@ const SAVE_FORMAT_OPTIONS = [
 
 const DEFAULT_CONFIG = {
   saveScope: 'both',
-  namePrefix: 'Pasted Image',
+  namePrefix: 'PasteDrop',
   saveFormat: 'auto',
 }
 
@@ -94,6 +94,7 @@ export default {
   setup() {
     ensureStyles()
     const message = useMessage()
+    const osName = ref('unknown')
     const busy = ref('')
     const saveScope = ref(DEFAULT_CONFIG.saveScope)
     const namePrefix = ref(DEFAULT_CONFIG.namePrefix)
@@ -101,6 +102,8 @@ export default {
     /** @type {import('vue').Ref<object|null>} */
     const status = ref(null)
     let saveTimer = null
+    let statusTimer = null
+    let statusInFlight = false
 
     function currentConfig() {
       return normalizeConfig({
@@ -171,12 +174,36 @@ export default {
       })
     }
 
+    async function pollStatus() {
+      if (statusInFlight || busy.value === 'boot') return
+      statusInFlight = true
+      try {
+        status.value = await plugin.sidecar.request('getStatus')
+      } catch {
+        /* 未启用 sidecar 时保持现有行 */
+      } finally {
+        statusInFlight = false
+      }
+    }
+
     onMounted(() => {
       run('boot', async () => {
+        try {
+          const info = await plugin.platform.getInfo()
+          osName.value = info?.os || 'unknown'
+        } catch {}
         const saved = await plugin.config.get()
         if (saved && typeof saved === 'object') applyConfig(saved)
         await persistAndSync({ quiet: true })
       })
+      statusTimer = setInterval(() => {
+        pollStatus()
+      }, 2000)
+    })
+
+    onBeforeUnmount?.(() => {
+      if (saveTimer) clearTimeout(saveTimer)
+      if (statusTimer) clearInterval(statusTimer)
     })
 
     const button = (label, key, onClick, props = {}) =>
@@ -230,12 +257,12 @@ export default {
                 namePrefix.value = v
                 scheduleSave()
               },
-              placeholder: 'Pasted Image',
+              placeholder: 'PasteDrop',
             }),
             h(
               'p',
               { class: 'hint' },
-              '例如「Pasted Image 2026-08-13 10-00-00.png」，同名会自动加序号。',
+              '例如「PasteDrop 2026-08-13 10-00-00.png」，同名会自动加序号。',
             ),
           ]),
           h('div', { class: 'field' }, [
@@ -285,7 +312,7 @@ export default {
           h('div', { class: 'actions' }, [
             button('刷新状态', 'status', refreshStatus),
           ]),
-          h('p', { class: 'hint' }, '本插件跑一个 PowerShell 小子进程装全局键盘钩子，启用即信任其全部代码。'),
+          h('p', { class: 'hint' }, 'Windows 跑 PowerShell 子进程装全局键盘钩子。启用即信任其全部代码。状态每 2 秒刷新。'),
         ]),
       ])
     }

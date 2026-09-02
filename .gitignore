@@ -8,3 +8,5 @@ Thumbs.db
 
 # node
 node_modules/
+**/runtime/shutdown.signal
+**/runtime/last-saved.txt
