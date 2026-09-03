@@ -1,11 +1,12 @@
 {
   "id": "notify-demo",
-  "name": "间隔通知",
+  "name": "间隔通知 Demo",
   "version": "0.2.1",
   "description": "按间隔自动 Toast，可选仅活跃时通知",
   "main": "ui.mjs",
   "background": "background.mjs",
   "settings": "settings.mjs",
+  "icon": "icon.svg",
   "events": ["notify-demo", "kind:notify-demo", "notify-demo.send"],
   "enabledByDefault": false
 }

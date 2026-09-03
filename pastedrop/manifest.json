@@ -3,6 +3,7 @@
   "name": "PasteDrop 剪贴板存图",
   "version": "0.1.0",
   "description": "在桌面或资源管理器里按 Ctrl+V，把剪贴板图片直接存成 PNG 文件（源自独立工具 PasteDrop）",
+  "icon": "icon.svg",
   "settings": "settings.mjs",
   "events": [
     "pastedrop",

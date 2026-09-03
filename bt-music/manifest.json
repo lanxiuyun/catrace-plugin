@@ -5,6 +5,7 @@
   "description": "监听蓝牙耳机连接，弹窗提醒并可自动启动音乐软件",
   "main": "ui.mjs",
   "settings": "settings.mjs",
+  "icon": "icon.svg",
   "events": [
     "bt-music",
     "kind:bt-music",

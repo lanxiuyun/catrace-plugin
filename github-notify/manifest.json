@@ -6,6 +6,7 @@
   "main": "ui.mjs",
   "background": "background.mjs",
   "settings": "settings.mjs",
+  "icon": "icon.svg",
   "events": [
     "github-notify",
     "kind:github-notify",
