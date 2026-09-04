@@ -1710,26 +1710,6 @@ export default {
             [IconPhone(), h('span', { class: 'dev-name' }, device || appName || '设备')],
           ),
           h('div', { class: 'foot-actions' }, [
-            hasBlockTitle
-              ? h(
-                  'button',
-                  {
-                    class: [
-                      'block-btn',
-                      this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
-                    ],
-                    type: 'button',
-                    title: `不再显示标题含「${sender}」的通知`,
-                    onClick: () => this.handleBlockClick('block-title'),
-                  },
-                  [
-                    IconBan(),
-                    this.blockArmedKind === 'block-title' && this.blockArmedAt
-                      ? '确认屏蔽标题？'
-                      : '屏蔽这个标题',
-                  ],
-                )
-              : null,
             hasBlock
               ? h(
                   'button',
@@ -1753,6 +1733,26 @@ export default {
                       : isLockscreenSms
                         ? '屏蔽这个标题'
                         : '屏蔽此应用',
+                  ],
+                )
+              : null,
+            hasBlockTitle
+              ? h(
+                  'button',
+                  {
+                    class: [
+                      'block-btn',
+                      this.blockArmedKind === 'block-title' && this.blockArmedAt ? 'is-armed' : '',
+                    ],
+                    type: 'button',
+                    title: `不再显示标题含「${sender}」的通知`,
+                    onClick: () => this.handleBlockClick('block-title'),
+                  },
+                  [
+                    IconBan(),
+                    this.blockArmedKind === 'block-title' && this.blockArmedAt
+                      ? '确认屏蔽标题？'
+                      : '屏蔽这个标题',
                   ],
                 )
               : null,

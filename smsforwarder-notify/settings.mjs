@@ -1207,8 +1207,8 @@ export default {
           actions: [
             { id: 'copy-otp', label: '复制验证码' },
             ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
-            { id: 'block-title', label: '屏蔽这个标题' },
             { id: 'block-app', label: '屏蔽此应用' },
+            { id: 'block-title', label: '屏蔽这个标题' },
           ],
           payload: {
             packageName: 'com.example.test',
