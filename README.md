@@ -12,6 +12,9 @@ Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事
 
 ## 有哪些插件
 
+### 🤖 Agent 通知（agent-notify）
+Claude / Codex / Gemini / Kimi 的 hook 通知和权限审批，落在桌面小窗。sidecar 监听 `127.0.0.1:23456`。需要本机 Node.js。默认关闭。
+
 ### 🟪 作息回顾（heatmap）
 翻日期回看往日的专注和休息。Dashboard 过 0 点只显示今天，这里可以翻昨天。
 

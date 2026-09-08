@@ -1,0 +1,21 @@
+{
+  "id": "agent-notify",
+  "name": "Agent 通知",
+  "version": "0.1.0",
+  "description": "Claude / Codex / Gemini / Kimi 的 hook 通知与权限审批，落在桌面小窗",
+  "main": "ui.mjs",
+  "settings": "settings.mjs",
+  "events": [
+    "agent-notify",
+    "kind:agent-notify",
+    "agent-notify.state",
+    "agent-notify.permission"
+  ],
+  "icon": "icon.svg",
+  "enabledByDefault": false,
+  "sidecar": {
+    "command": "node",
+    "args": ["runtime/main.mjs"],
+    "cwd": "."
+  }
+}
