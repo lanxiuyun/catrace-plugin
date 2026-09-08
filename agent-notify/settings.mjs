@@ -32,8 +32,10 @@ const CSS = `
 const EVENTS = [
   { id: 'SessionStart', label: '会话开始' },
   { id: 'UserPromptSubmit', label: '开始思考' },
+  { id: 'PreToolUse', label: '调用工具中' },
+  { id: 'PostToolUse', label: '工具调用完成' },
+  { id: 'PostToolUseFailure', label: '工具调用失败' },
   { id: 'Stop', label: '任务完成' },
-  { id: 'StopFailure', label: '任务出错 / 异常' },
   { id: 'Notification', label: '等待交互' },
 ]
 const NAMES = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
@@ -66,8 +68,10 @@ export default {
     const modes = ref({
       SessionStart: 'off',
       UserPromptSubmit: 'off',
+      PreToolUse: 'auto',
+      PostToolUse: 'auto',
+      PostToolUseFailure: 'sticky',
       Stop: 'sticky',
-      StopFailure: 'sticky',
       Notification: 'sticky',
     })
     const showDebug = ref(false)

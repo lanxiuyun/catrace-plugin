@@ -15,15 +15,18 @@ const EVENT_ALIASES = {
   // Gemini CLI
   BeforeAgent: "UserPromptSubmit",
   AfterAgent: "Stop",
-  // Kimi（旧 CLI 无 StopFailure，用工具失败兜底）
-  PostToolUseFailure: "StopFailure",
+  BeforeTool: "PreToolUse",
+  AfterTool: "PostToolUse",
 };
 
-// 未映射的事件（PreToolUse 等高频事件）直接忽略。
-// PermissionRequest 不走此脚本：P6 起 Claude 用 type:"http" 阻塞 hook 直推 /permission 做真审批。
+// 未映射的事件直接忽略。
+// PermissionRequest 不走此脚本：用 type:"http" 阻塞 hook 直推 /permission 做真审批。
 const EVENT_TO_STATE = {
   SessionStart: "idle",
   UserPromptSubmit: "thinking",
+  PreToolUse: "working",
+  PostToolUse: "working",
+  PostToolUseFailure: "error",
   Stop: "attention",
   StopFailure: "error",
   Notification: "notification",

@@ -120,6 +120,9 @@ const CSS = `
 const EVENT_LABEL = {
   SessionStart: '会话开始',
   UserPromptSubmit: '开始思考',
+  PreToolUse: '调用工具中',
+  PostToolUse: '工具调用完成',
+  PostToolUseFailure: '工具调用失败',
   Stop: '任务完成',
   StopFailure: '任务出错 / 异常',
   Notification: '等待交互',
@@ -127,16 +130,22 @@ const EVENT_LABEL = {
 const EVENT_BODY = {
   SessionStart: '会话已开始',
   UserPromptSubmit: '正在处理你的请求',
+  PreToolUse: '正在调用工具',
+  PostToolUse: '工具调用完成',
+  PostToolUseFailure: '工具调用失败',
   Stop: '本轮任务已完成，等你继续',
   StopFailure: '执行中断，请查看终端',
   Notification: '需要你回来看一眼',
 }
 const EVENT_THEMES = {
+  PostToolUseFailure: { accent: '#EF4444', title: '#991B1B', body: '#B91C1C', lightBg: '#FECACA', border: '#FECACA', badgeBg: '#FEE2E2', badgeFg: '#B91C1C' },
   StopFailure: { accent: '#EF4444', title: '#991B1B', body: '#B91C1C', lightBg: '#FECACA', border: '#FECACA', badgeBg: '#FEE2E2', badgeFg: '#B91C1C' },
   Stop: { accent: '#06B6D4', title: '#0F172A', body: '#475569', lightBg: '#CFFAFE', border: '#A5F3FC', badgeBg: '#CFFAFE', badgeFg: '#0E7490' },
   Notification: { accent: '#8B5CF6', title: '#0F172A', body: '#475569', lightBg: '#E9D5FF', border: '#DDD6FE', badgeBg: '#EDE9FE', badgeFg: '#6D28D9' },
   SessionStart: { accent: '#10B981', title: '#0F172A', body: '#475569', lightBg: '#A7F3D0', border: '#6EE7B7', badgeBg: '#D1FAE5', badgeFg: '#047857' },
   UserPromptSubmit: { accent: '#6B7280', title: '#0F172A', body: '#475569', lightBg: '#E5E7EB', border: '#D1D5DB', badgeBg: '#F3F4F6', badgeFg: '#4B5563' },
+  PreToolUse: { accent: '#F59E0B', title: '#0F172A', body: '#475569', lightBg: '#FEF3C7', border: '#FDE68A', badgeBg: '#FEF3C7', badgeFg: '#B45309' },
+  PostToolUse: { accent: '#14B8A6', title: '#0F172A', body: '#475569', lightBg: '#CCFBF1', border: '#99F6E4', badgeBg: '#CCFBF1', badgeFg: '#0F766E' },
 }
 
 function ensureStyles() {

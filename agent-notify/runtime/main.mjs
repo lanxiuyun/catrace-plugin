@@ -10,10 +10,22 @@ const PORT = 23456
 const PERM_WAIT_MS = 540_000
 const DEDUP_MS = 8000
 
-const KNOWN = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification']
+const KNOWN = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'Stop',
+  'StopFailure',
+  'Notification',
+]
 const DEFAULT_MODE = {
   SessionStart: 'off',
   UserPromptSubmit: 'off',
+  PreToolUse: 'auto',
+  PostToolUse: 'auto',
+  PostToolUseFailure: 'sticky',
   Stop: 'sticky',
   StopFailure: 'sticky',
   Notification: 'sticky',
@@ -21,6 +33,9 @@ const DEFAULT_MODE = {
 const EVENT_BODY = {
   SessionStart: '会话已开始',
   UserPromptSubmit: '正在处理你的请求',
+  PreToolUse: '正在调用工具',
+  PostToolUse: '工具调用完成',
+  PostToolUseFailure: '工具调用失败',
   Stop: '本轮任务已完成，等你继续',
   StopFailure: '执行中断，请查看终端',
   Notification: '需要你回来看一眼',
@@ -92,7 +107,7 @@ function publishSession(entry, { gone = false } = {}) {
       kind: 'agent-notify',
       title: cardTitle(entry),
       body: cardBody(entry),
-      level: entry.event === 'StopFailure' ? 'error' : 'info',
+      level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: !gone,
       actions: gone ? [] : [{ id: `dismiss:${sessionId}`, label: '知道了' }],
       payload: {
@@ -204,7 +219,7 @@ function handleState(payload) {
       kind: 'agent-notify',
       title: cardTitle(entry),
       body: cardBody(entry),
-      level: entry.event === 'StopFailure' ? 'error' : 'info',
+      level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
       payload: { sessionId, entry, debug: !!config.showDebug, raw: payload },
       dedupeKey: `agent-notify:session:${sessionId}`,

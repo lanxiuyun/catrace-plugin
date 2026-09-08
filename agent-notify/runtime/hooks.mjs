@@ -98,11 +98,19 @@ export function installClaude(scriptPath) {
   const settings = readJson(settingsPath)
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
   const spec = claudeSpec(scriptPath)
-  const events = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification']
+  const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop']
   for (const event of events) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     const arr = settings.hooks[event]
     if (!arr.some(containsMarker)) arr.push({ matcher: '', hooks: [{ ...spec }] })
+  }
+  // 清理旧版 command hook（StopFailure/Notification 已不再为 Claude 注册）
+  for (const event of ['StopFailure', 'Notification']) {
+    const arr = settings.hooks[event]
+    if (!Array.isArray(arr)) continue
+    const next = arr.filter((e) => !containsMarker(e))
+    if (next.length) settings.hooks[event] = next
+    else delete settings.hooks[event]
   }
   if (!Array.isArray(settings.hooks.PermissionRequest)) settings.hooks.PermissionRequest = []
   settings.hooks.PermissionRequest = settings.hooks.PermissionRequest.filter((e) => !containsMarker(e) || isPermHook(e))
@@ -145,7 +153,7 @@ export function installCodex(scriptPath) {
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
   const spec = { type: 'command', command: commandFor(scriptPath), timeout: 30 }
   if (win()) spec.commandWindows = commandFor(scriptPath)
-  for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop']) {
+  for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     if (!settings.hooks[event].some(containsMarker)) {
       settings.hooks[event].push({ hooks: [{ ...spec }] })
@@ -215,7 +223,7 @@ function stripKimiHooks(content) {
 
 function kimiHookBlocks(scriptPath) {
   const command = commandFor(scriptPath).replace(/'/g, '')
-  const events = ['SessionStart', 'UserPromptSubmit', 'Stop', 'Notification']
+  const events = ['SessionStart', 'UserPromptSubmit', 'PostToolUseFailure', 'Stop', 'Notification']
   return events
     .map(
       (event) =>
