@@ -1,10 +1,10 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, onMounted } = vue
-const { NButton, NRadioButton, NRadioGroup, NTag, useMessage } = naive
+const { NButton, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
 
 if (typeof h !== 'function') throw new Error('Vue runtime missing')
-if (!NButton || !NRadioGroup || !NTag || !useMessage) throw new Error('naive runtime missing')
+if (!NButton || !NRadioGroup || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
 if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
@@ -70,11 +70,13 @@ export default {
       StopFailure: 'sticky',
       Notification: 'sticky',
     })
+    const showDebug = ref(false)
 
     async function load() {
       try {
         const raw = await plugin.config.get()
         if (raw && raw.eventModes) modes.value = { ...modes.value, ...raw.eventModes }
+        showDebug.value = !!(raw && raw.showDebug)
       } catch {
         /* ignore */
       }
@@ -88,12 +90,21 @@ export default {
     }
 
     async function persistModes() {
-      const cfg = { enabled: true, eventModes: { ...modes.value } }
+      const cfg = { enabled: true, showDebug: !!showDebug.value, eventModes: { ...modes.value } }
       await plugin.config.set(cfg)
       try {
         await plugin.sidecar.request('setConfig', cfg)
       } catch {
         /* ignore */
+      }
+    }
+
+    async function setDebug(v) {
+      showDebug.value = !!v
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
       }
     }
 
@@ -108,11 +119,17 @@ export default {
 
     async function toggle(agent) {
       busy.value = agent.id
+      const installing = !agent.installed
       try {
-        if (agent.installed) await plugin.sidecar.request('uninstall', { agent: agent.id })
-        else await plugin.sidecar.request('install', { agent: agent.id })
+        if (installing) await plugin.sidecar.request('install', { agent: agent.id })
+        else await plugin.sidecar.request('uninstall', { agent: agent.id })
         await load()
-        message.success(agent.installed ? 'Hook 已卸载' : 'Hook 已安装')
+        const now = agents.value.find((x) => x.id === agent.id)
+        if (installing && !now?.installed) {
+          message.error('没有写入成功（该 Agent 的配置目录可能不存在）')
+        } else {
+          message.success(installing ? 'Hook 已安装' : 'Hook 已卸载')
+        }
       } catch (e) {
         message.error(e instanceof Error ? e.message : String(e))
       } finally {
@@ -142,6 +159,16 @@ export default {
               ),
             ]),
           ),
+        ),
+        section(
+          '调试',
+          '打开后，卡片底部会列出这次 Toast 收到的全部字段，方便对照该显示什么。',
+          [
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '显示调试字段'),
+              h(NSwitch, { value: showDebug.value, onUpdateValue: setDebug }),
+            ]),
+          ],
         ),
         section(
           '事件通知策略',

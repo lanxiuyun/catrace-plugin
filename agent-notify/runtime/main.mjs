@@ -18,9 +18,34 @@ const DEFAULT_MODE = {
   StopFailure: 'sticky',
   Notification: 'sticky',
 }
+const EVENT_BODY = {
+  SessionStart: '会话已开始',
+  UserPromptSubmit: '正在处理你的请求',
+  Stop: '本轮任务已完成，等你继续',
+  StopFailure: '执行中断，请查看终端',
+  Notification: '需要你回来看一眼',
+}
+
+function projectName(cwd) {
+  if (!cwd) return ''
+  const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts[parts.length - 1] || ''
+}
+
+function cardTitle(entry) {
+  const named = entry.sessionTitle && String(entry.sessionTitle).trim()
+  if (named) return named
+  return projectName(entry.cwd) || 'AI 助手'
+}
+
+function cardBody(entry) {
+  if (entry.prompt) return entry.prompt
+  return EVENT_BODY[entry.event] || '状态已更新'
+}
 
 let config = {
   enabled: true,
+  showDebug: false,
   eventModes: { ...DEFAULT_MODE },
 }
 /** @type {Map<string, object>} sessionId -> entry */
@@ -57,22 +82,26 @@ function modeOf(event) {
   return config.eventModes[event] || DEFAULT_MODE[event] || 'off'
 }
 
-function publishState() {
-  const entries = [...stickyEntries.values()]
-  if (!entries.length) return
+function publishSession(entry, { gone = false } = {}) {
+  const sessionId = entry.sessionId || 'unknown'
   send({
     v: 1,
     op: 'publish',
     event: {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
-      title: entries.length > 1 ? `${entries.length} 个 Agent 会话` : 'Agent 通知',
-      body: entries[0].summary || entries[0].event,
-      level: entries.some((e) => e.event === 'StopFailure') ? 'error' : 'info',
-      sticky: true,
-      actions: [{ id: 'dismiss', label: '知道了' }],
-      payload: { entries },
-      dedupeKey: 'agent-notify:sticky',
+      title: cardTitle(entry),
+      body: cardBody(entry),
+      level: entry.event === 'StopFailure' ? 'error' : 'info',
+      sticky: !gone,
+      actions: gone ? [] : [{ id: `dismiss:${sessionId}`, label: '知道了' }],
+      payload: {
+        sessionId,
+        entry,
+        debug: !!config.showDebug,
+        raw: entry.raw || null,
+      },
+      dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
 }
@@ -98,6 +127,8 @@ function publishPermission(id, payload) {
         toolInput: payload.tool_input,
         sessionId: payload.session_id,
         cwd: payload.cwd,
+        debug: !!config.showDebug,
+        raw: payload,
       },
       dedupeKey: `agent-notify:perm:${id}`,
     },
@@ -138,8 +169,10 @@ function handleState(payload) {
   const sessionId = payload.session_id || 'unknown'
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
     timeoutSessionPerms(sessionId)
-    stickyEntries.delete(sessionId)
-    if (stickyEntries.size) publishState()
+    if (stickyEntries.has(sessionId)) {
+      stickyEntries.delete(sessionId)
+      publishSession({ sessionId }, { gone: true })
+    }
   }
   const mode = modeOf(event)
   if (mode === 'off') return
@@ -155,12 +188,12 @@ function handleState(payload) {
     sessionId,
     cwd: payload.cwd || '',
     prompt: payload.prompt || '',
-    summary: payload.prompt || payload.session_title || event,
-    sessionTitle: payload.session_title || '',
+    sessionTitle: payload.session_title || payload.sessionTitle || '',
+    raw: payload,
   }
   if (mode === 'sticky') {
     stickyEntries.set(sessionId, entry)
-    publishState()
+    publishSession(entry)
     return
   }
   send({
@@ -169,12 +202,12 @@ function handleState(payload) {
     event: {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
-      title: 'Agent 通知',
-      body: entry.summary,
-      level: 'info',
+      title: cardTitle(entry),
+      body: cardBody(entry),
+      level: entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { entries: [entry] },
-      dedupeKey: `agent-notify:auto:${sessionId}:${event}`,
+      payload: { sessionId, entry, debug: !!config.showDebug, raw: payload },
+      dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
 }
@@ -241,6 +274,7 @@ function stopHttp() {
 
 function applyConfig(input = {}) {
   if (typeof input.enabled === 'boolean') config.enabled = input.enabled
+  if (typeof input.showDebug === 'boolean') config.showDebug = input.showDebug
   if (input.eventModes && typeof input.eventModes === 'object') {
     config.eventModes = { ...DEFAULT_MODE, ...input.eventModes }
   }
@@ -311,10 +345,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (message.op === 'resolved') {
     const actionId = String(message.actionId || '')
     const kind = String(message.resolutionKind || '')
-    if (actionId === 'dismiss' || kind === 'dismissed') {
-      stickyEntries.clear()
+    if (actionId.startsWith('dismiss:')) {
+      stickyEntries.delete(actionId.slice('dismiss:'.length))
       return
     }
+    if (kind === 'dismissed') return
     const m = /^(allow|deny):(\d+)$/.exec(actionId)
     if (m) finishPerm(Number(m[2]), m[1])
   }
