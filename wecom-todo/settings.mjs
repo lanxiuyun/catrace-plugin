@@ -107,7 +107,8 @@ const CSS = `
 .wc-faq { margin: 0.6rem 0 0; }
 .wc-faq-q { font-size: 0.8125rem; font-weight: 700; color: #0f172a; line-height: 1.4; margin-bottom: 0.25rem; }
 .wc-faq-a { margin: 0; font-size: 0.8125rem; line-height: 1.5; color: #475569; }
-.wc-privacy { display: flex; gap: 0.5rem; padding: 0.7rem 0.85rem; border-radius: 0.65rem; background: #f0fdf4; color: #15803d; font-size: 0.8125rem; line-height: 1.4; }
+.wc-privacy { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.75rem; line-height: 1.5; color: #64748b; }
+.wc-privacy svg { flex-shrink: 0; margin-top: 0.1rem; color: #94a3b8; }
 .wc-banner .wc-link { color: #b91c1c; text-decoration: underline; margin-left: 0.5rem; }
 .wc-banner .wc-link:hover { color: #7f1d1d; }
 `
@@ -631,9 +632,11 @@ export default {
         ]),
       ])
 
-      const privacyCard = h('div', { class: 'wc-privacy' }, [
-        h('span', '🔒'),
-        h('span', '隐私说明：本插件不保存任何企业微信 Secret 或密码，完全依赖本机 wecom-cli 的登录会话；图片附件也仅保存在本机。'),
+      const privacyCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-privacy' }, [
+          svg('M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4zm-2 6V6a2 2 0 1 1 4 0v2h-4z', 14),
+          h('span', '隐私说明：本插件不保存任何企业微信 Secret 或密码，完全依赖本机 wecom-cli 的登录会话；图片附件也仅保存在本机。'),
+        ]),
       ])
 
       return h('div', { class: 'wc-tab-panel' }, [introCard, prereqCard, enableCard, configCard, usageCard, faqCard, privacyCard])
