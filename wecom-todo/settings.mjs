@@ -188,10 +188,16 @@ export default {
     async function runInTerminal(command) {
       const cmd = String(command || '').trim()
       if (!cmd) return
+      console.log('[wecom-todo] runInTerminal', cmd)
       try {
+        if (!plugin.platform || !plugin.process || typeof plugin.process.spawn !== 'function') {
+          throw new Error('plugin platform/process API not available')
+        }
         const info = await plugin.platform.getInfo()
+        console.log('[wecom-todo] platform', info)
         if (info.os === 'windows') {
-          await plugin.process.spawn('cmd.exe', ['/k', cmd])
+          // /c start cmd.exe /k ... 强制打开一个新终端窗口
+          await plugin.process.spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', cmd])
         } else if (info.os === 'macos') {
           const script = `tell application "Terminal" to do script "${cmd.replace(/"/g, '\\"')}"`
           await plugin.process.spawn('osascript', ['-e', script])
@@ -200,6 +206,7 @@ export default {
         }
         message.success('已在终端打开命令')
       } catch (e) {
+        console.error('[wecom-todo] runInTerminal failed', e)
         try {
           await navigator.clipboard.writeText(cmd)
           message.warning('当前系统不支持直接运行，已复制命令，请手动粘贴到终端')
