@@ -652,43 +652,11 @@ export default {
     return () => {
       const st = status.value || {}
       const err = st.lastPollError || st.error || ''
+      const cliMissing = err.includes('找不到 wecom-cli')
       return h('div', { class: 'wc' }, [
         renderTabs(),
         activeTab.value === 'board'
           ? h('div', { class: 'wc-tab-panel' }, [
-              h('div', { class: 'wc-bar' }, [
-                h('div', { class: 'wc-bar-left' }, [
-                  h('h1', { class: 'wc-h' }, '进行中'),
-                  h('span', { class: 'wc-badge' }, `${board.value.length} 条待办`),
-                ]),
-                h('div', { class: 'wc-bar-right' }, [
-                  h('button', {
-                    type: 'button',
-                    class: 'wc-btn wc-btn-text',
-                    disabled: busy.value === 'boot' || busy.value === 'refresh',
-                    onClick: () => run('refresh', refreshBoard),
-                  }, busy.value === 'refresh' ? '刷新中…' : '刷新'),
-                  h('button', {
-                    type: 'button',
-                    class: 'wc-btn wc-btn-primary',
-                    onClick: () => {
-                      creating.value = !creating.value
-                      if (creating.value) openKey.value = ''
-                    },
-                  }, creating.value ? '取消新建' : '新建'),
-                ]),
-              ]),
-              h('label', { class: 'wc-setting' }, [
-                h('input', {
-                  type: 'checkbox',
-                  checked: preserveOriginalTitle.value,
-                  onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
-                }),
-                h('span', [
-                  h('strong', '首次收到待办时保留原始标题'),
-                  h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
-                ]),
-              ]),
               err
                 ? h('div', { class: 'wc-banner' }, [
                     err,
@@ -699,16 +667,61 @@ export default {
                     }, '查看教程'),
                   ])
                 : null,
-              creating.value ? renderEditor({}, { isNew: true }) : null,
-              loading.value
-                ? [h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' })]
-                : board.value.length
-                  ? board.value.map((item) => renderRow(item))
-                  : h('div', { class: 'wc-empty' }, [
-                      h('h3', '还没有进行中的待办'),
-                      h('p', '从企业微信同步，或在这里新建一条。标题会写回企微，图片只存在本机。'),
-                      h('button', { type: 'button', class: 'wc-btn wc-btn-primary', onClick: () => { creating.value = true } }, '新建待办'),
+              cliMissing
+                ? h('div', { class: 'wc-empty' }, [
+                    h('h3', '无法连接企业微信'),
+                    h('p', '本插件依赖本机安装的 wecom-cli。请先完成安装与登录，或切到「教程」查看步骤。'),
+                    h('button', {
+                      type: 'button',
+                      class: 'wc-btn wc-btn-primary',
+                      onClick: () => { activeTab.value = 'tutorial' },
+                    }, '查看教程'),
+                  ])
+                : [
+                    h('div', { class: 'wc-bar' }, [
+                      h('div', { class: 'wc-bar-left' }, [
+                        h('h1', { class: 'wc-h' }, '进行中'),
+                        h('span', { class: 'wc-badge' }, `${board.value.length} 条待办`),
+                      ]),
+                      h('div', { class: 'wc-bar-right' }, [
+                        h('button', {
+                          type: 'button',
+                          class: 'wc-btn wc-btn-text',
+                          disabled: busy.value === 'boot' || busy.value === 'refresh',
+                          onClick: () => run('refresh', refreshBoard),
+                        }, busy.value === 'refresh' ? '刷新中…' : '刷新'),
+                        h('button', {
+                          type: 'button',
+                          class: 'wc-btn wc-btn-primary',
+                          onClick: () => {
+                            creating.value = !creating.value
+                            if (creating.value) openKey.value = ''
+                          },
+                        }, creating.value ? '取消新建' : '新建'),
+                      ]),
                     ]),
+                    h('label', { class: 'wc-setting' }, [
+                      h('input', {
+                        type: 'checkbox',
+                        checked: preserveOriginalTitle.value,
+                        onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
+                      }),
+                      h('span', [
+                        h('strong', '首次收到待办时保留原始标题'),
+                        h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
+                      ]),
+                    ]),
+                    creating.value ? renderEditor({}, { isNew: true }) : null,
+                    loading.value
+                      ? [h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' })]
+                      : board.value.length
+                        ? board.value.map((item) => renderRow(item))
+                        : h('div', { class: 'wc-empty' }, [
+                            h('h3', '还没有进行中的待办'),
+                            h('p', '从企业微信同步，或在这里新建一条。标题会写回企微，图片只存在本机。'),
+                            h('button', { type: 'button', class: 'wc-btn wc-btn-primary', onClick: () => { creating.value = true } }, '新建待办'),
+                          ]),
+                  ],
             ])
           : renderTutorial(),
       ])
