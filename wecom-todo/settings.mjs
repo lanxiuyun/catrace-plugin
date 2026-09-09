@@ -85,6 +85,31 @@ const CSS = `
 .wc-skel + .wc-skel { margin-top: 0.75rem; }
 @keyframes wcsh { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .wc-skel { animation: none; } .wc-card, .wc-btn { transition: none; } }
+.wc-tabs { display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.875rem; border-bottom: 0.0625rem solid #e2e8f0; padding-bottom: 0.25rem; }
+.wc-tab { appearance: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 2rem; padding: 0 0.75rem; border-radius: 0.5rem; font-size: 0.8125rem; font-weight: 600; line-height: 1; border: 0.0625rem solid transparent; background: transparent; color: #64748b; transition: background .15s, color .15s; }
+.wc-tab:hover { background: #f1f5f9; color: #334155; }
+.wc-tab.active { background: #eff6ff; color: #2563eb; }
+.wc-tab-panel { width: 100%; }
+.wc-section { margin: 0 0 0.75rem; }
+.wc-section-title { margin: 0 0 0.45rem; font-size: 1rem; font-weight: 700; color: #0f172a; line-height: 1.3; }
+.wc-section p { margin: 0 0 0.5rem; font-size: 0.8125rem; line-height: 1.5; color: #475569; }
+.wc-steps { display: flex; flex-direction: column; gap: 0.65rem; }
+.wc-step { display: flex; gap: 0.6rem; align-items: flex-start; }
+.wc-step-num { flex-shrink: 0; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; border-radius: 999px; background: #2563eb; color: #fff; font-size: 0.75rem; font-weight: 700; }
+.wc-step-body { min-width: 0; flex: 1; }
+.wc-step-title { margin: 0 0 0.2rem; font-size: 0.8125rem; font-weight: 700; color: #0f172a; line-height: 1.4; }
+.wc-step-list { margin: 0; padding-left: 1.1rem; font-size: 0.8125rem; line-height: 1.5; color: #475569; }
+.wc-step-list li { margin: 0.25rem 0; }
+.wc-copy-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; }
+.wc-code { flex: 1; min-width: 0; padding: 0.45rem 0.6rem; border-radius: 0.4rem; background: #f1f5f9; color: #0f172a; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.75rem; line-height: 1.4; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.wc-copy-btn { appearance: none; font-family: inherit; cursor: pointer; flex-shrink: 0; height: 1.75rem; padding: 0 0.55rem; border-radius: 0.4rem; border: 0.0625rem solid #e2e8f0; background: #fff; color: #475569; font-size: 0.75rem; font-weight: 600; }
+.wc-copy-btn:hover { border-color: #93c5fd; color: #2563eb; background: #f8fbff; }
+.wc-faq { margin: 0.6rem 0 0; }
+.wc-faq-q { font-size: 0.8125rem; font-weight: 700; color: #0f172a; line-height: 1.4; margin-bottom: 0.25rem; }
+.wc-faq-a { margin: 0; font-size: 0.8125rem; line-height: 1.5; color: #475569; }
+.wc-privacy { display: flex; gap: 0.5rem; padding: 0.7rem 0.85rem; border-radius: 0.65rem; background: #f0fdf4; color: #15803d; font-size: 0.8125rem; line-height: 1.4; }
+.wc-banner .wc-link { color: #b91c1c; text-decoration: underline; margin-left: 0.5rem; }
+.wc-banner .wc-link:hover { color: #7f1d1d; }
 `
 
 function ensureStyles() {
@@ -147,7 +172,17 @@ export default {
     const draftDesc = ref('')
     const status = ref(null)
     const dragOver = ref(false)
+    const activeTab = ref('board')
     const headerEnabled = computed(() => enabled.value !== false)
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(String(text || ''))
+        message.success('已复制到剪贴板')
+      } catch (e) {
+        message.error('复制失败')
+      }
+    }
 
     function currentConfig() {
       return {
@@ -472,9 +507,174 @@ export default {
       ])
     }
 
+    function renderTabs() {
+      const tabs = [
+        { id: 'board', label: '待办' },
+        { id: 'tutorial', label: '教程' },
+      ]
+      return h('div', { class: 'wc-tabs' }, tabs.map((tab) =>
+        h('button', {
+          key: tab.id,
+          type: 'button',
+          class: ['wc-tab', activeTab.value === tab.id ? 'active' : ''],
+          onClick: () => { activeTab.value = tab.id },
+        }, tab.label),
+      ))
+    }
+
+    function renderTutorial() {
+      const codeRow = (text) =>
+        h('div', { class: 'wc-copy-row' }, [
+          h('code', { class: 'wc-code' }, text),
+          h('button', {
+            type: 'button',
+            class: 'wc-copy-btn',
+            onClick: () => copyToClipboard(text),
+          }, '复制'),
+        ])
+
+      const introCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '这是什么'),
+          h('p', '本插件调用你本机安装的 wecom-cli，定时拉取企业微信工作台里的「进行中」待办。出现新的或发生更新的待办时，会在桌面右下角弹出 Toast 小窗；你可以在 Toast 上直接点「完成」把待办标记为已办。'),
+        ]),
+      ])
+
+      const prereqCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '前置条件'),
+          h('div', { class: 'wc-steps' }, [
+            h('div', { class: 'wc-step' }, [
+              h('span', { class: 'wc-step-num' }, '1'),
+              h('div', { class: 'wc-step-body' }, [
+                h('div', { class: 'wc-step-title' }, '安装 Node.js'),
+                h('p', { style: { margin: 0 } }, '确保命令行可以执行 node，建议 Node.js ≥ 18。'),
+              ]),
+            ]),
+            h('div', { class: 'wc-step' }, [
+              h('span', { class: 'wc-step-num' }, '2'),
+              h('div', { class: 'wc-step-body' }, [
+                h('div', { class: 'wc-step-title' }, '安装企业微信 CLI'),
+                h('p', { style: { margin: 0 } }, '全局安装 @wecom/cli（建议 ≥ 1.1.0）：'),
+                codeRow('npm install -g @wecom/cli'),
+              ]),
+            ]),
+            h('div', { class: 'wc-step' }, [
+              h('span', { class: 'wc-step-num' }, '3'),
+              h('div', { class: 'wc-step-body' }, [
+                h('div', { class: 'wc-step-title' }, '扫码登录一次'),
+                h('p', { style: { margin: 0 } }, '在命令行执行：'),
+                codeRow('wecom-cli auth init'),
+                h('p', { style: { margin: '0.35rem 0 0' } }, '按提示扫码后，wecom-cli 会在本机保存登录会话。'),
+              ]),
+            ]),
+            h('div', { class: 'wc-step' }, [
+              h('span', { class: 'wc-step-num' }, '4'),
+              h('div', { class: 'wc-step-body' }, [
+                h('div', { class: 'wc-step-title' }, '验证待办列表可访问'),
+                h('p', { style: { margin: 0 } }, '执行下面命令，确认能返回 JSON 数据：'),
+                codeRow('wecom-cli todo list --page-count 20'),
+                h('p', { style: { margin: '0.35rem 0 0' } }, '如果这里报错，请检查企业微信权限或重新 auth init。'),
+              ]),
+            ]),
+          ]),
+        ]),
+      ])
+
+      const enableCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '启用插件'),
+          h('p', '在 Catrace 左侧「功能插件」列表里打开「企业微信待办」开关。首次启用后的第一次轮询会被当作基线：已有的进行中待办不会弹 Toast，只有基线之后新增或更新的待办才会提醒。'),
+        ]),
+      ])
+
+      const configCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '配置项说明'),
+          h('ul', { class: 'wc-step-list' }, [
+            h('li', [h('strong', 'cliPath：'), '如果 wecom-cli 不在系统 PATH 中，可以填写 wecom-cli.cmd 的完整路径。']),
+            h('li', [h('strong', 'pollIntervalSec：'), `轮询间隔，默认 ${DEFAULT_POLL_SEC} 秒，最短 ${MIN_POLL_SEC} 秒。`]),
+            h('li', [h('strong', 'cardDurationSec：'), 'Toast 停留秒数，默认 12 秒；设为 0 则常驻不自动消失。']),
+            h('li', [h('strong', 'onlyWhenActive：'), '只在电脑处于活跃状态时弹窗，离开/锁屏期间不打扰。']),
+            h('li', [h('strong', 'preserveOriginalTitle：'), '首次同步时把原始标题包进正文，方便后续修改后仍能回看原标题。']),
+          ]),
+        ]),
+      ])
+
+      const usageCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '使用说明'),
+          h('ul', { class: 'wc-step-list' }, [
+            h('li', '「待办」页会展示当前进行中的待办列表，点击卡片可编辑标题和正文。'),
+            h('li', '在 Catrace 里新建或编辑的标题会写回企业微信；图片仅保存在插件本地的 media/ 目录，不会上传到企微服务器。'),
+            h('li', '收到新待办时，桌面会弹出 Toast；点「完成」会调用 wecom-cli todo finish 把待办标记完成。'),
+            h('li', '点「关闭」只是把 Toast 关掉，不会同步到企业微信。'),
+          ]),
+        ]),
+      ])
+
+      const faqCard = h('div', { class: 'wc-card' }, [
+        h('div', { class: 'wc-section' }, [
+          h('h2', { class: 'wc-section-title' }, '常见问题'),
+          h('div', { class: 'wc-faq' }, [
+            h('div', { class: 'wc-faq-q' }, '提示「找不到 wecom-cli」'),
+            h('p', { class: 'wc-faq-a' }, '先确认已执行 npm install -g @wecom/cli；如果仍找不到，检查系统 PATH，或在配置里填写 wecom-cli.cmd 的完整路径后重启插件。'),
+          ]),
+          h('div', { class: 'wc-faq' }, [
+            h('div', { class: 'wc-faq-q' }, '有新待办但不弹窗'),
+            h('p', { class: 'wc-faq-a' }, '检查插件是否已启用、onlyWhenActive 是否在你离开电脑时过滤了通知、以及企业微信里的待办状态是否为「进行中」。'),
+          ]),
+          h('div', { class: 'wc-faq' }, [
+            h('div', { class: 'wc-faq-q' }, '点「完成」没有反应'),
+            h('p', { class: 'wc-faq-a' }, '通常是 wecom-cli 登录会话过期，重新执行 wecom-cli auth init 扫码登录即可。'),
+          ]),
+        ]),
+      ])
+
+      const privacyCard = h('div', { class: 'wc-privacy' }, [
+        h('span', '🔒'),
+        h('span', '隐私说明：本插件不保存任何企业微信 Secret 或密码，完全依赖本机 wecom-cli 的登录会话；图片附件也仅保存在本机。'),
+      ])
+
+      return h('div', { class: 'wc-tab-panel' }, [introCard, prereqCard, enableCard, configCard, usageCard, faqCard, privacyCard])
+    }
+
     return () => {
       const st = status.value || {}
       const err = st.lastPollError || st.error || ''
+      const boardPanel = h('div', { class: 'wc-tab-panel' }, [
+        h('label', { class: 'wc-setting' }, [
+          h('input', {
+            type: 'checkbox',
+            checked: preserveOriginalTitle.value,
+            onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
+          }),
+          h('span', [
+            h('strong', '首次收到待办时保留原始标题'),
+            h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
+          ]),
+        ]),
+        err
+          ? h('div', { class: 'wc-banner' }, [
+              err,
+              h('button', {
+                type: 'button',
+                class: 'wc-link',
+                onClick: () => { activeTab.value = 'tutorial' },
+              }, '查看教程'),
+            ])
+          : null,
+        creating.value ? renderEditor({}, { isNew: true }) : null,
+        loading.value
+          ? [h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' })]
+          : board.value.length
+            ? board.value.map((item) => renderRow(item))
+            : h('div', { class: 'wc-empty' }, [
+                h('h3', '还没有进行中的待办'),
+                h('p', '从企业微信同步，或在这里新建一条。标题会写回企微，图片只存在本机。'),
+                h('button', { type: 'button', class: 'wc-btn wc-btn-primary', onClick: () => { creating.value = true } }, '新建待办'),
+              ]),
+      ])
       return h('div', { class: 'wc' }, [
         h('div', { class: 'wc-bar' }, [
           h('div', { class: 'wc-bar-left' }, [
@@ -498,28 +698,8 @@ export default {
             }, creating.value ? '取消新建' : '新建'),
           ]),
         ]),
-        h('label', { class: 'wc-setting' }, [
-          h('input', {
-            type: 'checkbox',
-            checked: preserveOriginalTitle.value,
-            onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
-          }),
-          h('span', [
-            h('strong', '首次收到待办时保留原始标题'),
-            h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
-          ]),
-        ]),
-        err ? h('div', { class: 'wc-banner' }, err) : null,
-        creating.value ? renderEditor({}, { isNew: true }) : null,
-        loading.value
-          ? [h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' }), h('div', { class: 'wc-skel' })]
-          : board.value.length
-            ? board.value.map((item) => renderRow(item))
-            : h('div', { class: 'wc-empty' }, [
-                h('h3', '还没有进行中的待办'),
-                h('p', '从企业微信同步，或在这里新建一条。标题会写回企微，图片只存在本机。'),
-                h('button', { type: 'button', class: 'wc-btn wc-btn-primary', onClick: () => { creating.value = true } }, '新建待办'),
-              ]),
+        renderTabs(),
+        activeTab.value === 'board' ? boardPanel : renderTutorial(),
       ])
     }
   },
