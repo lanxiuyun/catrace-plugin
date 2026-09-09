@@ -185,6 +185,30 @@ export default {
       }
     }
 
+    async function runInTerminal(command) {
+      const cmd = String(command || '').trim()
+      if (!cmd) return
+      try {
+        const info = await plugin.platform.getInfo()
+        if (info.os === 'windows') {
+          await plugin.process.spawn('cmd.exe', ['/k', cmd])
+        } else if (info.os === 'macos') {
+          const script = `tell application "Terminal" to do script "${cmd.replace(/"/g, '\\"')}"`
+          await plugin.process.spawn('osascript', ['-e', script])
+        } else {
+          await plugin.process.spawn('xterm', ['-e', cmd])
+        }
+        message.success('已在终端打开命令')
+      } catch (e) {
+        try {
+          await navigator.clipboard.writeText(cmd)
+          message.warning('当前系统不支持直接运行，已复制命令，请手动粘贴到终端')
+        } catch {
+          message.error('无法运行或复制命令')
+        }
+      }
+    }
+
     function currentConfig() {
       return {
         cliPath: String(cliPath.value || '').trim(),
@@ -524,14 +548,14 @@ export default {
     }
 
     function renderTutorial() {
-      const codeRow = (text) =>
+      const runRow = (text) =>
         h('div', { class: 'wc-copy-row' }, [
           h('code', { class: 'wc-code' }, text),
           h('button', {
             type: 'button',
             class: 'wc-copy-btn',
-            onClick: () => copyToClipboard(text),
-          }, '复制'),
+            onClick: () => runInTerminal(text),
+          }, '运行'),
         ])
 
       const introCard = h('div', { class: 'wc-card' }, [
@@ -557,7 +581,7 @@ export default {
               h('div', { class: 'wc-step-body' }, [
                 h('div', { class: 'wc-step-title' }, '安装企业微信 CLI'),
                 h('p', { style: { margin: 0 } }, '全局安装 @wecom/cli（建议 ≥ 1.1.0）：'),
-                codeRow('npm install -g @wecom/cli'),
+                runRow('npm install -g @wecom/cli'),
               ]),
             ]),
             h('div', { class: 'wc-step' }, [
@@ -565,7 +589,7 @@ export default {
               h('div', { class: 'wc-step-body' }, [
                 h('div', { class: 'wc-step-title' }, '扫码登录一次'),
                 h('p', { style: { margin: 0 } }, '在命令行执行：'),
-                codeRow('wecom-cli auth init'),
+                runRow('wecom-cli auth init'),
                 h('p', { style: { margin: '0.35rem 0 0' } }, '按提示扫码后，wecom-cli 会在本机保存登录会话。'),
               ]),
             ]),
@@ -574,7 +598,7 @@ export default {
               h('div', { class: 'wc-step-body' }, [
                 h('div', { class: 'wc-step-title' }, '验证待办列表可访问'),
                 h('p', { style: { margin: 0 } }, '执行下面命令，确认能返回 JSON 数据：'),
-                codeRow('wecom-cli todo list --page-count 20'),
+                runRow('wecom-cli todo list --page-count 20'),
                 h('p', { style: { margin: '0.35rem 0 0' } }, '如果这里报错，请检查企业微信权限或重新 auth init。'),
               ]),
             ]),
@@ -639,14 +663,7 @@ export default {
         ]),
       ])
 
-      return h('div', { class: 'wc-tab-panel' }, [
-        h('div', { class: 'wc-bar' }, [
-          h('div', { class: 'wc-bar-left' }, [
-            h('h1', { class: 'wc-h' }, '使用教程'),
-          ]),
-        ]),
-        introCard, prereqCard, enableCard, configCard, usageCard, faqCard, privacyCard,
-      ])
+      return h('div', { class: 'wc-tab-panel' }, [introCard, prereqCard, enableCard, configCard, usageCard, faqCard, privacyCard])
     }
 
     return () => {
