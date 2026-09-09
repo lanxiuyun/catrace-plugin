@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = {
   pollIntervalSec: DEFAULT_POLL_SEC,
   cardDurationSec: DEFAULT_CARD_SEC,
   onlyWhenActive: true,
+  preserveOriginalTitle: true,
   enabled: true,
 }
 
@@ -74,6 +75,7 @@ function normalizeConfig(input = {}) {
     pollIntervalSec: clampInt(input.pollIntervalSec, 15, 3600, config.pollIntervalSec),
     cardDurationSec: clampInt(input.cardDurationSec, 0, 600, config.cardDurationSec),
     onlyWhenActive: input.onlyWhenActive !== false,
+    preserveOriginalTitle: input.preserveOriginalTitle !== false,
     enabled: input.enabled !== false,
   }
   if (typeof input.activityActive === 'boolean') {
@@ -297,8 +299,25 @@ function localEntry(local, id) {
   return local.todos[id]
 }
 
-function expandTokens(text, originalTitle) {
-  return String(text || '').replace(/@raw_title/g, originalTitle || '')
+const ORIGINAL_TITLE_START = '[原始标题]'
+const ORIGINAL_TITLE_END = '[/原始标题]'
+
+function extractOriginalTitle(description) {
+  const text = String(description || '')
+  const match = text.match(/\[原始标题\]\n([\s\S]*?)\n\[\/原始标题\]/)
+  return match ? match[1].trim() : ''
+}
+
+function originalTitleBlock(title) {
+  return `${ORIGINAL_TITLE_START}\n${String(title || '').trim()}\n${ORIGINAL_TITLE_END}`
+}
+
+function appendOriginalTitle(description, title) {
+  const current = String(description || '').trim()
+  if (!String(title || '').trim()) return current
+  if (current.includes(ORIGINAL_TITLE_START) && current.includes(ORIGINAL_TITLE_END)) return current
+  const block = originalTitleBlock(title)
+  return current ? `${current}\n\n${block}` : block
 }
 
 function mimeOf(file) {
@@ -324,9 +343,8 @@ function thumbOf(absPath) {
 function boardItem(item, local) {
   const id = itemId(item)
   const entry = id ? localEntry(local, id) : { originalTitle: '', images: [] }
-  if (id && !entry.originalTitle) {
-    entry.originalTitle = String(item.title || item.content || '')
-  }
+  const embedded = extractOriginalTitle(item.description)
+  if (id && embedded && !entry.originalTitle) entry.originalTitle = embedded
   const images = (entry.images || []).map((rel, i) => {
     const abs = path.isAbsolute(rel) ? rel : path.join(__dirname, rel)
     return {
@@ -341,7 +359,7 @@ function boardItem(item, local) {
     title: String(item.title || ''),
     description: String(item.description || ''),
     create_time: String(item.create_time || ''),
-    originalTitle: entry.originalTitle || String(item.title || ''),
+    originalTitle: entry.originalTitle || embedded,
     images,
   }
 }
@@ -394,6 +412,7 @@ function statusPayload() {
     pollIntervalSec: config.pollIntervalSec,
     cardDurationSec: config.cardDurationSec,
     onlyWhenActive: config.onlyWhenActive !== false,
+    preserveOriginalTitle: config.preserveOriginalTitle !== false,
     seenCount: seenMap.size,
     lastPollAt,
     lastPollError: lastPollError || null,
@@ -415,9 +434,39 @@ async function fetchList() {
 }
 
 function extractItems(data) {
-  if (Array.isArray(data?.items)) return data.items
+  const items = data?.items
+  if (Array.isArray(items)) return items
+  // wecom 后端把 items 当成对象（单条或 map），CLI schema 仍写 array
+  if (items && typeof items === 'object') {
+    if (items.todo_id || items.title) return [items]
+    return Object.values(items).filter((v) => v && typeof v === 'object')
+  }
   if (Array.isArray(data?.todo_list)) return data.todo_list
   return []
+}
+
+async function captureOriginalTitles(items, local, shouldWrite) {
+  for (const item of items) {
+    const id = itemId(item)
+    if (!id) continue
+    const entry = localEntry(local, id)
+    const embedded = extractOriginalTitle(item.description)
+    if (embedded) {
+      entry.originalTitle = embedded
+      continue
+    }
+    if (!shouldWrite || seenMap.has(id) || entry.originalTitle) continue
+    const title = String(item.title || item.content || '').trim()
+    if (!title) continue
+    const description = appendOriginalTitle(item.description, title)
+    await runCli(
+      ['todo', 'update'],
+      JSON.stringify({ items: { todo_id: id, title, description } }),
+    )
+    item.description = description
+    entry.originalTitle = title
+    saveLocal(local)
+  }
 }
 
 async function saveTodo(params = {}) {
@@ -425,14 +474,11 @@ async function saveTodo(params = {}) {
   const title = String(params.title || '').trim()
   if (!id) throw new Error('missing todo')
   if (!title) throw new Error('标题不能为空')
-  const local = loadLocal()
-  const entry = localEntry(local, id)
-  const description = expandTokens(params.description || '', entry.originalTitle)
+  const description = String(params.description || '').trim()
   await runCli(
     ['todo', 'update'],
-    JSON.stringify({ items: [{ todo_id: id, title, description }] }),
+    JSON.stringify({ items: { todo_id: id, title, description } }),
   )
-  saveLocal(local)
   const items = await fetchList()
   lastTitles = items.map((item) => boardItem(item, loadLocal()))
   return { ok: true, board: lastTitles }
@@ -441,16 +487,13 @@ async function saveTodo(params = {}) {
 async function createTodo(params = {}) {
   const title = String(params.title || '').trim()
   if (!title) throw new Error('标题不能为空')
-  const local = loadLocal()
-  const description = expandTokens(params.description || '', '')
+  const description = String(params.description || '').trim()
   const data = await runCli(
     ['todo', 'create'],
-    JSON.stringify({ items: [{ title, description }] }),
+    JSON.stringify({ items: { title, description } }),
   )
   const created = extractItems(data)[0] || data?.item || data
   const id = itemId(created)
-  if (id) localEntry(local, id).originalTitle = title
-  saveLocal(local)
   const items = await fetchList()
   const merged = loadLocal()
   lastTitles = items.map((item) => boardItem(item, merged))
@@ -532,7 +575,7 @@ async function setCover(params = {}) {
 async function finishTodo(todoId) {
   const id = String(todoId || '')
   if (!id) throw new Error('missing todo')
-  const body = JSON.stringify({ items: [{ todo_id: id, finished_all: true }] })
+  const body = JSON.stringify({ items: { todo_id: id, finished_all: true } })
   await runCli(['todo', 'finish'], body)
 }
 
@@ -547,6 +590,8 @@ async function pollOnce({ forceSeed = false, notifyAll = false } = {}) {
       lastPollAt = Date.now()
       lastPollError = ''
       const local = loadLocal()
+      const isBaseline = !seeded
+      await captureOriginalTitles(items, local, !isBaseline && config.preserveOriginalTitle !== false)
       lastTitles = items.map((item) => boardItem(item, local))
       saveLocal(local)
 
@@ -586,6 +631,7 @@ function applyHostConfig(input) {
     pollIntervalSec: config.pollIntervalSec,
     cardDurationSec: config.cardDurationSec,
     onlyWhenActive: config.onlyWhenActive,
+    preserveOriginalTitle: config.preserveOriginalTitle,
     enabled: config.enabled,
   })
   schedule()

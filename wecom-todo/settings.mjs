@@ -27,6 +27,10 @@ const CSS = `
 .wc-h { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; line-height: 1.3; }
 .wc-badge { display: inline-flex; align-items: center; height: 1.5rem; padding: 0 0.6rem; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 0.75rem; font-weight: 700; }
 .wc-bar-right { display: flex; align-items: center; gap: 0.4rem; }
+.wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0 0 0.875rem; padding: 0.75rem 0.85rem; border: 0.0625rem solid #e2e8f0; border-radius: 0.7rem; background: #fff; color: #475569; font-size: 0.75rem; line-height: 1.4; }
+.wc-setting input { width: 1rem; height: 1rem; margin: 0.1rem 0 0; accent-color: #2563eb; flex-shrink: 0; }
+.wc-setting strong { display: block; color: #334155; font-size: 0.8125rem; }
+.wc-setting span { display: block; margin-top: 0.15rem; }
 .wc-btn { appearance: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; height: 2.25rem; padding: 0 1rem; border-radius: 0.65rem; font-size: 0.8125rem; font-weight: 600; line-height: 1.3; border: 0.0625rem solid transparent; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
 .wc-btn:disabled { opacity: .55; cursor: default; }
 .wc-btn-text { background: transparent; color: #64748b; border-color: transparent; }
@@ -108,13 +112,6 @@ function collapseBlankLines(text) {
     .trim()
 }
 
-function previewDesc(item) {
-  const raw = String(item && item.description ? item.description : '').trim()
-  if (!raw) return ''
-  const original = String(item.originalTitle || '')
-  return raw.replace(/@raw_title/g, original)
-}
-
 function displayTitle(item) {
   const t = collapseBlankLines(item && item.title)
   return t || '未命名待办'
@@ -141,6 +138,7 @@ export default {
     const cliPath = ref('')
     const pollIntervalSec = ref(DEFAULT_POLL_SEC)
     const enabled = ref(true)
+    const preserveOriginalTitle = ref(true)
     const board = ref([])
     const openKey = ref('')
     const drafts = ref({})
@@ -155,6 +153,7 @@ export default {
       return {
         cliPath: String(cliPath.value || '').trim(),
         pollIntervalSec: clamp(pollIntervalSec.value, MIN_POLL_SEC, MAX_POLL_SEC, DEFAULT_POLL_SEC),
+        preserveOriginalTitle: preserveOriginalTitle.value !== false,
         enabled: enabled.value !== false,
       }
     }
@@ -203,6 +202,11 @@ export default {
       }
     }
 
+    function togglePreserveOriginalTitle(value) {
+      preserveOriginalTitle.value = value
+      void run('config', persistAndSync)
+    }
+
     async function refreshBoard() {
       if (!plugin.sidecar?.request) {
         status.value = { error: 'sidecar 未运行，请先启用插件' }
@@ -227,13 +231,6 @@ export default {
         applyBoard(result)
         message.success('已保存到企业微信')
       })
-    }
-
-    function insertRaw(item) {
-      const d = draftOf(item.key)
-      const cur = String(d.description || '')
-      const next = cur.includes('@raw_title') ? cur : (cur.trim() ? `${cur.trim()}\n\n@raw_title` : '@raw_title')
-      patchDraft(item.key, { description: next })
     }
 
     async function addPic(item) {
@@ -330,6 +327,7 @@ export default {
           if (raw && typeof raw === 'object') {
             if (typeof raw.cliPath === 'string') cliPath.value = raw.cliPath
             pollIntervalSec.value = clamp(raw.pollIntervalSec, MIN_POLL_SEC, MAX_POLL_SEC, DEFAULT_POLL_SEC)
+            preserveOriginalTitle.value = raw.preserveOriginalTitle !== false
             enabled.value = raw.enabled !== false
           }
           await persistAndSync()
@@ -374,10 +372,7 @@ export default {
         }),
         h('div', { class: 'wc-field' }, [
           h('div', { class: 'wc-lab' }, [
-            h('span', '正文 · @raw_title 会在保存时替换成原文'),
-            isNew
-              ? null
-              : h('button', { type: 'button', class: 'wc-link', onClick: () => insertRaw(item) }, '插入 @raw_title'),
+            h('span', '正文'),
           ]),
           h('textarea', {
             class: 'wc-area sm',
@@ -462,7 +457,7 @@ export default {
           h('div', { class: 'wc-check', 'aria-hidden': 'true' }),
           h('div', { class: 'wc-body' }, [
             h('p', { class: 'wc-title' }, displayTitle(item)),
-            previewDesc(item) ? h('p', { class: 'wc-desc' }, collapseBlankLines(previewDesc(item))) : null,
+            item.description ? h('p', { class: 'wc-desc' }, collapseBlankLines(item.description)) : null,
             imgs.some((x) => x.dataUrl)
               ? h('div', { class: 'wc-previews' }, imgs.filter((x) => x.dataUrl).slice(0, 4).map((img) => h('img', { src: img.dataUrl, alt: '' })))
               : null,
@@ -501,6 +496,17 @@ export default {
                 if (creating.value) openKey.value = ''
               },
             }, creating.value ? '取消新建' : '新建'),
+          ]),
+        ]),
+        h('label', { class: 'wc-setting' }, [
+          h('input', {
+            type: 'checkbox',
+            checked: preserveOriginalTitle.value,
+            onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
+          }),
+          h('span', [
+            h('strong', '首次收到待办时保留原始标题'),
+            h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
           ]),
         ]),
         err ? h('div', { class: 'wc-banner' }, err) : null,
