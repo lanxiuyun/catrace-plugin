@@ -90,6 +90,7 @@
 
 - 只用白名单 Naive 组件：`NAlert NButton NDatePicker NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**没有 `NInputNumber`**，数字用 `NInput` + `Number(...)` 钳制。
 - 根节点**不要**写外层 `padding` / `max-width`（宿主 `.plugin-detail` 已负责，会双倍缩进）；内部小组件间距可以有。
+- 宿主 `.plugin-detail` 已设排版基线：`0.8125rem` / `line-height: 1.4` / 系统字体（对齐侧边栏）。插件要改字号时自己写选择器，压过基线再用 `!important`。
 - 用户配置走 `plugin.config`（整包）；侧配置同时推 sidecar：`plugin.config.set` 后 `plugin.sidecar.request('setConfig', cfg)`（见 `bt-music/settings.mjs:194`）。
 - `useMessage` / `useDialog` 必须在 `setup()` 内调用。
 
