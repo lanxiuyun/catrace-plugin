@@ -6,7 +6,7 @@
   "main": "ui.mjs",
   "background": "background.mjs",
   "settings": "settings.mjs",
-  "icon": "icon.svg",
+  "icon": "icon.png",
   "events": [
     "wecom-todo",
     "kind:wecom-todo",
