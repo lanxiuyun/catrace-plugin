@@ -24,7 +24,8 @@ description: >
 - `heatmap/` — 仅 settings：`plugin.activity.getRecords` 翻日作息回顾
 - `bt-music/` — sidecar（OS 设备事件）+ settings 三卡 + `plugin.sidecar.request` RPC
 - `sidecar-echo/` — sidecar JSONL 端到端最小闭环
-- `github-notify/runtime/main.mjs` — sidecar config/state 落盘、shutdown、去重
+- `github-notify/runtime/main.mjs` — sidecar 轮询、去重状态落盘、shutdown
+- `wecom-todo/` — sidecar 调 `wecom-cli todo list` / `finish`
 - 本仓库 `develop.md`「契约速查」与「常见问题」；完整通用合同在宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`
 
 ---

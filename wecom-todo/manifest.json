@@ -1,0 +1,21 @@
+{
+  "id": "wecom-todo",
+  "name": "企业微信待办",
+  "version": "0.1.0",
+  "description": "用本机 wecom-cli 轮询企业微信待办，新待办弹桌面小窗",
+  "main": "ui.mjs",
+  "background": "background.mjs",
+  "settings": "settings.mjs",
+  "icon": "icon.svg",
+  "events": [
+    "wecom-todo",
+    "kind:wecom-todo",
+    "wecom-todo.item"
+  ],
+  "enabledByDefault": false,
+  "sidecar": {
+    "command": "node",
+    "args": ["runtime/main.mjs"],
+    "cwd": "."
+  }
+}
