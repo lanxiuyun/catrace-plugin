@@ -72,6 +72,8 @@ clawd-on-desk 把各 agent 的原生事件名归一化成下面这套共享事�
 5. **B 派 Agent**（OpenCode、OpenClaw、Hermes 等）不写配置文件，而是写进程内插件，接入方式与命令 hook 完全不同。
 6. **`StopFailure` / `Notification`** 目前没有 Agent 默认安装；`agent-notify` 运行时还保留识别，主要是为了兼容旧配置或用户手动配置。
 
+- `CatraceHookData` 归一化、Agent ID 传递和会话标题缓存：见 [HOOK_DATA_NORMALIZATION.md](HOOK_DATA_NORMALIZATION.md)。
+
 ## CatraceHookData 归一化层
 
 `runtime/main.mjs` 会把 hook 收到的 `hook_raw_data` 转换成插件内部维护的 `CatraceHookData`，UI 不直接依赖各 Agent 的字段差异：
