@@ -356,6 +356,14 @@ export function installZcode(scriptPath) {
       arr.push({ hooks: [{ ...spec }] })
     }
   }
+  // PermissionRequest 需要阻塞等待用户审批，使用 http hook 直推 /permission
+  if (!Array.isArray(config.hooks.events.PermissionRequest)) config.hooks.events.PermissionRequest = []
+  const permArr = config.hooks.events.PermissionRequest
+  if (!permArr.some((e) => isPermHook(e))) {
+    permArr.push({
+      hooks: [{ type: 'http', url: `http://127.0.0.1:${PORT}/permission`, timeout: PERM_TIMEOUT_SECS }],
+    })
+  }
   writeJson(file, config)
   return { ok: true, agent: 'zcode' }
 }
@@ -368,7 +376,7 @@ export function uninstallZcode() {
   for (const event of Object.keys(config.hooks.events)) {
     const arr = config.hooks.events[event]
     if (!Array.isArray(arr)) continue
-    const next = arr.filter((e) => !containsMarker(e))
+    const next = arr.filter((e) => !containsMarker(e) && !isPermHook(e))
     removed += arr.length - next.length
     if (next.length) config.hooks.events[event] = next
     else delete config.hooks.events[event]
@@ -381,7 +389,9 @@ function isZcodeInstalled() {
   const config = readJson(zcodeConfigPath())
   const events = config.hooks && config.hooks.events
   if (!events || typeof events !== 'object') return false
-  return Object.values(events).some((arr) => Array.isArray(arr) && arr.some(containsMarker))
+  return Object.values(events).some((arr) =>
+    Array.isArray(arr) && arr.some((e) => containsMarker(e) || isPermHook(e)),
+  )
 }
 
 export const AGENTS = ['claude', 'zcode', 'codex', 'gemini', 'kimi']
