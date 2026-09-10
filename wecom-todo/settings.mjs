@@ -27,7 +27,7 @@ const CSS = `
 .wc-h { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; line-height: 1.3; }
 .wc-badge { display: inline-flex; align-items: center; height: 1.5rem; padding: 0 0.6rem; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 0.75rem; font-weight: 700; }
 .wc-bar-right { display: flex; align-items: center; gap: 0.4rem; }
-.wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0; padding: 0.75rem 0.85rem; border: 0.0625rem solid #bfdbfe; border-radius: 0.7rem; background: #eff6ff; color: #475569; font-size: 0.75rem; line-height: 1.4; }
+.wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: #475569; font-size: 0.75rem; line-height: 1.4; }
 .wc-setting input { width: 1rem; height: 1rem; margin: 0.1rem 0 0; accent-color: #2563eb; flex-shrink: 0; }
 .wc-setting strong { display: block; color: #1e40af; font-size: 0.8125rem; }
 .wc-setting span { display: block; margin-top: 0.15rem; }
