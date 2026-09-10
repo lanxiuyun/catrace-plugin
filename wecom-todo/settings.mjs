@@ -29,9 +29,9 @@ const CSS = `
 .wc-bar-right { display: flex; align-items: center; gap: 0.4rem; }
 .wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: #475569; font-size: 0.75rem; line-height: 1.4; }
 .wc-setting input { width: 1rem; height: 1rem; margin: 0.1rem 0 0; accent-color: #2563eb; flex-shrink: 0; }
-.wc-setting strong { display: block; color: #1e40af; font-size: 0.8125rem; }
+.wc-setting strong { display: block; color: #334155; font-size: 0.8125rem; }
 .wc-setting span { display: block; margin-top: 0.15rem; }
-.wc-settings { margin-bottom: 1rem; padding: 0.75rem; border: 0.0625rem solid #bfdbfe; border-radius: 0.9rem; background: #f0f7ff; }
+.wc-settings { margin-bottom: 1rem; padding: 0.75rem; border: 0.0625rem solid #e2e8f0; border-radius: 0.9rem; background: #f8fafc; }
 .wc-btn { appearance: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; height: 2.25rem; padding: 0 1rem; border-radius: 0.65rem; font-size: 0.8125rem; font-weight: 600; line-height: 1.3; border: 0.0625rem solid transparent; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
 .wc-btn:disabled { opacity: .55; cursor: default; }
 .wc-btn-text { background: transparent; color: #64748b; border-color: transparent; }
