@@ -75,6 +75,7 @@ export default {
     })
     const showDebug = ref(false)
     const debugView = ref('off')
+    const debugExpanded = ref(false)
 
     async function load() {
       try {
@@ -86,6 +87,7 @@ export default {
         } else {
           debugView.value = showDebug.value ? 'raw' : 'off'
         }
+        debugExpanded.value = raw && raw.debugExpanded === true
       } catch {
         /* ignore */
       }
@@ -103,6 +105,7 @@ export default {
         enabled: true,
         showDebug: debugView.value !== 'off',
         debugView: debugView.value,
+        debugExpanded: debugExpanded.value,
         eventModes: { ...modes.value },
       }
       await plugin.config.set(cfg)
@@ -116,6 +119,15 @@ export default {
     async function setDebugView(v) {
       debugView.value = v
       showDebug.value = v !== 'off'
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function setDebugExpanded(v) {
+      debugExpanded.value = !!v
       try {
         await persistModes()
       } catch (e) {
@@ -193,6 +205,20 @@ export default {
                 },
               ),
             ]),
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '默认状态'),
+              h(
+                NRadioGroup,
+                { value: debugExpanded.value ? 'expanded' : 'collapsed', size: 'small', onUpdateValue: (v) => setDebugExpanded(v === 'expanded') },
+                {
+                  default: () => [
+                    h(NRadioButton, { value: 'collapsed' }, { default: () => '折叠' }),
+                    h(NRadioButton, { value: 'expanded' }, { default: () => '展开' }),
+                  ],
+                },
+              ),
+            ]),
+
           ],
         ),
         section(

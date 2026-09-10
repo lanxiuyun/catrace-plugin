@@ -63,37 +63,65 @@ const CSS = `
 .agent-toast .goto-hint { font-size: 0.6875rem; color: var(--accent); opacity: 0.85; font-weight: 600; }
 .agent-toast .dump-wrap,
 .perm-card .dump-wrap {
-  margin-top: 0.25rem; border-radius: 0.5rem; overflow: hidden; background: #0f172a;
+  margin: 0.5rem 0 0.625rem;
+  border: 0.0625rem solid #dedede;
+  border-radius: 0.625rem;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: none;
 }
 .agent-toast .dump-bar,
 .perm-card .dump-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
-  padding: 0.375rem 0.5rem; background: #1e293b;
+  min-height: 1.875rem; padding: 0.125rem 0.5rem 0.125rem 0.625rem;
+  background: #f7f7f7;
+  border-bottom: 0.0625rem solid #e5e5e5;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
+.agent-toast .dump-toggle,
+.perm-card .dump-toggle {
+  display: inline-flex; flex: 1; align-items: center; gap: 0.3rem;
+  border: none; background: transparent; color: #475569;
+  font-size: 0.6875rem; font-weight: 700; cursor: pointer; padding: 0.25rem 0;
+  text-align: left;
+}
+.agent-toast .dump-arrow,
+.perm-card .dump-arrow { width: 0.625rem; color: #94a3b8; font-size: 0.6875rem; line-height: 1; }
+.agent-toast .dump-tools,
+.perm-card .dump-tools { display: flex; align-items: center; gap: 0.375rem; }
 .agent-toast .dump-tabs,
-.perm-card .dump-tabs { display: flex; gap: 0.25rem; }
+.perm-card .dump-tabs {
+  display: flex; gap: 0.0625rem; padding: 0.0625rem;
+  border-radius: 0.3125rem; background: #e9e9e9;
+}
 .agent-toast .dump-tab,
 .perm-card .dump-tab {
-  border: none; border-radius: 0.25rem; height: 1.375rem; padding: 0 0.5rem;
-  font-size: 0.6875rem; font-weight: 600; cursor: pointer;
-  background: transparent; color: #94a3b8;
+  border: none; border-radius: 0.25rem; height: 1.25rem; padding: 0 0.4375rem;
+  font-size: 0.625rem; font-weight: 700; cursor: pointer;
+  background: transparent; color: #8a8a8a;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 .agent-toast .dump-tab.is-on,
-.perm-card .dump-tab.is-on { background: #334155; color: #f8fafc; }
+.perm-card .dump-tab.is-on {
+  background: #ffffff; color: #475569;
+  box-shadow: 0 0.0625rem 0.125rem rgba(0, 0, 0, 0.1);
+}
 .agent-toast .dump-copy,
 .perm-card .dump-copy {
-  position: static; height: 1.375rem; padding: 0 0.5rem; border: none; border-radius: 0.25rem;
-  font-size: 0.6875rem; font-weight: 600; cursor: pointer;
-  background: rgba(148, 163, 184, 0.25); color: #e2e8f0;
+  position: static; height: 1.25rem; padding: 0 0.5rem;
+  border: 0.0625rem solid #d6d6d6; border-radius: 0.3125rem;
+  font-size: 0.625rem; font-weight: 700; cursor: pointer;
+  background: #ffffff; color: #64748b;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.agent-toast .dump-copy:hover,
-.perm-card .dump-copy:hover { background: rgba(148, 163, 184, 0.4); }
 .agent-toast .dump-fields,
 .perm-card .dump-fields {
   margin: 0; max-height: 14rem; overflow-y: scroll; overflow-x: hidden;
   padding: 0.25rem 0.625rem 0.5rem;
   scrollbar-gutter: stable; scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+  background: #ffffff;
+  color: #1e293b;
   -webkit-user-select: text !important;
   user-select: text !important;
   cursor: text;
@@ -108,18 +136,18 @@ const CSS = `
 .agent-toast .dump-row,
 .perm-card .dump-row {
   padding: 0.4rem 0;
-  border-bottom: 0.0625rem solid #334155;
+  border-bottom: 0.0625rem solid #e2e8f0;
 }
 .agent-toast .dump-row:last-child,
 .perm-card .dump-row:last-child { border-bottom: none; }
 .agent-toast .dump-key,
 .perm-card .dump-key {
   font-size: 0.625rem; font-weight: 700; letter-spacing: 0.02em;
-  color: #7dd3fc; margin-bottom: 0.15rem;
+  color: #2563eb; margin-bottom: 0.15rem;
 }
 .agent-toast .dump-val,
 .perm-card .dump-val {
-  font-size: 0.75rem; color: #e2e8f0; line-height: 1.45;
+  font-size: 0.75rem; color: #1e293b; line-height: 1.45;
   white-space: pre-wrap; word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -136,14 +164,16 @@ const CSS = `
   cursor: text;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+  scrollbar-color: #94a3b8 #f8fafc;
 }
 .agent-toast .dump-fields::-webkit-scrollbar,
 .perm-card .dump-fields::-webkit-scrollbar { width: 0.5rem; }
 .agent-toast .dump-fields::-webkit-scrollbar-thumb,
 .perm-card .dump-fields::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.7); border-radius: 999px;
+  background: #94a3b8; border-radius: 999px;
 }
+.agent-toast .dump-fields::-webkit-scrollbar-track,
+.perm-card .dump-fields::-webkit-scrollbar-track { background: #f8fafc; }
 .agent-toast .dump::-webkit-scrollbar-thumb,
 .perm-card .dump::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.7); border-radius: 999px;
@@ -329,12 +359,14 @@ export default {
   },
   emits: ['close', 'action'],
   data() {
-    return { copied: false, dumpMode: '' }
+    return { copied: false, dumpMode: '', dumpExpanded: false }
   },
   created() {
     ensureStyles()
-    const v = this.event && this.event.payload && this.event.payload.debugView
+    const p = this.event && this.event.payload
+    const v = p && p.debugView
     this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
+    this.dumpExpanded = p && p.debugExpanded === true
   },
   methods: {
     copyDump() {
@@ -353,27 +385,47 @@ export default {
       const p = (this.event && this.event.payload) || {}
       if (!p.debug && p.debugView !== 'common' && p.debugView !== 'raw') return null
       const mode = this.dumpMode || p.debugView || 'common'
+      const controls = this.dumpExpanded
+        ? h('div', { class: 'dump-tools' }, [
+            h('div', { class: 'dump-tabs' }, [
+              h('button', {
+                class: ['dump-tab', mode === 'common' ? 'is-on' : ''],
+                type: 'button',
+                onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'common' },
+              }, '常用'),
+              h('button', {
+                class: ['dump-tab', mode === 'raw' ? 'is-on' : ''],
+                type: 'button',
+                onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'raw' },
+              }, '原始'),
+            ]),
+            h('button', {
+              class: 'dump-copy',
+              type: 'button',
+              onClick: (ev) => { ev.stopPropagation(); this.copyDump() },
+            }, this.copied ? '已复制' : '复制'),
+          ])
+        : null
       return h('div', { class: 'dump-wrap' }, [
-        h('div', { class: 'dump-bar' }, [
-          h('div', { class: 'dump-tabs' }, [
-            h('button', {
-              class: ['dump-tab', mode === 'common' ? 'is-on' : ''],
-              type: 'button',
-              onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'common' },
-            }, '常用'),
-            h('button', {
-              class: ['dump-tab', mode === 'raw' ? 'is-on' : ''],
-              type: 'button',
-              onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'raw' },
-            }, '原始'),
+        h('div', {
+          class: 'dump-bar',
+          role: 'button',
+          tabindex: 0,
+          onClick: () => { this.dumpExpanded = !this.dumpExpanded },
+          onKeydown: (ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault()
+              this.dumpExpanded = !this.dumpExpanded
+            }
+          },
+        }, [
+          h('span', { class: 'dump-toggle' }, [
+            h('span', { class: 'dump-arrow', 'aria-hidden': 'true' }, this.dumpExpanded ? '▾' : '▸'),
+            '调试字段',
           ]),
-          h('button', {
-            class: 'dump-copy',
-            type: 'button',
-            onClick: (ev) => { ev.stopPropagation(); this.copyDump() },
-          }, this.copied ? '已复制' : '复制'),
+          controls,
         ]),
-        renderFields(dumpObject(this.event, mode), mode),
+        this.dumpExpanded ? renderFields(dumpObject(this.event, mode), mode) : null,
       ])
     },
   },
@@ -434,9 +486,9 @@ export default {
           : h('span', { class: 'chip project-chip muted' }, '未知项目'),
         h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
       ]),
+      dump,
       h('p', { class: 'body-text' }, body),
       h('div', { class: 'hint-row' }, [h('span', { class: 'goto-hint' }, '点击前往会话')]),
-      dump,
     ])
   },
 }

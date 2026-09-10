@@ -62,6 +62,7 @@ let config = {
   enabled: true,
   showDebug: false,
   debugView: 'off',
+  debugExpanded: false,
   eventModes: { ...DEFAULT_MODE },
 }
 /** @type {Map<string, object>} sessionId -> entry */
@@ -123,6 +124,7 @@ function publishSession(entry, { gone = false } = {}) {
         entry,
         debug: debugViewOf() !== 'off',
         debugView: debugViewOf(),
+        debugExpanded: config.debugExpanded,
         raw: entry.raw || null,
       },
       dedupeKey: `agent-notify:session:${sessionId}`,
@@ -153,6 +155,7 @@ function publishPermission(id, payload) {
         cwd: payload.cwd,
         debug: debugViewOf() !== 'off',
         debugView: debugViewOf(),
+        debugExpanded: config.debugExpanded,
         raw: payload,
       },
       dedupeKey: `agent-notify:perm:${id}`,
@@ -231,7 +234,7 @@ function handleState(payload) {
       body: cardBody(entry),
       level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, entry, debug: debugViewOf() !== 'off', debugView: debugViewOf(), raw: payload },
+      payload: { sessionId, entry, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: payload },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
@@ -302,6 +305,7 @@ function applyConfig(input = {}) {
   if (input.debugView === 'off' || input.debugView === 'common' || input.debugView === 'raw') {
     config.debugView = input.debugView
   }
+  if (typeof input.debugExpanded === 'boolean') config.debugExpanded = input.debugExpanded
   if (input.eventModes && typeof input.eventModes === 'object') {
     config.eventModes = { ...DEFAULT_MODE, ...input.eventModes }
   }
