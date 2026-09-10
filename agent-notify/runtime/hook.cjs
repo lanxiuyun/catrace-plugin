@@ -91,12 +91,19 @@ async function main() {
 
   // Claude Code 不会把事件名放在 argv，而是放在 stdin JSON 的 hook_event_name 里；
   // argv[2] 仅作为手动调试时的兜底。Gemini/Kimi 事件名先归一化。
-  const rawEvent = process.argv[2] || payload.hook_event_name || payload.hookEventName;
+  const rawEvent = process.argv[2] && !process.argv[2].startsWith('--')
+    ? process.argv[2]
+    : payload.hook_event_name || payload.hookEventName;
+  const agentArg = process.argv.find((arg) => arg.startsWith('--agent='));
+  const agentId = (agentArg && agentArg.slice('--agent='.length)) || process.env.CATRACE_AGENT_ID || 'unknown';
+  const outbound = raw && payload && typeof payload === 'object'
+    ? JSON.stringify({ ...payload, agentId })
+    : raw;
   const event = EVENT_ALIASES[rawEvent] || rawEvent;
 
   // 权限请求：阻塞等待 Catrace 用户决策，把响应原样写回 stdout 给 agent
   if (event === "PermissionRequest") {
-    const response = await postToCatrace("/permission", raw, PERMISSION_POST_TIMEOUT_MS);
+    const response = await postToCatrace("/permission", outbound, PERMISSION_POST_TIMEOUT_MS);
     if (response) process.stdout.write(`${response.trim()}\n`);
     process.exit(0);
   }
@@ -104,7 +111,7 @@ async function main() {
   const state = EVENT_TO_STATE[event];
   if (!state || !raw) process.exit(0);
 
-  await postToCatrace("/state", raw, STATE_POST_TIMEOUT_MS);
+  await postToCatrace("/state", outbound, STATE_POST_TIMEOUT_MS);
   process.exit(0);
 }
 

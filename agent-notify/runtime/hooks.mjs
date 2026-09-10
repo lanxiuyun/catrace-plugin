@@ -45,9 +45,10 @@ function win() {
   return process.platform === 'win32'
 }
 
-function commandFor(scriptPath) {
-  if (win()) return `& "node" "${scriptPath}"`
-  return `"node" "${scriptPath}"`
+function commandFor(scriptPath, agentId = '') {
+  const suffix = agentId ? ` --agent=${agentId}` : ''
+  if (win()) return `& "node" "${scriptPath}"${suffix}`
+  return `"node" "${scriptPath}"${suffix}`
 }
 
 function containsMarker(entry) {
@@ -92,7 +93,7 @@ function uninstallJson(file) {
 function claudeSpec(scriptPath) {
   const spec = {
     type: 'command',
-    command: commandFor(scriptPath),
+    command: commandFor(scriptPath, 'claude'),
     async: true,
     timeout: 5,
   }
@@ -121,7 +122,7 @@ export function installClaude(scriptPath) {
   }
   if (!Array.isArray(settings.hooks.PermissionRequest)) settings.hooks.PermissionRequest = []
   settings.hooks.PermissionRequest = settings.hooks.PermissionRequest.filter((e) => !containsMarker(e) || isPermHook(e))
-  const permUrl = `http://127.0.0.1:${PORT}/permission`
+  const permUrl = `http://127.0.0.1:${PORT}/permission?agent=claude`
   if (!settings.hooks.PermissionRequest.some(isPermHook)) {
     settings.hooks.PermissionRequest.push({
       matcher: '',
@@ -158,8 +159,8 @@ export function installCodex(scriptPath) {
   backup(hooksPath)
   const settings = readJson(hooksPath)
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
-  const spec = { type: 'command', command: commandFor(scriptPath), timeout: 30 }
-  if (win()) spec.commandWindows = commandFor(scriptPath)
+  const spec = { type: 'command', command: commandFor(scriptPath, 'codex'), timeout: 30 }
+  if (win()) spec.commandWindows = commandFor(scriptPath, 'codex')
   for (const event of SHARED_EVENTS) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     if (!settings.hooks[event].some(containsMarker)) {
@@ -167,8 +168,8 @@ export function installCodex(scriptPath) {
     }
   }
   // PermissionRequest 需要阻塞等待用户审批，timeout 设长
-  const permSpec = { type: 'command', command: commandFor(scriptPath), timeout: 600 }
-  if (win()) permSpec.commandWindows = commandFor(scriptPath)
+  const permSpec = { type: 'command', command: commandFor(scriptPath, 'codex'), timeout: 600 }
+  if (win()) permSpec.commandWindows = commandFor(scriptPath, 'codex')
   if (!Array.isArray(settings.hooks.PermissionRequest)) settings.hooks.PermissionRequest = []
   if (!settings.hooks.PermissionRequest.some(containsMarker)) {
     settings.hooks.PermissionRequest.push({ hooks: [{ ...permSpec }] })
@@ -183,7 +184,7 @@ export function installGemini(scriptPath) {
   backup(settingsPath)
   const settings = readJson(settingsPath)
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
-  const command = commandFor(scriptPath)
+  const command = commandFor(scriptPath, 'gemini')
   const geminiEvents = [...SHARED_EVENTS, 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool']
   for (const event of geminiEvents) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
@@ -237,7 +238,7 @@ function stripKimiHooks(content) {
 }
 
 function kimiHookBlocks(scriptPath) {
-  const command = commandFor(scriptPath).replace(/'/g, '')
+  const command = commandFor(scriptPath, 'kimi').replace(/'/g, '')
   const events = SHARED_EVENTS
   return events
     .map(
@@ -324,7 +325,7 @@ function zcodeConfigPath() {
 function zcodeHookSpec(scriptPath) {
   const spec = {
     type: 'command',
-    command: commandFor(scriptPath),
+    command: commandFor(scriptPath, 'zcode'),
     enabled: true,
     async: true,
     timeout: 5,
@@ -368,7 +369,7 @@ export function installZcode(scriptPath) {
   const permArr = config.hooks.events.PermissionRequest
   if (!permArr.some((e) => isPermHook(e))) {
     permArr.push({
-      hooks: [{ type: 'http', url: `http://127.0.0.1:${PORT}/permission`, timeout: PERM_TIMEOUT_SECS }],
+      hooks: [{ type: 'http', url: `http://127.0.0.1:${PORT}/permission?agent=zcode`, timeout: PERM_TIMEOUT_SECS }],
     })
   }
   writeJson(file, config)

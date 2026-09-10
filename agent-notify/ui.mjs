@@ -436,16 +436,19 @@ export default {
     const isPerm = (event.eventType || event.event_type) === 'agent-notify.permission' || p.requestId != null
 
     if (isPerm) {
+      const permEntry = p.entry || {}
+      const permission = permEntry.permission || {}
+      const permProject = p.projectName || permEntry.projectName || projectName(p.cwd || permEntry.cwd)
       return h('div', { class: 'perm-card' }, [
         h('div', { class: 'header' }, [
           h('div', { class: 'header-left' }, [
             h('div', { class: 'pulse-dot' }),
             h('h2', { class: 'title' }, '等待你批准'),
           ]),
-          projectName(p.cwd) ? h('span', { class: 'project' }, projectName(p.cwd)) : null,
+          permProject ? h('span', { class: 'project' }, permProject) : null,
         ]),
         h('div', { class: 'tool-block' }, [
-          h('span', { class: 'tool-name' }, p.toolName || 'tool'),
+          h('span', { class: 'tool-name' }, permission.toolName || p.toolName || 'tool'),
         ]),
         h('div', { class: 'actions' }, [
           h('button', { class: 'btn btn-allow', type: 'button', onClick: () => { this.$emit('action', `allow:${p.requestId}`); this.$emit('close') } }, '允许'),
@@ -458,11 +461,8 @@ export default {
     const entry = p.entry || (Array.isArray(p.entries) ? p.entries[0] : null) || {}
     const sessionId = p.sessionId || entry.sessionId || ''
     const theme = themeOf(entry.event)
-    const title = (entry.sessionTitle && entry.sessionTitle.trim()) || projectName(entry.cwd) || 'AI 助手'
-    const body = (entry.raw && (entry.raw.last_assistant_message || entry.raw.responsePreview || entry.raw.responseText))
-      || entry.prompt
-      || EVENT_BODY[entry.event]
-      || '状态已更新'
+    const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
+    const body = entry.message || EVENT_BODY[entry.event] || '状态已更新'
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [

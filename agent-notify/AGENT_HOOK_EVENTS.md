@@ -59,7 +59,7 @@ clawd-on-desk 把各 agent 的原生事件名归一化成下面这套共享事�
 |---|---|---|---|
 | **Claude Code** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`Stop` | ✅ | 6 个共享状态 + HTTP 权限 hook |
 | **ZCode** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`Stop` | ✅ | 6 个共享状态 + config 权限 hook |
-| **Codex** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop` | ❌ | 只装 5 个，因为 `PostToolUseFailure` 在 Codex 官方 hook 里不存在 |
+| **Codex** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop` | ✅ | 5 个状态事件 + command 权限 hook（timeout 600s） |
 | **Gemini** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop`/`Notification` | ❌ | Gemini 原生事件名不同，hook 脚本内做映射 |
 | **Kimi** | `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`Stop` | ❌ | 旧 Kimi 无原生权限事件；Kimi Code 有，但当前插件未启用 |
 
@@ -71,3 +71,20 @@ clawd-on-desk 把各 agent 的原生事件名归一化成下面这套共享事�
 4. **Gemini 事件名完全不同**，需要在 hook 脚本里做映射表（`BeforeAgent` → `UserPromptSubmit`，`BeforeTool` → `PreToolUse` 等）。
 5. **B 派 Agent**（OpenCode、OpenClaw、Hermes 等）不写配置文件，而是写进程内插件，接入方式与命令 hook 完全不同。
 6. **`StopFailure` / `Notification`** 目前没有 Agent 默认安装；`agent-notify` 运行时还保留识别，主要是为了兼容旧配置或用户手动配置。
+
+## CatraceHookData 归一化层
+
+`runtime/main.mjs` 会把 hook 收到的 `hook_raw_data` 转换成插件内部维护的 `CatraceHookData`，UI 不直接依赖各 Agent 的字段差异：
+
+```js
+{
+  agentId, event, sessionId, sessionTitle, projectName, cwd,
+  timestamp, message, permission, raw
+}
+```
+
+- `message` 统一从 `last_assistant_message`、`responsePreview`、`responseText`、`prompt` 等字段取值。
+- `permission.toolName` / `permission.toolInput` 统一 Claude、ZCode、Codex 的权限字段。
+- `raw` 仅用于调试视图，保留原始 hook JSON。
+- `sessionTitle` 优先使用 Agent 直接提供的字段；缺失时按 Agent 读取 transcript / metadata，并写入 `runtime/cache/session-titles.json`。
+- 标题缓存保留 7 天，过期条目在保存时清理。

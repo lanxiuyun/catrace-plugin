@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -9,6 +10,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = 23456
 const PERM_WAIT_MS = 540_000
 const DEDUP_MS = 8000
+const TITLE_CACHE_PATH = path.join(__dirname, 'cache', 'session-titles.json')
+const TITLE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const TITLE_MAX_LENGTH = 120
+
+function projectName(cwd) {
+  if (!cwd) return ''
+  const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts[parts.length - 1] || ''
+}
 
 const KNOWN = [
   'SessionStart',
@@ -19,6 +29,7 @@ const KNOWN = [
   'Stop',
   'StopFailure',
   'Notification',
+  'PermissionRequest',
 ]
 const DEFAULT_MODE = {
   SessionStart: 'auto',
@@ -31,6 +42,13 @@ const DEFAULT_MODE = {
   Notification: 'sticky',
   PermissionRequest: 'sticky',
 }
+const EVENT_ALIASES = {
+  BeforeAgent: 'UserPromptSubmit',
+  AfterAgent: 'Stop',
+  BeforeTool: 'PreToolUse',
+  AfterTool: 'PostToolUse',
+}
+
 const EVENT_BODY = {
   SessionStart: '会话已开始',
   UserPromptSubmit: '正在处理你的请求',
@@ -42,21 +60,152 @@ const EVENT_BODY = {
   Notification: '需要你回来看一眼',
 }
 
-function projectName(cwd) {
-  if (!cwd) return ''
-  const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts[parts.length - 1] || ''
+const titleCache = new Map()
+const titleReadAttempts = new Set()
+
+function loadTitleCache() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TITLE_CACHE_PATH, 'utf8'))
+    const now = Date.now()
+    for (const [key, value] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+      if (value && typeof value.title === 'string' && now - Number(value.ts || 0) < TITLE_CACHE_TTL_MS) {
+        titleCache.set(key, { title: value.title, ts: Number(value.ts) })
+      }
+    }
+  } catch {
+    /* cache is optional */
+  }
 }
+
+function saveTitleCache() {
+  try {
+    const now = Date.now()
+    const out = {}
+    for (const [key, value] of titleCache) {
+      if (now - value.ts < TITLE_CACHE_TTL_MS) out[key] = value
+    }
+    fs.mkdirSync(path.dirname(TITLE_CACHE_PATH), { recursive: true })
+    fs.writeFileSync(TITLE_CACHE_PATH, `${JSON.stringify(out, null, 2)}\n`, 'utf8')
+  } catch (error) {
+    log('save title cache failed', { error: String(error) }, 'warn')
+  }
+}
+
+function cleanTitle(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > TITLE_MAX_LENGTH ? `${text.slice(0, TITLE_MAX_LENGTH - 1)}…` : text
+}
+
+function cacheKey(agentId, sessionId) {
+  return `${agentId || 'unknown'}:${sessionId || 'unknown'}`
+}
+
+function readJsonLines(file, limit = 80) {
+  try {
+    return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(0, limit).map((line) => {
+      try { return JSON.parse(line) } catch { return null }
+    }).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function titleFromTranscript(file, agentId) {
+  if (!file) return ''
+  try {
+    if (agentId === 'zcode') {
+      const metadataPath = path.join(path.dirname(file), 'metadata.json')
+      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+      return cleanTitle(metadata.description || metadata.prompt)
+    }
+    const lines = readJsonLines(file)
+    for (const row of lines) {
+      const type = row.type || row.payload?.type || ''
+      if (agentId === 'codex' && type === 'event_msg') {
+        const payload = row.payload || {}
+        const subtype = payload.type || payload.event_type || ''
+        if (subtype === 'user_message') {
+          return cleanTitle(payload.message || payload.text || payload.content)
+        }
+      }
+      if (type === 'user_message' || type === 'user_prompt') {
+        const payload = row.payload || row
+        return cleanTitle(payload.message || payload.text || payload.content || payload.prompt)
+      }
+    }
+  } catch {
+    /* transcript shape varies by agent */
+  }
+  return ''
+}
+
+function deriveSessionTitle(payload, agentId, sessionId) {
+  const key = cacheKey(agentId, sessionId)
+  const cached = titleCache.get(key)
+  if (cached && Date.now() - cached.ts < TITLE_CACHE_TTL_MS) return cached.title
+  const direct = cleanTitle(payload.session_title || payload.sessionTitle)
+  if (direct) {
+    titleCache.set(key, { title: direct, ts: Date.now() })
+    saveTitleCache()
+    return direct
+  }
+  if (titleReadAttempts.has(key)) return ''
+  titleReadAttempts.add(key)
+  const title = titleFromTranscript(payload.transcript_path || payload.transcriptPath, agentId)
+  if (title) {
+    titleCache.set(key, { title, ts: Date.now() })
+    saveTitleCache()
+    return title
+  }
+  return ''
+}
+
+function firstString(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim())?.trim() || ''
+}
+
+function normalizeHookData(raw, agentId = 'unknown') {
+  const rawEvent = raw.event || raw.hook_event_name || raw.hookEventName || ''
+  const event = EVENT_ALIASES[rawEvent] || rawEvent
+  const sessionId = firstString(raw.session_id, raw.sessionId) || 'unknown'
+  const cwd = firstString(raw.cwd, raw.working_directory)
+  const sessionTitle = deriveSessionTitle(raw, agentId, sessionId)
+  const message = firstString(
+    raw.last_assistant_message,
+    raw.lastAssistantMessage,
+    raw.responsePreview,
+    raw.response_preview,
+    raw.responseText,
+    raw.response_text,
+    raw.prompt,
+  )
+  const normalizedAgentId = agentId !== 'unknown' ? agentId : raw.agentId || 'unknown'
+  return {
+    agentId: normalizedAgentId,
+    event,
+    sessionId,
+    sessionTitle,
+    projectName: projectName(cwd),
+    cwd,
+    timestamp: firstString(raw.timestamp, raw.created_at) || new Date().toISOString(),
+    message,
+    permission: event === 'PermissionRequest' ? {
+      toolName: firstString(raw.tool_name, raw.toolName, raw.name) || '工具调用',
+      toolInput: raw.tool_input ?? raw.toolInput,
+    } : undefined,
+    raw,
+  }
+}
+
 
 function cardTitle(entry) {
   const named = entry.sessionTitle && String(entry.sessionTitle).trim()
   if (named) return named
-  return projectName(entry.cwd) || 'AI 助手'
+  return entry.projectName || projectName(entry.cwd) || 'AI 助手'
 }
 
 function cardBody(entry) {
-  if (entry.prompt) return entry.prompt
-  return EVENT_BODY[entry.event] || '状态已更新'
+  return entry.message || EVENT_BODY[entry.event] || '状态已更新'
 }
 
 let config = {
@@ -133,7 +282,8 @@ function publishSession(entry, { gone = false } = {}) {
   })
 }
 
-function publishPermission(id, payload) {
+function publishPermission(id, data) {
+  const permission = data.permission || {}
   send({
     v: 1,
     op: 'publish',
@@ -141,7 +291,7 @@ function publishPermission(id, payload) {
       eventType: 'agent-notify.permission',
       kind: 'agent-notify',
       title: '权限审批',
-      body: payload.tool_name || '工具调用',
+      body: permission.toolName || '工具调用',
       level: 'warning',
       sticky: true,
       actions: [
@@ -150,14 +300,18 @@ function publishPermission(id, payload) {
       ],
       payload: {
         requestId: id,
-        toolName: payload.tool_name || '',
-        toolInput: payload.tool_input,
-        sessionId: payload.session_id,
-        cwd: payload.cwd,
+        agentId: data.agentId,
+        toolName: permission.toolName,
+        toolInput: permission.toolInput,
+        sessionId: data.sessionId,
+        sessionTitle: data.sessionTitle,
+        projectName: data.projectName,
+        cwd: data.cwd,
+        entry: data,
         debug: debugViewOf() !== 'off',
         debugView: debugViewOf(),
         debugExpanded: config.debugExpanded,
-        raw: payload,
+        raw: data.raw,
       },
       dedupeKey: `agent-notify:perm:${id}`,
     },
@@ -194,8 +348,8 @@ function timeoutSessionPerms(sessionId) {
 
 function handleState(payload) {
   if (!config.enabled) return
-  const event = payload.event || payload.hook_event_name || payload.hookEventName || ''
-  const sessionId = payload.session_id || payload.sessionId || 'unknown'
+  const data = normalizeHookData(payload, payload.agentId)
+  const { event, sessionId } = data
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
     timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {
@@ -212,17 +366,9 @@ function handleState(payload) {
     if (prev && now - prev < DEDUP_MS) return
     dedup.set(key, now)
   }
-  const entry = {
-    event,
-    sessionId,
-    cwd: payload.cwd || '',
-    prompt: payload.prompt || '',
-    sessionTitle: payload.session_title || payload.sessionTitle || '',
-    raw: payload,
-  }
   if (mode === 'sticky') {
-    stickyEntries.set(sessionId, entry)
-    publishSession(entry)
+    stickyEntries.set(sessionId, data)
+    publishSession(data)
     return
   }
   send({
@@ -231,17 +377,18 @@ function handleState(payload) {
     event: {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
-      title: cardTitle(entry),
-      body: cardBody(entry),
-      level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
+      title: cardTitle(data),
+      body: cardBody(data),
+      level: data.event === 'PostToolUseFailure' || data.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, entry, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: payload },
+      payload: { sessionId, entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
 }
 
-function handlePermission(req, res, payload) {
+function handlePermission(req, res, payload, agentId) {
+  const data = normalizeHookData(payload, agentId || payload.agentId)
   const mode = modeOf('PermissionRequest')
   if (mode === 'off') {
     cors(res, 200, JSON.stringify({
@@ -253,11 +400,11 @@ function handlePermission(req, res, payload) {
     return
   }
   const id = permId++
-  const sessionId = payload.session_id || ''
+  const sessionId = data.sessionId
   if (sessionId && sessionId !== 'unknown') timeoutSessionPerms(sessionId)
   const timer = setTimeout(() => finishPerm(id, 'timeout'), PERM_WAIT_MS)
   pendingPerm.set(id, { res, sessionId, timer })
-  publishPermission(id, payload)
+  publishPermission(id, data)
 }
 
 function readBody(req) {
@@ -278,7 +425,9 @@ function readBody(req) {
 function startHttp() {
   if (server) return
   server = http.createServer(async (req, res) => {
-    const url = (req.url || '').split('?')[0]
+    const requestUrl = new URL(req.url || '/', `http://127.0.0.1:${PORT}`)
+    const url = requestUrl.pathname
+    const agentId = requestUrl.searchParams.get('agent') || ''
     if (req.method === 'OPTIONS') {
       cors(res, 204)
       return
@@ -293,7 +442,7 @@ function startHttp() {
       return
     }
     if (url === '/permission') {
-      handlePermission(req, res, payload)
+      handlePermission(req, res, payload, agentId)
       return
     }
     cors(res, 200)
@@ -361,6 +510,7 @@ function shutdown() {
   process.exit(0)
 }
 
+loadTitleCache()
 startHttp()
 send({ v: 1, op: 'ready' })
 log('agent-notify ready', { pluginId, pid: process.pid })
