@@ -27,16 +27,11 @@ const CSS = `
 .wc-h { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; line-height: 1.3; }
 .wc-badge { display: inline-flex; align-items: center; height: 1.5rem; padding: 0 0.6rem; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 0.75rem; font-weight: 700; }
 .wc-bar-right { display: flex; align-items: center; gap: 0.4rem; }
-.wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0 0 0.875rem; padding: 0.75rem 0.85rem; border: 0.0625rem solid #e2e8f0; border-radius: 0.7rem; background: #fff; color: #475569; font-size: 0.75rem; line-height: 1.4; }
+.wc-setting { display: flex; align-items: flex-start; gap: 0.6rem; margin: 0; padding: 0.75rem 0.85rem; border: 0.0625rem solid #bfdbfe; border-radius: 0.7rem; background: #eff6ff; color: #475569; font-size: 0.75rem; line-height: 1.4; }
 .wc-setting input { width: 1rem; height: 1rem; margin: 0.1rem 0 0; accent-color: #2563eb; flex-shrink: 0; }
-.wc-setting strong { display: block; color: #334155; font-size: 0.8125rem; }
+.wc-setting strong { display: block; color: #1e40af; font-size: 0.8125rem; }
 .wc-setting span { display: block; margin-top: 0.15rem; }
-.wc-settings { margin-bottom: 1rem; border-bottom: 0.0625rem solid #e2e8f0; }
-.wc-settings-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0 0.6rem; border: 0; background: transparent; color: #64748b; cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 600; text-align: left; }
-.wc-settings-toggle:hover { color: #2563eb; }
-.wc-settings-chevron { font-size: 0.9rem; transition: transform .15s ease; }
-.wc-settings-chevron.open { transform: rotate(180deg); }
-.wc-settings-panel { padding: 0.1rem 0 0.8rem; }
+.wc-settings { margin-bottom: 1rem; padding: 0.75rem; border: 0.0625rem solid #bfdbfe; border-radius: 0.9rem; background: #f0f7ff; }
 .wc-btn { appearance: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; height: 2.25rem; padding: 0 1rem; border-radius: 0.65rem; font-size: 0.8125rem; font-weight: 600; line-height: 1.3; border: 0.0625rem solid transparent; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
 .wc-btn:disabled { opacity: .55; cursor: default; }
 .wc-btn-text { background: transparent; color: #64748b; border-color: transparent; }
@@ -180,7 +175,6 @@ export default {
     const status = ref(null)
     const dragOver = ref(false)
     const activeTab = ref('board')
-    const settingsOpen = ref(false)
     const headerEnabled = computed(() => enabled.value !== false)
 
     async function copyToClipboard(text) {
@@ -682,30 +676,17 @@ export default {
 
     function renderSettings() {
       return h('div', { class: 'wc-settings' }, [
-        h('button', {
-          type: 'button',
-          class: 'wc-settings-toggle',
-          'aria-expanded': settingsOpen.value,
-          onClick: () => { settingsOpen.value = !settingsOpen.value },
-        }, [
-          h('span', '设置'),
-          h('span', { class: ['wc-settings-chevron', settingsOpen.value ? 'open' : ''] }, '⌄'),
+        h('div', { class: 'wc-setting' }, [
+          h('input', {
+            type: 'checkbox',
+            checked: preserveOriginalTitle.value,
+            onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
+          }),
+          h('span', [
+            h('strong', '首次收到待办时保留原始标题'),
+            h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
+          ]),
         ]),
-        settingsOpen.value
-          ? h('div', { class: 'wc-settings-panel' }, [
-              h('label', { class: 'wc-setting' }, [
-                h('input', {
-                  type: 'checkbox',
-                  checked: preserveOriginalTitle.value,
-                  onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
-                }),
-                h('span', [
-                  h('strong', '首次收到待办时保留原始标题'),
-                  h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
-                ]),
-              ]),
-            ])
-          : null,
       ])
     }
 
