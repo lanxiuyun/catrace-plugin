@@ -29,6 +29,7 @@ const DEFAULT_MODE = {
   Stop: 'sticky',
   StopFailure: 'sticky',
   Notification: 'sticky',
+  PermissionRequest: 'sticky',
 }
 const EVENT_BODY = {
   SessionStart: '会话已开始',
@@ -241,6 +242,16 @@ function handleState(payload) {
 }
 
 function handlePermission(req, res, payload) {
+  const mode = modeOf('PermissionRequest')
+  if (mode === 'off') {
+    cors(res, 200, JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: { behavior: 'deny' },
+      },
+    }))
+    return
+  }
   const id = permId++
   const sessionId = payload.session_id || ''
   if (sessionId && sessionId !== 'unknown') timeoutSessionPerms(sessionId)

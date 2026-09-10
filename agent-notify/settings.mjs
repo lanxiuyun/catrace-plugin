@@ -36,6 +36,9 @@ const EVENTS = [
   { id: 'PostToolUse', label: '工具调用完成' },
   { id: 'PostToolUseFailure', label: '工具调用失败' },
   { id: 'Stop', label: '任务完成' },
+  { id: 'StopFailure', label: '任务出错 / 异常' },
+  { id: 'Notification', label: '等待交互' },
+  { id: 'PermissionRequest', label: '权限请求' },
 ]
 const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
 
@@ -67,11 +70,13 @@ export default {
     const modes = ref({
       SessionStart: 'off',
       UserPromptSubmit: 'off',
-      PreToolUse: 'auto',
-      PostToolUse: 'auto',
+      PreToolUse: 'off',
+      PostToolUse: 'off',
       PostToolUseFailure: 'sticky',
       Stop: 'sticky',
+      StopFailure: 'sticky',
       Notification: 'sticky',
+      PermissionRequest: 'sticky',
     })
     const showDebug = ref(false)
     const debugView = ref('off')
