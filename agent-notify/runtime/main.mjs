@@ -23,8 +23,8 @@ const KNOWN = [
 const DEFAULT_MODE = {
   SessionStart: 'off',
   UserPromptSubmit: 'off',
-  PreToolUse: 'auto',
-  PostToolUse: 'auto',
+  PreToolUse: 'off',
+  PostToolUse: 'off',
   PostToolUseFailure: 'sticky',
   Stop: 'sticky',
   StopFailure: 'sticky',
@@ -61,6 +61,7 @@ function cardBody(entry) {
 let config = {
   enabled: true,
   showDebug: false,
+  debugView: 'off',
   eventModes: { ...DEFAULT_MODE },
 }
 /** @type {Map<string, object>} sessionId -> entry */
@@ -93,6 +94,13 @@ function cors(res, status = 200, body = '') {
   res.end(buf)
 }
 
+function debugViewOf() {
+  if (config.debugView === 'common' || config.debugView === 'raw' || config.debugView === 'off') {
+    return config.debugView
+  }
+  return config.showDebug ? 'raw' : 'off'
+}
+
 function modeOf(event) {
   return config.eventModes[event] || DEFAULT_MODE[event] || 'off'
 }
@@ -109,11 +117,12 @@ function publishSession(entry, { gone = false } = {}) {
       body: cardBody(entry),
       level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: !gone,
-      actions: gone ? [] : [{ id: `dismiss:${sessionId}`, label: '知道了' }],
+      actions: gone ? [] : [{ id: 'dismiss', label: '知道了' }],
       payload: {
         sessionId,
         entry,
-        debug: !!config.showDebug,
+        debug: debugViewOf() !== 'off',
+        debugView: debugViewOf(),
         raw: entry.raw || null,
       },
       dedupeKey: `agent-notify:session:${sessionId}`,
@@ -142,7 +151,8 @@ function publishPermission(id, payload) {
         toolInput: payload.tool_input,
         sessionId: payload.session_id,
         cwd: payload.cwd,
-        debug: !!config.showDebug,
+        debug: debugViewOf() !== 'off',
+        debugView: debugViewOf(),
         raw: payload,
       },
       dedupeKey: `agent-notify:perm:${id}`,
@@ -180,8 +190,8 @@ function timeoutSessionPerms(sessionId) {
 
 function handleState(payload) {
   if (!config.enabled) return
-  const event = payload.event || payload.hook_event_name || ''
-  const sessionId = payload.session_id || 'unknown'
+  const event = payload.event || payload.hook_event_name || payload.hookEventName || ''
+  const sessionId = payload.session_id || payload.sessionId || 'unknown'
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
     timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {
@@ -221,7 +231,7 @@ function handleState(payload) {
       body: cardBody(entry),
       level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, entry, debug: !!config.showDebug, raw: payload },
+      payload: { sessionId, entry, debug: debugViewOf() !== 'off', debugView: debugViewOf(), raw: payload },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
@@ -268,7 +278,6 @@ function startHttp() {
       cors(res, 400)
       return
     }
-    if (!payload.event && payload.hook_event_name) payload.event = payload.hook_event_name
     if (url === '/permission') {
       handlePermission(req, res, payload)
       return
@@ -290,6 +299,9 @@ function stopHttp() {
 function applyConfig(input = {}) {
   if (typeof input.enabled === 'boolean') config.enabled = input.enabled
   if (typeof input.showDebug === 'boolean') config.showDebug = input.showDebug
+  if (input.debugView === 'off' || input.debugView === 'common' || input.debugView === 'raw') {
+    config.debugView = input.debugView
+  }
   if (input.eventModes && typeof input.eventModes === 'object') {
     config.eventModes = { ...DEFAULT_MODE, ...input.eventModes }
   }
@@ -360,11 +372,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (message.op === 'resolved') {
     const actionId = String(message.actionId || '')
     const kind = String(message.resolutionKind || '')
-    if (actionId.startsWith('dismiss:')) {
-      stickyEntries.delete(actionId.slice('dismiss:'.length))
+    const sessionId =
+      (message.payload && message.payload.sessionId) ||
+      (message.payload && message.payload.entry && message.payload.entry.sessionId) ||
+      ''
+    if (actionId === 'dismiss' || kind === 'dismissed') {
+      if (sessionId) stickyEntries.delete(sessionId)
       return
     }
-    if (kind === 'dismissed') return
     const m = /^(allow|deny):(\d+)$/.exec(actionId)
     if (m) finishPerm(Number(m[2]), m[1])
   }

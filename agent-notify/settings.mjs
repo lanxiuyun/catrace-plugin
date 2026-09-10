@@ -36,9 +36,8 @@ const EVENTS = [
   { id: 'PostToolUse', label: '工具调用完成' },
   { id: 'PostToolUseFailure', label: '工具调用失败' },
   { id: 'Stop', label: '任务完成' },
-  { id: 'Notification', label: '等待交互' },
 ]
-const NAMES = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
+const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
 
 function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return
@@ -75,12 +74,18 @@ export default {
       Notification: 'sticky',
     })
     const showDebug = ref(false)
+    const debugView = ref('off')
 
     async function load() {
       try {
         const raw = await plugin.config.get()
         if (raw && raw.eventModes) modes.value = { ...modes.value, ...raw.eventModes }
         showDebug.value = !!(raw && raw.showDebug)
+        if (raw && (raw.debugView === 'off' || raw.debugView === 'common' || raw.debugView === 'raw')) {
+          debugView.value = raw.debugView
+        } else {
+          debugView.value = showDebug.value ? 'raw' : 'off'
+        }
       } catch {
         /* ignore */
       }
@@ -89,12 +94,17 @@ export default {
         const result = list && list.result ? list.result : list
         agents.value = Array.isArray(result) ? result : []
       } catch {
-        agents.value = ['claude', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false }))
+        agents.value = ['claude', 'zcode', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false }))
       }
     }
 
     async function persistModes() {
-      const cfg = { enabled: true, showDebug: !!showDebug.value, eventModes: { ...modes.value } }
+      const cfg = {
+        enabled: true,
+        showDebug: debugView.value !== 'off',
+        debugView: debugView.value,
+        eventModes: { ...modes.value },
+      }
       await plugin.config.set(cfg)
       try {
         await plugin.sidecar.request('setConfig', cfg)
@@ -103,8 +113,9 @@ export default {
       }
     }
 
-    async function setDebug(v) {
-      showDebug.value = !!v
+    async function setDebugView(v) {
+      debugView.value = v
+      showDebug.value = v !== 'off'
       try {
         await persistModes()
       } catch (e) {
@@ -147,7 +158,7 @@ export default {
       h('div', { class: 'an-set' }, [
         section(
           'Agent 联动',
-          '一键写入 agent 的配置文件，让它把状态推送到 Catrace（Claude Desktop 与 Claude Code 共用配置，安装一次即覆盖）',
+          '一键写入 agent 的配置文件，让它把状态推送到 Catrace。ZCode 写入 ~/.zcode/cli/config.json（hooks.enabled 会打开）。',
           agents.value.map((a) =>
             h('div', { class: 'event-row', key: a.id }, [
               h('div', { class: 'agent-label' }, [
@@ -166,11 +177,21 @@ export default {
         ),
         section(
           '调试',
-          '打开后，卡片底部会列出这次 Toast 收到的全部字段，方便对照该显示什么。',
+          '卡片底部可看 hook stdin。常用=去重后的可读 JSON；原始=对方传来的全文。',
           [
             h('div', { class: 'event-row' }, [
-              h('span', { class: 'event-name' }, '显示调试字段'),
-              h(NSwitch, { value: showDebug.value, onUpdateValue: setDebug }),
+              h('span', { class: 'event-name' }, '调试显示'),
+              h(
+                NRadioGroup,
+                { value: debugView.value, size: 'small', onUpdateValue: setDebugView },
+                {
+                  default: () => [
+                    h(NRadioButton, { value: 'off' }, { default: () => '关闭' }),
+                    h(NRadioButton, { value: 'common' }, { default: () => '常用' }),
+                    h(NRadioButton, { value: 'raw' }, { default: () => '原始' }),
+                  ],
+                },
+              ),
             ]),
           ],
         ),

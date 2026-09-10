@@ -59,33 +59,91 @@ const CSS = `
   font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.5rem 0;
   word-break: break-word;
 }
-.agent-toast .hint-row { display: flex; justify-content: flex-end; }
+.agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 .agent-toast .goto-hint { font-size: 0.6875rem; color: var(--accent); opacity: 0.85; font-weight: 600; }
-.agent-toast .dump-wrap { position: relative; margin-top: 0.5rem; }
+.agent-toast .dump-wrap,
+.perm-card .dump-wrap {
+  margin-top: 0.25rem; border-radius: 0.5rem; overflow: hidden; background: #0f172a;
+}
+.agent-toast .dump-bar,
+.perm-card .dump-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.375rem 0.5rem; background: #1e293b;
+}
+.agent-toast .dump-tabs,
+.perm-card .dump-tabs { display: flex; gap: 0.25rem; }
+.agent-toast .dump-tab,
+.perm-card .dump-tab {
+  border: none; border-radius: 0.25rem; height: 1.375rem; padding: 0 0.5rem;
+  font-size: 0.6875rem; font-weight: 600; cursor: pointer;
+  background: transparent; color: #94a3b8;
+}
+.agent-toast .dump-tab.is-on,
+.perm-card .dump-tab.is-on { background: #334155; color: #f8fafc; }
 .agent-toast .dump-copy,
 .perm-card .dump-copy {
-  position: absolute; top: 0.375rem; right: 1rem; z-index: 1;
-  height: 1.5rem; padding: 0 0.5rem; border: none; border-radius: 0.25rem;
-  font-size: 0.625rem; font-weight: 600; cursor: pointer;
+  position: static; height: 1.375rem; padding: 0 0.5rem; border: none; border-radius: 0.25rem;
+  font-size: 0.6875rem; font-weight: 600; cursor: pointer;
   background: rgba(148, 163, 184, 0.25); color: #e2e8f0;
 }
 .agent-toast .dump-copy:hover,
 .perm-card .dump-copy:hover { background: rgba(148, 163, 184, 0.4); }
+.agent-toast .dump-fields,
+.perm-card .dump-fields {
+  margin: 0; max-height: 14rem; overflow-y: scroll; overflow-x: hidden;
+  padding: 0.25rem 0.625rem 0.5rem;
+  scrollbar-gutter: stable; scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  cursor: text;
+  pointer-events: auto !important;
+}
+.agent-toast .dump-fields *,
+.perm-card .dump-fields * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  cursor: text;
+}
+.agent-toast .dump-row,
+.perm-card .dump-row {
+  padding: 0.4rem 0;
+  border-bottom: 0.0625rem solid #334155;
+}
+.agent-toast .dump-row:last-child,
+.perm-card .dump-row:last-child { border-bottom: none; }
+.agent-toast .dump-key,
+.perm-card .dump-key {
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.02em;
+  color: #7dd3fc; margin-bottom: 0.15rem;
+}
+.agent-toast .dump-val,
+.perm-card .dump-val {
+  font-size: 0.75rem; color: #e2e8f0; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .agent-toast .dump,
 .perm-card .dump {
-  margin: 0; max-height: 16rem; overflow-x: hidden; overflow-y: scroll;
-  padding: 0.5rem 0.5rem 0.5rem 0.625rem; padding-top: 1.875rem; border-radius: 0.5rem;
+  margin: 0; max-height: 14rem; overflow-x: hidden; overflow-y: scroll;
+  padding: 0.5rem 0.625rem; border-radius: 0;
   background: #0f172a; color: #e2e8f0;
-  font-size: 0.625rem; line-height: 1.45;
+  font-size: 0.6875rem; line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap; word-break: break-word;
-  -webkit-user-select: text; user-select: text;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  cursor: text;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
 }
-.agent-toast .dump::-webkit-scrollbar,
-.perm-card .dump::-webkit-scrollbar { width: 0.5rem; }
+.agent-toast .dump-fields::-webkit-scrollbar,
+.perm-card .dump-fields::-webkit-scrollbar { width: 0.5rem; }
+.agent-toast .dump-fields::-webkit-scrollbar-thumb,
+.perm-card .dump-fields::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7); border-radius: 999px;
+}
 .agent-toast .dump::-webkit-scrollbar-thumb,
 .perm-card .dump::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.7); border-radius: 999px;
@@ -178,14 +236,89 @@ function projectName(cwd) {
   return parts[parts.length - 1] || ''
 }
 
-function dumpText(event) {
+function toSnake(key) {
+  return String(key).replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`).replace(/^_/, '')
+}
+
+function rawOf(event) {
   const p = (event && event.payload) || {}
-  const raw = p.raw || (p.entry && p.entry.raw)
+  return p.raw || (p.entry && p.entry.raw) || null
+}
+
+function filterCommon(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const skip = new Set()
+  for (const key of Object.keys(raw)) {
+    const snake = toSnake(key)
+    if (snake !== key && Object.prototype.hasOwnProperty.call(raw, snake)) skip.add(key)
+  }
+  const out = {}
+  for (const key of Object.keys(raw)) {
+    if (skip.has(key)) continue
+    const val = raw[key]
+    if (val === '' || val == null) continue
+    out[toSnake(key)] = val
+  }
+  if (out.hook_event_name === out.event) delete out.hook_event_name
+  const texts = ['last_assistant_message', 'response_preview', 'response_text']
+  const first = texts.map((k) => out[k]).find((v) => typeof v === 'string' && v)
+  if (first) {
+    for (const k of texts) delete out[k]
+    out.last_assistant_message = first
+  }
+  if (out.mode != null && out.permission_mode != null && out.mode === out.permission_mode) delete out.mode
+  return out
+}
+
+const COMMON_SKIP = new Set(['response_preview', 'response_text', 'hook_event_name'])
+const KEY_ORDER = [
+  'event', 'last_assistant_message', 'cwd', 'session_id', 'timestamp',
+  'permission_mode', 'state', 'tool_name', 'tool_call_count',
+  'transcript_path', 'turn_id', 'trace_id', 'stop_hook_active',
+]
+
+function dumpObject(event, mode) {
+  const raw = rawOf(event)
+  if (mode === 'common') return filterCommon(raw)
+  return raw
+}
+
+function dumpText(event, mode) {
   try {
-    return JSON.stringify(raw ?? { note: '没有收到 hook POST body' }, null, 2)
+    return JSON.stringify(dumpObject(event, mode) ?? { note: '没有收到 hook stdin' }, null, 2)
   } catch (err) {
     return String(err)
   }
+}
+
+function orderedKeys(obj) {
+  const keys = Object.keys(obj || {})
+  const head = KEY_ORDER.filter((k) => keys.includes(k))
+  const rest = keys.filter((k) => !KEY_ORDER.includes(k)).sort()
+  return [...head, ...rest]
+}
+
+function renderFields(obj, mode) {
+  if (obj == null) {
+    return h('div', { class: 'dump-fields' }, [h('div', { class: 'dump-val' }, '没有收到 hook stdin')])
+  }
+  if (typeof obj !== 'object' || Array.isArray(obj)) {
+    return h('pre', { class: 'dump' }, dumpText({ payload: { raw: obj } }, 'raw'))
+  }
+  const skip = mode === 'common' ? COMMON_SKIP : new Set()
+  const keys = orderedKeys(obj).filter((k) => !skip.has(k))
+  return h(
+    'div',
+    { class: 'dump-fields' },
+    keys.map((key) => {
+      const val = obj[key]
+      const text = typeof val === 'string' ? val : JSON.stringify(val, null, 2)
+      return h('div', { class: 'dump-row' }, [
+        h('div', { class: 'dump-key' }, key),
+        h('div', { class: 'dump-val' }, text),
+      ])
+    }),
+  )
 }
 
 export default {
@@ -196,14 +329,16 @@ export default {
   },
   emits: ['close', 'action'],
   data() {
-    return { copied: false }
+    return { copied: false, dumpMode: '' }
   },
   created() {
     ensureStyles()
+    const v = this.event && this.event.payload && this.event.payload.debugView
+    this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
   },
   methods: {
     copyDump() {
-      const text = dumpText(this.event)
+      const text = dumpText(this.event, this.dumpMode || 'common')
       const done = () => {
         this.copied = true
         setTimeout(() => {
@@ -214,24 +349,38 @@ export default {
       const p = clip ? clip(text) : navigator.clipboard.writeText(text)
       Promise.resolve(p).then(done).catch(() => {})
     },
+    renderDump() {
+      const p = (this.event && this.event.payload) || {}
+      if (!p.debug && p.debugView !== 'common' && p.debugView !== 'raw') return null
+      const mode = this.dumpMode || p.debugView || 'common'
+      return h('div', { class: 'dump-wrap' }, [
+        h('div', { class: 'dump-bar' }, [
+          h('div', { class: 'dump-tabs' }, [
+            h('button', {
+              class: ['dump-tab', mode === 'common' ? 'is-on' : ''],
+              type: 'button',
+              onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'common' },
+            }, '常用'),
+            h('button', {
+              class: ['dump-tab', mode === 'raw' ? 'is-on' : ''],
+              type: 'button',
+              onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'raw' },
+            }, '原始'),
+          ]),
+          h('button', {
+            class: 'dump-copy',
+            type: 'button',
+            onClick: (ev) => { ev.stopPropagation(); this.copyDump() },
+          }, this.copied ? '已复制' : '复制'),
+        ]),
+        renderFields(dumpObject(this.event, mode), mode),
+      ])
+    },
   },
   render() {
     const event = this.event || {}
     const p = event.payload || {}
-    const debug = !!p.debug
-    const dump = debug
-      ? h('div', { class: 'dump-wrap' }, [
-          h('button', {
-            class: 'dump-copy',
-            type: 'button',
-            onClick: (ev) => {
-              ev.stopPropagation()
-              this.copyDump()
-            },
-          }, this.copied ? '已复制' : '复制'),
-          h('pre', { class: 'dump' }, dumpText(event)),
-        ])
-      : null
+    const dump = this.renderDump()
     const isPerm = (event.eventType || event.event_type) === 'agent-notify.permission' || p.requestId != null
 
     if (isPerm) {
@@ -247,8 +396,8 @@ export default {
           h('span', { class: 'tool-name' }, p.toolName || 'tool'),
         ]),
         h('div', { class: 'actions' }, [
-          h('button', { class: 'btn btn-allow', type: 'button', onClick: () => this.$emit('action', `allow:${p.requestId}`) }, '允许'),
-          h('button', { class: 'btn btn-deny', type: 'button', onClick: () => this.$emit('action', `deny:${p.requestId}`) }, '拒绝'),
+          h('button', { class: 'btn btn-allow', type: 'button', onClick: () => { this.$emit('action', `allow:${p.requestId}`); this.$emit('close') } }, '允许'),
+          h('button', { class: 'btn btn-deny', type: 'button', onClick: () => { this.$emit('action', `deny:${p.requestId}`); this.$emit('close') } }, '拒绝'),
         ]),
         dump,
       ])
@@ -258,7 +407,10 @@ export default {
     const sessionId = p.sessionId || entry.sessionId || ''
     const theme = themeOf(entry.event)
     const title = (entry.sessionTitle && entry.sessionTitle.trim()) || projectName(entry.cwd) || 'AI 助手'
-    const body = entry.summary || EVENT_BODY[entry.event] || '状态已更新'
+    const body = (entry.raw && (entry.raw.last_assistant_message || entry.raw.responsePreview || entry.raw.responseText))
+      || entry.prompt
+      || EVENT_BODY[entry.event]
+      || '状态已更新'
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [
@@ -269,7 +421,11 @@ export default {
         h('button', {
           class: 'close-btn',
           type: 'button',
-          onClick: () => this.$emit('action', `dismiss:${sessionId}`),
+          'aria-label': 'Close',
+          onClick: (ev) => {
+            ev.stopPropagation()
+            this.$emit('close')
+          },
         }, '×'),
       ]),
       h('div', { class: 'meta-row' }, [
@@ -278,7 +434,6 @@ export default {
           : h('span', { class: 'chip project-chip muted' }, '未知项目'),
         h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
       ]),
-      debug ? h('div', { class: 'sid' }, sessionId) : null,
       h('p', { class: 'body-text' }, body),
       h('div', { class: 'hint-row' }, [h('span', { class: 'goto-hint' }, '点击前往会话')]),
       dump,

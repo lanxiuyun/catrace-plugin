@@ -61,34 +61,13 @@ async function main() {
 
   // Claude Code 不会把事件名放在 argv，而是放在 stdin JSON 的 hook_event_name 里；
   // argv[2] 仅作为手动调试时的兜底。Gemini/Kimi 事件名先归一化。
-  const rawEvent = process.argv[2] || payload.hook_event_name;
+  const rawEvent = process.argv[2] || payload.hook_event_name || payload.hookEventName;
   const event = EVENT_ALIASES[rawEvent] || rawEvent;
   const state = EVENT_TO_STATE[event];
   if (!state) process.exit(0);
+  if (!raw) process.exit(0);
 
-  const toolName =
-    payload.tool_name ||
-    payload.toolName ||
-    (payload.tool && typeof payload.tool === "object" && payload.tool.name) ||
-    (typeof payload.tool === "string" ? payload.tool : "") ||
-    "";
-
-  const body = JSON.stringify({
-    event,
-    state,
-    session_id: payload.session_id || "unknown",
-    cwd: payload.cwd || "",
-    transcript_path: payload.transcript_path || "",
-    prompt: payload.prompt || "",
-    tool_name: String(toolName || ""),
-    // 有的 agent 直接带标题；没有时 Catrace 会从 transcript 的 ai-title 行读
-    session_title:
-      payload.session_title ||
-      payload.sessionTitle ||
-      payload.ai_title ||
-      payload.aiTitle ||
-      "",
-  });
+  const body = raw;
 
   const req = http.request(
     {

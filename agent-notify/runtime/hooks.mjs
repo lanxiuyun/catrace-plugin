@@ -5,6 +5,14 @@ import path from 'node:path'
 const MARKER = 'catrace-agent-hook'
 const PORT = 23456
 const PERM_TIMEOUT_SECS = 600
+const SHARED_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'Stop',
+]
 
 function home() {
   return os.homedir()
@@ -98,8 +106,7 @@ export function installClaude(scriptPath) {
   const settings = readJson(settingsPath)
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
   const spec = claudeSpec(scriptPath)
-  const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop']
-  for (const event of events) {
+  for (const event of SHARED_EVENTS) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     const arr = settings.hooks[event]
     if (!arr.some(containsMarker)) arr.push({ matcher: '', hooks: [{ ...spec }] })
@@ -153,7 +160,7 @@ export function installCodex(scriptPath) {
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
   const spec = { type: 'command', command: commandFor(scriptPath), timeout: 30 }
   if (win()) spec.commandWindows = commandFor(scriptPath)
-  for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
+  for (const event of SHARED_EVENTS) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     if (!settings.hooks[event].some(containsMarker)) {
       settings.hooks[event].push({ hooks: [{ ...spec }] })
@@ -170,7 +177,8 @@ export function installGemini(scriptPath) {
   const settings = readJson(settingsPath)
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
   const command = commandFor(scriptPath)
-  for (const event of ['SessionStart', 'BeforeAgent', 'AfterAgent', 'Notification']) {
+  const geminiEvents = [...SHARED_EVENTS, 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool']
+  for (const event of geminiEvents) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     if (!settings.hooks[event].some(containsMarker)) {
       settings.hooks[event].push({
@@ -223,7 +231,7 @@ function stripKimiHooks(content) {
 
 function kimiHookBlocks(scriptPath) {
   const command = commandFor(scriptPath).replace(/'/g, '')
-  const events = ['SessionStart', 'UserPromptSubmit', 'PostToolUseFailure', 'Stop', 'Notification']
+  const events = SHARED_EVENTS
   return events
     .map(
       (event) =>
@@ -272,6 +280,7 @@ export function installAgent(agent, scriptPath) {
   if (agent === 'codex') return installCodex(scriptPath)
   if (agent === 'gemini') return installGemini(scriptPath)
   if (agent === 'kimi') return installKimi(scriptPath)
+  if (agent === 'zcode') return installZcode(scriptPath)
   throw new Error(`unknown agent: ${agent}`)
 }
 
@@ -280,6 +289,7 @@ export function uninstallAgent(agent) {
   if (agent === 'codex') return uninstallJson(path.join(home(), '.codex', 'hooks.json'))
   if (agent === 'gemini') return uninstallJson(path.join(home(), '.gemini', 'settings.json'))
   if (agent === 'kimi') return uninstallKimi()
+  if (agent === 'zcode') return uninstallZcode()
   throw new Error(`unknown agent: ${agent}`)
 }
 
@@ -296,7 +306,82 @@ export function isInstalled(agent) {
       }
     })
   }
+  if (agent === 'zcode') return isZcodeInstalled()
   return false
 }
 
-export const AGENTS = ['claude', 'codex', 'gemini', 'kimi']
+function zcodeConfigPath() {
+  return path.join(home(), '.zcode', 'cli', 'config.json')
+}
+
+function zcodeHookSpec(scriptPath) {
+  const spec = {
+    type: 'command',
+    command: commandFor(scriptPath),
+    enabled: true,
+    async: true,
+    timeout: 5,
+  }
+  if (win()) spec.shell = 'powershell'
+  return spec
+}
+
+const ZCODE_EVENTS = SHARED_EVENTS
+
+export function installZcode(scriptPath) {
+  const file = zcodeConfigPath()
+  const dir = path.dirname(file)
+  if (!fs.existsSync(dir)) throw new Error('未找到 ZCode 配置目录（~/.zcode/cli）')
+  backup(file)
+  const config = readJson(file)
+  if (!config.hooks || typeof config.hooks !== 'object') config.hooks = {}
+  config.hooks.enabled = true
+  if (!config.hooks.events || typeof config.hooks.events !== 'object') config.hooks.events = {}
+  const spec = zcodeHookSpec(scriptPath)
+  for (const event of ZCODE_EVENTS) {
+    if (!Array.isArray(config.hooks.events[event])) config.hooks.events[event] = []
+    const arr = config.hooks.events[event]
+    const existing = arr.find(containsMarker)
+    if (existing && Array.isArray(existing.hooks)) {
+      for (const hook of existing.hooks) {
+        if (hook && typeof hook === 'object') {
+          hook.command = spec.command
+          hook.type = 'command'
+          hook.enabled = true
+          hook.timeout = 5
+          if (spec.shell) hook.shell = spec.shell
+        }
+      }
+    } else if (!existing) {
+      arr.push({ hooks: [{ ...spec }] })
+    }
+  }
+  writeJson(file, config)
+  return { ok: true, agent: 'zcode' }
+}
+
+export function uninstallZcode() {
+  const file = zcodeConfigPath()
+  const config = readJson(file)
+  if (!config.hooks || !config.hooks.events || typeof config.hooks.events !== 'object') return { removed: 0 }
+  let removed = 0
+  for (const event of Object.keys(config.hooks.events)) {
+    const arr = config.hooks.events[event]
+    if (!Array.isArray(arr)) continue
+    const next = arr.filter((e) => !containsMarker(e))
+    removed += arr.length - next.length
+    if (next.length) config.hooks.events[event] = next
+    else delete config.hooks.events[event]
+  }
+  if (removed) writeJson(file, config)
+  return { removed }
+}
+
+function isZcodeInstalled() {
+  const config = readJson(zcodeConfigPath())
+  const events = config.hooks && config.hooks.events
+  if (!events || typeof events !== 'object') return false
+  return Object.values(events).some((arr) => Array.isArray(arr) && arr.some(containsMarker))
+}
+
+export const AGENTS = ['claude', 'zcode', 'codex', 'gemini', 'kimi']
