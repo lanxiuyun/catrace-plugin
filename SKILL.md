@@ -78,6 +78,17 @@ description: >
 
 注入：宿主加载前插 `const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__('<id>')` → 模块级直接用 `plugin`，禁止 import 宿主模块、禁止重新 create。
 
+### agent-notify 调试卡经验
+
+`agent-notify` 的调试区用于观察 Agent hook 实际传来的 stdin：
+
+- `runtime/hook.cjs` 必须把 stdin 原文 POST 给 sidecar；不要在 hook 层清洗 key、去空值、合并 `camelCase` / `snake_case` 或补 `event` / `state`。
+- 设置提供「关闭 / 常用 / 原始」三档。常用只做展示层过滤和排序；原始直接显示 hook body，用于核对对方实际发送的数据。
+- 调试卡按字段行展示，重要字段置顶，长文本 `white-space: pre-wrap` + `word-break: break-word`，不要把整份 JSON 挤成一块连续 `<pre>`。
+- 宿主全局样式默认禁止文本选择；调试容器和所有子元素必须使用 `user-select: text !important`、`-webkit-user-select: text !important`、`pointer-events: auto !important`，否则鼠标拖选和 `Ctrl+C` 不生效。
+- 复制按钮放在独立 toolbar，不要绝对定位压住 JSON；滚动区使用稳定的细滚动条。
+- 外置 `ui.mjs` 通过 Blob URL 加载，不能 bare import 第三方 JSON viewer；除非依赖已打包进插件，否则用插件内 `h` + CSS 实现。
+
 ### ui.mjs
 
 - 仅 `globalThis.__CATRACE_VUE__.h`（可加 `ref/computed/watch/markRaw/onMounted/onBeforeUnmount`）。
