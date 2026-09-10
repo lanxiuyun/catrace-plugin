@@ -31,6 +31,12 @@ const CSS = `
 .wc-setting input { width: 1rem; height: 1rem; margin: 0.1rem 0 0; accent-color: #2563eb; flex-shrink: 0; }
 .wc-setting strong { display: block; color: #334155; font-size: 0.8125rem; }
 .wc-setting span { display: block; margin-top: 0.15rem; }
+.wc-settings { margin-bottom: 1rem; border-bottom: 0.0625rem solid #e2e8f0; }
+.wc-settings-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0 0.6rem; border: 0; background: transparent; color: #64748b; cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 600; text-align: left; }
+.wc-settings-toggle:hover { color: #2563eb; }
+.wc-settings-chevron { font-size: 0.9rem; transition: transform .15s ease; }
+.wc-settings-chevron.open { transform: rotate(180deg); }
+.wc-settings-panel { padding: 0.1rem 0 0.8rem; }
 .wc-btn { appearance: none; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; height: 2.25rem; padding: 0 1rem; border-radius: 0.65rem; font-size: 0.8125rem; font-weight: 600; line-height: 1.3; border: 0.0625rem solid transparent; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
 .wc-btn:disabled { opacity: .55; cursor: default; }
 .wc-btn-text { background: transparent; color: #64748b; border-color: transparent; }
@@ -174,6 +180,7 @@ export default {
     const status = ref(null)
     const dragOver = ref(false)
     const activeTab = ref('board')
+    const settingsOpen = ref(false)
     const headerEnabled = computed(() => enabled.value !== false)
 
     async function copyToClipboard(text) {
@@ -673,6 +680,35 @@ export default {
       return h('div', { class: 'wc-tab-panel' }, [introCard, prereqCard, enableCard, configCard, usageCard, faqCard, privacyCard])
     }
 
+    function renderSettings() {
+      return h('div', { class: 'wc-settings' }, [
+        h('button', {
+          type: 'button',
+          class: 'wc-settings-toggle',
+          'aria-expanded': settingsOpen.value,
+          onClick: () => { settingsOpen.value = !settingsOpen.value },
+        }, [
+          h('span', '设置'),
+          h('span', { class: ['wc-settings-chevron', settingsOpen.value ? 'open' : ''] }, '⌄'),
+        ]),
+        settingsOpen.value
+          ? h('div', { class: 'wc-settings-panel' }, [
+              h('label', { class: 'wc-setting' }, [
+                h('input', {
+                  type: 'checkbox',
+                  checked: preserveOriginalTitle.value,
+                  onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
+                }),
+                h('span', [
+                  h('strong', '首次收到待办时保留原始标题'),
+                  h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
+                ]),
+              ]),
+            ])
+          : null,
+      ])
+    }
+
     return () => {
       const st = status.value || {}
       const err = st.lastPollError || st.error || ''
@@ -681,6 +717,7 @@ export default {
         renderTabs(),
         activeTab.value === 'board'
           ? h('div', { class: 'wc-tab-panel' }, [
+              renderSettings(),
               err
                 ? h('div', { class: 'wc-banner' }, [
                     err,
@@ -722,17 +759,6 @@ export default {
                             if (creating.value) openKey.value = ''
                           },
                         }, creating.value ? '取消新建' : '新建'),
-                      ]),
-                    ]),
-                    h('label', { class: 'wc-setting' }, [
-                      h('input', {
-                        type: 'checkbox',
-                        checked: preserveOriginalTitle.value,
-                        onChange: (e) => togglePreserveOriginalTitle(e.target.checked),
-                      }),
-                      h('span', [
-                        h('strong', '首次收到待办时保留原始标题'),
-                        h('span', '将原始 title 追加到正文末尾，并用 [原始标题] 标记包裹。'),
                       ]),
                     ]),
                     creating.value ? renderEditor({}, { isNew: true }) : null,
