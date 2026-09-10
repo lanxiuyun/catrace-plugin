@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Catrace Agent Hook — Claude Code 状态通知脚本
-// 用法：node catrace-agent-hook.js（事件名由 Claude Code 作为第一个参数传入）
-// 从 stdin 读取 Claude Code 的 JSON payload，把状态 POST 给本地 Catrace 服务。
-// 任何失败都静默退出，绝不阻塞或打断 agent。
+// Catrace Agent Hook — state notification + permission request handler
+// 用法：node catrace-agent-hook.js <event-name>
+// 从 stdin 读取 JSON payload，状态事件 POST 到 /state；权限事件 POST 到 /permission 并等待响应。
 
 const http = require("http");
 
 const CATRACE_PORT = 23456;
 const STDIN_READ_TIMEOUT_MS = 2000;
-const POST_TIMEOUT_MS = 500;
+const STATE_POST_TIMEOUT_MS = 500;
+const PERMISSION_POST_TIMEOUT_MS = 600000;
 
 // 各 agent 事件名归一化到 Claude Code 语义（未列出的事件直接忽略）
 const EVENT_ALIASES = {
@@ -19,8 +19,6 @@ const EVENT_ALIASES = {
   AfterTool: "PostToolUse",
 };
 
-// 未映射的事件直接忽略。
-// PermissionRequest 不走此脚本：用 type:"http" 阻塞 hook 直推 /permission 做真审批。
 const EVENT_TO_STATE = {
   SessionStart: "idle",
   UserPromptSubmit: "thinking",
@@ -50,6 +48,38 @@ function readStdin(timeoutMs) {
   });
 }
 
+function postToCatrace(path, body, timeoutMs) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: CATRACE_PORT,
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let responseData = "";
+        res.on("data", (chunk) => {
+          responseData += chunk;
+        });
+        res.on("end", () => resolve(responseData));
+      },
+    );
+    req.on("error", () => resolve(""));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve("");
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
 async function main() {
   const raw = await readStdin(STDIN_READ_TIMEOUT_MS);
   let payload = {};
@@ -63,33 +93,19 @@ async function main() {
   // argv[2] 仅作为手动调试时的兜底。Gemini/Kimi 事件名先归一化。
   const rawEvent = process.argv[2] || payload.hook_event_name || payload.hookEventName;
   const event = EVENT_ALIASES[rawEvent] || rawEvent;
-  const state = EVENT_TO_STATE[event];
-  if (!state) process.exit(0);
-  if (!raw) process.exit(0);
 
-  const body = raw;
-
-  const req = http.request(
-    {
-      hostname: "127.0.0.1",
-      port: CATRACE_PORT,
-      path: "/state",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
-      timeout: POST_TIMEOUT_MS,
-    },
-    () => process.exit(0)
-  );
-  req.on("error", () => process.exit(0));
-  req.on("timeout", () => {
-    req.destroy();
+  // 权限请求：阻塞等待 Catrace 用户决策，把响应原样写回 stdout 给 agent
+  if (event === "PermissionRequest") {
+    const response = await postToCatrace("/permission", raw, PERMISSION_POST_TIMEOUT_MS);
+    if (response) process.stdout.write(`${response.trim()}\n`);
     process.exit(0);
-  });
-  req.write(body);
-  req.end();
+  }
+
+  const state = EVENT_TO_STATE[event];
+  if (!state || !raw) process.exit(0);
+
+  await postToCatrace("/state", raw, STATE_POST_TIMEOUT_MS);
+  process.exit(0);
 }
 
 main().catch(() => process.exit(0));

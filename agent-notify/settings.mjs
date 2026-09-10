@@ -68,11 +68,11 @@ export default {
     const agents = ref([])
     const busy = ref('')
     const modes = ref({
-      SessionStart: 'off',
-      UserPromptSubmit: 'off',
+      SessionStart: 'auto',
+      UserPromptSubmit: 'auto',
       PreToolUse: 'off',
       PostToolUse: 'off',
-      PostToolUseFailure: 'sticky',
+      PostToolUseFailure: 'off',
       Stop: 'sticky',
       StopFailure: 'sticky',
       Notification: 'sticky',

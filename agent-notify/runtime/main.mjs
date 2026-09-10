@@ -21,11 +21,11 @@ const KNOWN = [
   'Notification',
 ]
 const DEFAULT_MODE = {
-  SessionStart: 'off',
-  UserPromptSubmit: 'off',
+  SessionStart: 'auto',
+  UserPromptSubmit: 'auto',
   PreToolUse: 'off',
   PostToolUse: 'off',
-  PostToolUseFailure: 'sticky',
+  PostToolUseFailure: 'off',
   Stop: 'sticky',
   StopFailure: 'sticky',
   Notification: 'sticky',

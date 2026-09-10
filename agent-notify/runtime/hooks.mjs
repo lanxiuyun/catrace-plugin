@@ -166,6 +166,13 @@ export function installCodex(scriptPath) {
       settings.hooks[event].push({ hooks: [{ ...spec }] })
     }
   }
+  // PermissionRequest 需要阻塞等待用户审批，timeout 设长
+  const permSpec = { type: 'command', command: commandFor(scriptPath), timeout: 600 }
+  if (win()) permSpec.commandWindows = commandFor(scriptPath)
+  if (!Array.isArray(settings.hooks.PermissionRequest)) settings.hooks.PermissionRequest = []
+  if (!settings.hooks.PermissionRequest.some(containsMarker)) {
+    settings.hooks.PermissionRequest.push({ hooks: [{ ...permSpec }] })
+  }
   writeJson(hooksPath, settings)
   ensureCodexHooksFeature()
   return { ok: true, agent: 'codex' }
