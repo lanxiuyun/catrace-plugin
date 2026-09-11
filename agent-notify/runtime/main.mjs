@@ -346,6 +346,11 @@ function timeoutSessionPerms(sessionId) {
   }
 }
 
+function dismissSessionCard(sessionId) {
+  if (!sessionId || sessionId === 'unknown') return
+  send({ v: 1, op: 'dismiss', dedupeKey: `agent-notify:session:${sessionId}` })
+}
+
 function handleState(payload) {
   if (!config.enabled) return
   const data = normalizeHookData(payload, payload.agentId)
@@ -354,7 +359,7 @@ function handleState(payload) {
     timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {
       stickyEntries.delete(sessionId)
-      publishSession({ sessionId }, { gone: true })
+      dismissSessionCard(sessionId)
     }
   }
   const mode = modeOf(event)
