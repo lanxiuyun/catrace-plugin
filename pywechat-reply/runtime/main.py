@@ -1,20 +1,11 @@
 """
 pywechat-reply sidecar for Catrace.
 
-This process is spawned by Catrace when the plugin is enabled. It talks to the
-host over stdin/stdout using JSON Lines (v1 protocol).
+Talks to the host over stdin/stdout JSON Lines (v1).
 
-Responsibilities:
-- Poll WeChat PC client for new messages via pywechat.
-- Publish Catrace events for each new message.
-- Receive reply actions from Catrace and send messages back via pywechat.
-
-Note:
-- pywechat is NOT bundled with this plugin. Install it separately:
-      pip install pywechat
-  or follow the project README at https://github.com/Hello-Mr-Crab/pywechat
-- WeChat PC client must be running and logged in.
-- UI automation is fragile: WeChat updates can break selectors.
+Requires:
+- pip install pywechat127
+- WeChat PC logged in (4.x → pyweixin; 3.9 → pywechat)
 """
 
 import json
@@ -23,32 +14,34 @@ import sys
 import threading
 import time
 import traceback
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# Plugin identity (injected by host; keep a fallback for standalone testing)
-# ---------------------------------------------------------------------------
 PLUGIN_ID = os.environ.get("CATRACE_PLUGIN_ID", "pywechat-reply")
 PROTOCOL_VERSION = os.environ.get("CATRACE_PROTOCOL_VERSION", "1")
 
-# ---------------------------------------------------------------------------
-# Configuration defaults
-# ---------------------------------------------------------------------------
 DEFAULT_CONFIG: Dict[str, Any] = {
     "enabled": True,
-    "pollIntervalMs": 3000,
+    "pollIntervalMs": 8000,
     "replyTimeoutMs": 30000,
     "debug": False,
 }
 
 config: Dict[str, Any] = dict(DEFAULT_CONFIG)
-
-# ---------------------------------------------------------------------------
-# Runtime state
-# ---------------------------------------------------------------------------
-wechat: Any = None  # pywechat handle, lazily initialized
-last_message_ids: set = set()  # crude deduplication cache
+messages_api: Any = None
+last_message_ids: set = set()
 running = True
+
+
+@contextmanager
+def hush_stdout():
+    """pyweixin prints to stdout; sidecar stdout is JSONL."""
+    old = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old
 
 
 def log(level: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
@@ -56,17 +49,14 @@ def log(level: str, message: str, data: Optional[Dict[str, Any]] = None) -> None
 
 
 def send(value: Dict[str, Any]) -> None:
-    """Write one JSON Lines message to stdout."""
     try:
         sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
         sys.stdout.flush()
     except Exception as e:
-        # If stdout is broken, we cannot recover.
         sys.stderr.write(f"sidecar stdout failed: {e}\n")
 
 
 def publish_message(chat_name: str, sender: str, body: str, msg_id: str) -> None:
-    """Publish a single WeChat message into Catrace Event Bus."""
     send({
         "v": 1,
         "op": "publish",
@@ -76,7 +66,7 @@ def publish_message(chat_name: str, sender: str, body: str, msg_id: str) -> None
             "title": chat_name,
             "body": body,
             "level": "info",
-            "sticky": False,
+            "sticky": True,
             "dedupeKey": f"pywechat-reply:{msg_id}",
             "actions": [
                 {"id": "reply", "label": "回复"},
@@ -92,25 +82,81 @@ def publish_message(chat_name: str, sender: str, body: str, msg_id: str) -> None
     })
 
 
-def try_init_wechat() -> bool:
-    """Lazily import pywechat and attach to the running WeChat window.
+def patch_pyweixin_tabbar() -> None:
+    """Current WeChat 4 tabbar auto_id is `main_tabbar`, not `MainView.main_tabbar`."""
+    import re as _re
 
-    Returns True on success. On failure, logs a warning and returns False so
-    polling can retry later (e.g. after the user opens WeChat).
-    """
-    global wechat
-    if wechat is not None:
+    import pyweixin.utils as wx_utils  # type: ignore
+    import pyweixin.WeChatAuto as wx_auto  # type: ignore
+    from pyweixin.Config import GlobalConfig  # type: ignore
+    from pyweixin.WeChatTools import Navigator  # type: ignore
+
+    def get_new_message_num(main_window=None, is_maximize=None, close_weixin=None):
+        if is_maximize is None:
+            is_maximize = GlobalConfig.is_maximize
+        if close_weixin is None:
+            close_weixin = GlobalConfig.close_weixin
+        if main_window is None:
+            main_window = Navigator.open_weixin(is_maximize=is_maximize)
+        weixin_button = None
+        for auto_id in ("main_tabbar", "MainView.main_tabbar"):
+            try:
+                bar = main_window.child_window(auto_id=auto_id, control_type="ToolBar")
+                kids = bar.children()
+                if kids:
+                    weixin_button = kids[0]
+                    break
+            except Exception:
+                continue
+        if weixin_button is None:
+            bars = main_window.descendants(control_type="ToolBar")
+            for bar in bars:
+                cls = bar.element_info.class_name or ""
+                if "MainTabBar" in cls:
+                    kids = bar.children()
+                    if kids:
+                        weixin_button = kids[0]
+                        break
+        if weixin_button is None:
+            raise RuntimeError("WeChat main_tabbar not found")
+        full_desc = weixin_button.element_info.element.GetCurrentPropertyValue(30159)
+        new_message_num = _re.search(r"\d+", full_desc or "")
+        if close_weixin:
+            main_window.close()
+        return int(new_message_num.group(0)) if new_message_num else 0
+
+    wx_utils.get_new_message_num = get_new_message_num
+    wx_auto.get_new_message_num = get_new_message_num
+
+
+def try_init_wechat() -> bool:
+    global messages_api
+    if messages_api is not None:
         return True
 
     try:
-        # pywechat's import path and class name vary by version.
-        # Adjust these imports after installing the exact package you use.
-        from pywechat import WeChat  # type: ignore
-        wechat = WeChat()
-        log("info", "pywechat connected to WeChat PC client")
+        with hush_stdout():
+            from pyweixin import Messages  # type: ignore
+            from pyweixin.Config import GlobalConfig  # type: ignore
+            GlobalConfig.close_weixin = False
+            GlobalConfig.is_maximize = False
+            patch_pyweixin_tabbar()
+            messages_api = Messages
+        log("info", "using pyweixin (WeChat 4.x / pywechat127)")
+        return True
+    except Exception as e4:
+        log("warn", "pyweixin unavailable, trying pywechat 3.9", {"error": str(e4)})
+
+    try:
+        with hush_stdout():
+            from pywechat import Messages  # type: ignore
+            from pywechat.Config import GlobalConfig  # type: ignore
+            GlobalConfig.close_weixin = False
+            messages_api = Messages
+        log("info", "using pywechat (WeChat 3.9)")
         return True
     except Exception as e:
-        log("warn", "failed to initialize pywechat", {
+        log("warn", "failed to initialize pywechat127", {
             "error": str(e),
             "trace": traceback.format_exc(limit=3) if config.get("debug") else None,
         })
@@ -118,80 +164,76 @@ def try_init_wechat() -> bool:
 
 
 def fetch_latest_messages() -> List[Dict[str, str]]:
-    """Fetch recent unread messages from WeChat via pywechat.
-
-    This is intentionally left as a thin wrapper: pywechat APIs differ across
-    versions. Implement the concrete calls here once you know your installed
-    version. The returned list item must contain:
-        - chatName: str   (chat window/session name)
-        - sender: str     (contact name, may equal chatName for 1:1 chats)
-        - body: str       (message text)
-        - id: str         (stable-ish id for deduplication)
-    """
     if not try_init_wechat():
         return []
 
     messages: List[Dict[str, str]] = []
     try:
-        # -------------------------------------------------------------------
-        # TODO: replace this block with real pywechat calls.
-        #
-        # Example shape (depends on pywechat version):
-        #   sessions = wechat.get_chat_list()
-        #   for session in sessions:
-        #       if session.unread_count > 0:
-        #           msgs = wechat.get_messages(session.name, limit=session.unread_count)
-        #           for m in msgs:
-        #               messages.append({
-        #                   "chatName": session.name,
-        #                   "sender": m.sender,
-        #                   "body": m.content,
-        #                   "id": f"{session.name}:{m.sender}:{m.time}:{m.content}",
-        #               })
-        # -------------------------------------------------------------------
-        log("info", "fetch_latest_messages called (pywechat integration stub)")
+        with hush_stdout():
+            raw = messages_api.check_new_messages(close_weixin=False, is_maximize=False)
+        if not raw:
+            return []
+        if not isinstance(raw, dict):
+            log("warn", "check_new_messages unexpected type", {"type": type(raw).__name__})
+            return []
+        for friend, items in raw.items():
+            chat_name = str(friend or "").strip() or "微信"
+            rows = items if isinstance(items, list) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                sender = str(row.get("消息发送人") or chat_name)
+                body = str(row.get("消息内容") or "").strip()
+                mtype = str(row.get("消息类型") or "")
+                if not body:
+                    continue
+                msg_id = f"{chat_name}:{sender}:{mtype}:{body}"
+                messages.append({
+                    "chatName": chat_name,
+                    "sender": sender,
+                    "body": body,
+                    "id": msg_id,
+                })
     except Exception as e:
         log("warn", "pywechat fetch failed", {
             "error": str(e),
             "trace": traceback.format_exc(limit=3) if config.get("debug") else None,
         })
-        # Reset handle so next poll retries connection.
-        wechat = None
-
+        # Keep the imported API; only UI lookup failed this round.
     return messages
 
 
-def send_reply(chat_name: str, text: str) -> Dict[str, Any]:
-    """Send a text message to the given chat via pywechat.
+def messages_api_reset() -> None:
+    global messages_api
+    messages_api = None
 
-    Returns a result dict for the sidecar response op.
-    """
+
+def send_reply(chat_name: str, text: str) -> Dict[str, Any]:
+    text = (text or "").strip()
+    if not text:
+        return {"ok": False, "error": "empty reply"}
     if not try_init_wechat():
         return {"ok": False, "error": "WeChat client not available"}
-
     try:
-        # -------------------------------------------------------------------
-        # TODO: replace with real pywechat send call.
-        #
-        # Example shape:
-        #   wechat.open_chat(chat_name)
-        #   wechat.send_text(text)
-        # -------------------------------------------------------------------
-        log("info", "send_reply called (pywechat integration stub)", {
-            "chatName": chat_name,
-            "text": text,
-        })
+        with hush_stdout():
+            messages_api.send_messages_to_friend(
+                friend=chat_name,
+                messages=[text],
+                close_weixin=False,
+                is_maximize=False,
+            )
+        log("info", "pywechat send ok", {"chatName": chat_name, "textLength": len(text)})
         return {"ok": True}
     except Exception as e:
         log("warn", "pywechat send failed", {
             "error": str(e),
             "trace": traceback.format_exc(limit=3) if config.get("debug") else None,
         })
+        messages_api_reset()
         return {"ok": False, "error": str(e)}
 
 
 def handle_host_message(message: Dict[str, Any]) -> None:
-    """Process one message from Catrace host."""
     op = message.get("op")
 
     if op == "shutdown":
@@ -205,7 +247,9 @@ def handle_host_message(message: Dict[str, Any]) -> None:
         incoming = message.get("config", {})
         if isinstance(incoming, dict):
             config.update(incoming)
-            log("info", "config updated", {"config": {k: v for k, v in config.items() if k != "token"}})
+            log("info", "config updated", {
+                "config": {k: v for k, v in config.items() if k != "token"},
+            })
         return
 
     if op == "resolved":
@@ -213,22 +257,22 @@ def handle_host_message(message: Dict[str, Any]) -> None:
         resolution_payload = message.get("resolutionPayload") or {}
         action_id = message.get("actionId")
         chat_name = event_payload.get("chatName")
-
         if action_id == "reply" and chat_name:
-            text = resolution_payload.get("text") or ""
-            result = send_reply(chat_name, text)
-            send({"v": 1, "op": "response", "requestId": message.get("requestId"), **result})
+            text = ""
+            if isinstance(resolution_payload, dict):
+                text = str(resolution_payload.get("text") or "")
+            result = send_reply(str(chat_name), text)
+            request_id = message.get("requestId")
+            if request_id:
+                send({"v": 1, "op": "response", "requestId": request_id, **result})
         return
 
-    # Unknown op: log and ignore.
     log("warn", "unknown host message", {"op": op})
 
 
 def poll_once() -> None:
-    """Single polling iteration: fetch messages and publish new ones."""
     if not config.get("enabled", True):
         return
-
     messages = fetch_latest_messages()
     for msg in messages:
         msg_id = msg.get("id", "")
@@ -236,7 +280,6 @@ def poll_once() -> None:
             continue
         if msg_id:
             last_message_ids.add(msg_id)
-            # Keep cache bounded.
             if len(last_message_ids) > 200:
                 last_message_ids.clear()
         publish_message(
@@ -248,7 +291,6 @@ def poll_once() -> None:
 
 
 def stdin_reader() -> None:
-    """Read JSON Lines from stdin on a background thread."""
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -262,18 +304,13 @@ def stdin_reader() -> None:
 
 
 def main() -> None:
-    # Announce readiness.
     send({"v": 1, "op": "ready"})
     log("info", "pywechat-reply sidecar ready", {
         "pluginId": PLUGIN_ID,
         "protocol": PROTOCOL_VERSION,
     })
-
-    # Start stdin listener so host can send config/reply/shutdown anytime.
     reader = threading.Thread(target=stdin_reader, daemon=True)
     reader.start()
-
-    # Polling loop.
     while running:
         try:
             poll_once()
@@ -282,8 +319,7 @@ def main() -> None:
                 "error": str(e),
                 "trace": traceback.format_exc(limit=3) if config.get("debug") else None,
             })
-        time.sleep(config.get("pollIntervalMs", 3000) / 1000.0)
-
+        time.sleep(config.get("pollIntervalMs", 8000) / 1000.0)
     log("info", "sidecar exiting")
 
 
