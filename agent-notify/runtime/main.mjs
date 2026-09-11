@@ -221,6 +221,9 @@ const stickyEntries = new Map()
 const pendingPerm = new Map()
 const dedup = new Map()
 let permId = 1
+let publishSeq = 0
+const publishRequests = new Map()
+const sessionEventIds = new Map()
 let server = null
 
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -258,9 +261,12 @@ function modeOf(event) {
 
 function publishSession(entry, { gone = false } = {}) {
   const sessionId = entry.sessionId || 'unknown'
+  const requestId = `publish-${++publishSeq}`
+  if (!gone) publishRequests.set(requestId, { sessionId, entry })
   send({
     v: 1,
     op: 'publish',
+    requestId,
     event: {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
@@ -346,6 +352,14 @@ function timeoutSessionPerms(sessionId) {
   }
 }
 
+function dismissSessionCard(sessionId) {
+  if (!sessionId || sessionId === 'unknown') return
+  const eventId = sessionEventIds.get(sessionId)
+  if (!eventId) return
+  send({ v: 1, op: 'resolve', eventId })
+  sessionEventIds.delete(sessionId)
+}
+
 function handleState(payload) {
   if (!config.enabled) return
   const data = normalizeHookData(payload, payload.agentId)
@@ -354,7 +368,7 @@ function handleState(payload) {
     timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {
       stickyEntries.delete(sessionId)
-      publishSession({ sessionId }, { gone: true })
+      dismissSessionCard(sessionId)
     }
   }
   const mode = modeOf(event)
@@ -532,6 +546,15 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (message.op === 'request') {
     handleRequest(message)
+    return
+  }
+  if (message.op === 'response') {
+    const pending = publishRequests.get(message.requestId)
+    if (pending) {
+      publishRequests.delete(message.requestId)
+      const eventId = message.result && message.result.eventId
+      if (message.ok && eventId) sessionEventIds.set(pending.sessionId, eventId)
+    }
     return
   }
   if (message.op === 'resolved') {

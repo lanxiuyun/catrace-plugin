@@ -20,6 +20,13 @@ const CSS = `
   background: var(--accent); flex-shrink: 0;
   animation: an-pulse 1.5s ease-in-out infinite;
 }
+.agent-toast .agent-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem;
+  border: 0.0625rem solid #d7dee8; border-radius: 0.4375rem;
+  background: #f8fafc; color: #475569;
+  font-size: 0.625rem; font-weight: 800; letter-spacing: -0.02em;
+}
 @keyframes an-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(1.3); }
@@ -56,8 +63,24 @@ const CSS = `
   word-break: break-all;
 }
 .agent-toast .body-text {
-  font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.5rem 0;
-  word-break: break-word;
+  font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.375rem 0;
+  word-break: break-word; cursor: pointer;
+  overflow-y: hidden; overflow-x: hidden;
+  max-height: 3.3rem;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  transition: max-height 0.2s ease;
+}
+.agent-toast .body-text.is-expanded {
+  display: block; -webkit-line-clamp: unset;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
+.agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+.agent-toast .body-toggle {
+  display: flex; justify-content: flex-end; margin: 0 0 0.375rem;
+  color: var(--accent); font-size: 0.6875rem; font-weight: 600; cursor: pointer;
 }
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 .agent-toast .goto-hint { font-size: 0.6875rem; color: var(--accent); opacity: 0.85; font-weight: 600; }
@@ -266,6 +289,11 @@ function projectName(cwd) {
   return parts[parts.length - 1] || ''
 }
 
+function agentBadge(agentId) {
+  const badges = { claude: 'Cl', zcode: 'Z', codex: 'Cx', gemini: 'G', kimi: 'K' }
+  return badges[String(agentId || '').toLowerCase()] || 'AI'
+}
+
 function toSnake(key) {
   return String(key).replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`).replace(/^_/, '')
 }
@@ -359,7 +387,7 @@ export default {
   },
   emits: ['close', 'action'],
   data() {
-    return { copied: false, dumpMode: '', dumpExpanded: false }
+    return { copied: false, dumpMode: '', dumpExpanded: false, bodyExpanded: false }
   },
   created() {
     ensureStyles()
@@ -466,8 +494,9 @@ export default {
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [
-        h('div', { class: 'header-left' }, [
+          h('div', { class: 'header-left' }, [
           h('div', { class: 'pulse-dot' }),
+          h('span', { class: 'agent-badge', title: entry.agentId || 'unknown' }, agentBadge(entry.agentId)),
           h('h2', { class: 'title' }, title),
         ]),
         h('button', {
@@ -487,7 +516,13 @@ export default {
         h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
       ]),
       dump,
-      h('p', { class: 'body-text' }, body),
+      h('p', {
+        class: ['body-text', this.bodyExpanded ? 'is-expanded' : ''],
+        onClick: (ev) => {
+          ev.stopPropagation()
+          this.bodyExpanded = !this.bodyExpanded
+        },
+      }, body),
       h('div', { class: 'hint-row' }, [h('span', { class: 'goto-hint' }, '点击前往会话')]),
     ])
   },
