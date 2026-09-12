@@ -64,7 +64,10 @@ function containsMarker(entry) {
 
 function isPermHook(entry) {
   const raw = JSON.stringify(entry)
-  return raw.includes('/permission') && raw.includes(`:${PORT}`)
+  if (!raw.includes('PermissionRequest') && !raw.includes('/permission')) return false
+  // http 形式（Claude）：url 直推 /permission；command 形式（ZCode/Codex）：同一脚本加长 timeout
+  if (raw.includes('/permission') && raw.includes(`:${PORT}`)) return true
+  return raw.includes('--agent=') && /"timeout"\s*:\s*(600|590)/.test(raw)
 }
 
 function jsonHasCatrace(file) {
@@ -364,13 +367,30 @@ export function installZcode(scriptPath) {
       arr.push({ hooks: [{ ...spec }] })
     }
   }
-  // PermissionRequest 需要阻塞等待用户审批，使用 http hook 直推 /permission
+  // PermissionRequest 需要阻塞等待用户审批。ZCode 的 hook schema 只接受
+  // 'process' | 'command'（type:"http" 会让整个 config.json 加载失败），
+  // 因此与 Codex 一致用 command hook，由 hook.cjs 阻塞等待 /permission 决策。
   if (!Array.isArray(config.hooks.events.PermissionRequest)) config.hooks.events.PermissionRequest = []
+  // 清理旧版 http 权限 hook：无 marker 且 schema 非法，留着会继续破坏配置加载
+  config.hooks.events.PermissionRequest = config.hooks.events.PermissionRequest.filter(
+    (e) => !isPermHook(e) || containsMarker(e),
+  )
   const permArr = config.hooks.events.PermissionRequest
-  if (!permArr.some((e) => isPermHook(e))) {
-    permArr.push({
-      hooks: [{ type: 'http', url: `http://127.0.0.1:${PORT}/permission?agent=zcode`, timeout: PERM_TIMEOUT_SECS }],
-    })
+  const permSpec = zcodeHookSpec(scriptPath)
+  permSpec.timeout = PERM_TIMEOUT_SECS
+  const existingPerm = permArr.find(containsMarker)
+  if (existingPerm && Array.isArray(existingPerm.hooks)) {
+    for (const hook of existingPerm.hooks) {
+      if (hook && typeof hook === 'object') {
+        hook.command = permSpec.command
+        hook.type = 'command'
+        hook.enabled = true
+        hook.timeout = PERM_TIMEOUT_SECS
+        if (permSpec.shell) hook.shell = permSpec.shell
+      }
+    }
+  } else {
+    permArr.push({ hooks: [{ ...permSpec }] })
   }
   writeJson(file, config)
   return { ok: true, agent: 'zcode' }
