@@ -15,17 +15,10 @@ const CSS = `
 .agent-toast .header-left {
   display: flex; align-items: flex-start; gap: 0.5rem; min-width: 0; flex: 1;
 }
-.agent-toast .pulse-dot {
-  width: 0.5rem; height: 0.5rem; margin-top: 0.35rem; border-radius: 50%;
-  background: var(--accent); flex-shrink: 0;
-  animation: an-pulse 1.5s ease-in-out infinite;
-}
 .agent-toast .agent-badge {
   display: inline-flex; align-items: center; justify-content: center;
-  flex: 0 0 auto; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem;
-  border: 0.0625rem solid #d7dee8; border-radius: 0.4375rem;
-  background: #f8fafc; color: #475569;
-  font-size: 0.625rem; font-weight: 800; letter-spacing: -0.02em;
+  flex: 0 0 auto; width: 1.625rem; height: 1.625rem; border-radius: 0.5rem;
+  color: #ffffff; font-size: 0.6875rem; font-weight: 800; letter-spacing: -0.02em;
 }
 @keyframes an-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -289,9 +282,32 @@ function projectName(cwd) {
   return parts[parts.length - 1] || ''
 }
 
+const AGENT_BADGES = {
+  claude: { label: 'Cl', name: 'Claude', color: '#D97757' },
+  zcode: { label: 'Z', name: 'ZCode', color: '#0EA5E9' },
+  codex: { label: 'Cx', name: 'Codex', color: '#10A37F' },
+  gemini: { label: 'G', name: 'Gemini', color: '#4285F4' },
+  kimi: { label: 'K', name: 'Kimi', color: '#334155' },
+}
 function agentBadge(agentId) {
-  const badges = { claude: 'Cl', zcode: 'Z', codex: 'Cx', gemini: 'G', kimi: 'K' }
-  return badges[String(agentId || '').toLowerCase()] || 'AI'
+  return AGENT_BADGES[String(agentId || '').toLowerCase()] || { label: 'AI', name: 'AI', color: '#64748B' }
+}
+
+function stripMarkdown(text) {
+  return String(text)
+    .replace(/`{1,3}([^`]*)`{1,3}/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+}
+
+// body 常是 assistant 回复的 markdown 原文：取首个自然段再去掉标记符号
+function bodyPreview(entry) {
+  const fallback = EVENT_BODY[entry.event] || '状态已更新'
+  const raw = entry.message || fallback
+  const firstPara = String(raw).split(/\r?\n\s*\r?\n/).find((s) => s.trim()) || ''
+  return stripMarkdown(firstPara).trim() || fallback
 }
 
 function toSnake(key) {
@@ -491,13 +507,13 @@ export default {
     const theme = themeOf(entry.event)
     const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
     const project = projectName(entry.cwd)
-    const body = entry.message || EVENT_BODY[entry.event] || '状态已更新'
+    const body = bodyPreview(entry)
+    const badge = agentBadge(entry.agentId)
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [
           h('div', { class: 'header-left' }, [
-          h('div', { class: 'pulse-dot' }),
-          h('span', { class: 'agent-badge', title: entry.agentId || 'unknown' }, agentBadge(entry.agentId)),
+          h('span', { class: 'agent-badge', title: badge.name, style: { background: badge.color } }, badge.label),
           h('h2', { class: 'title' }, title),
         ]),
         h('button', {
