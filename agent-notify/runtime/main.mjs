@@ -61,7 +61,6 @@ const EVENT_BODY = {
 }
 
 const titleCache = new Map()
-const titleReadAttempts = new Set()
 
 function loadTitleCache() {
   try {
@@ -69,7 +68,7 @@ function loadTitleCache() {
     const now = Date.now()
     for (const [key, value] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
       if (value && typeof value.title === 'string' && now - Number(value.ts || 0) < TITLE_CACHE_TTL_MS) {
-        titleCache.set(key, { title: value.title, ts: Number(value.ts) })
+        titleCache.set(key, { title: value.title, ts: Number(value.ts), pinned: value.pinned === true })
       }
     }
   } catch {
@@ -100,62 +99,30 @@ function cacheKey(agentId, sessionId) {
   return `${agentId || 'unknown'}:${sessionId || 'unknown'}`
 }
 
-function readJsonLines(file, limit = 80) {
-  try {
-    return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(0, limit).map((line) => {
-      try { return JSON.parse(line) } catch { return null }
-    }).filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-function titleFromTranscript(file, agentId) {
-  if (!file) return ''
-  try {
-    if (agentId === 'zcode') {
-      const metadataPath = path.join(path.dirname(file), 'metadata.json')
-      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
-      return cleanTitle(metadata.description || metadata.prompt)
-    }
-    const lines = readJsonLines(file)
-    for (const row of lines) {
-      const type = row.type || row.payload?.type || ''
-      if (agentId === 'codex' && type === 'event_msg') {
-        const payload = row.payload || {}
-        const subtype = payload.type || payload.event_type || ''
-        if (subtype === 'user_message') {
-          return cleanTitle(payload.message || payload.text || payload.content)
-        }
-      }
-      if (type === 'user_message' || type === 'user_prompt') {
-        const payload = row.payload || row
-        return cleanTitle(payload.message || payload.text || payload.content || payload.prompt)
-      }
-    }
-  } catch {
-    /* transcript shape varies by agent */
-  }
-  return ''
-}
-
-function deriveSessionTitle(payload, agentId, sessionId) {
+// 会话标题优先级：payload.session_title（--name、/rename 或宿主自动命名，pinned，
+// 不被 prompt 覆盖）> 缓存 > UserPromptSubmit 首条 prompt 填空（非 pinned，定名后
+// 不随后续 prompt 变化）。不读 transcript：各家落盘滞后，ZCode 的 transcript_path
+// 还是一次性临时目录，metadata.json 永远不在旁边。
+function deriveSessionTitle(payload, agentId, sessionId, event) {
   const key = cacheKey(agentId, sessionId)
+  const explicit = cleanTitle(payload.session_title || payload.sessionTitle)
+  if (explicit) {
+    const cached = titleCache.get(key)
+    if (!cached || !cached.pinned || cached.title !== explicit) {
+      titleCache.set(key, { title: explicit, ts: Date.now(), pinned: true })
+      saveTitleCache()
+    }
+    return explicit
+  }
   const cached = titleCache.get(key)
   if (cached && Date.now() - cached.ts < TITLE_CACHE_TTL_MS) return cached.title
-  const direct = cleanTitle(payload.session_title || payload.sessionTitle)
-  if (direct) {
-    titleCache.set(key, { title: direct, ts: Date.now() })
-    saveTitleCache()
-    return direct
-  }
-  if (titleReadAttempts.has(key)) return ''
-  titleReadAttempts.add(key)
-  const title = titleFromTranscript(payload.transcript_path || payload.transcriptPath, agentId)
-  if (title) {
-    titleCache.set(key, { title, ts: Date.now() })
-    saveTitleCache()
-    return title
+  if (event === 'UserPromptSubmit') {
+    const fromPrompt = cleanTitle(payload.prompt)
+    if (fromPrompt) {
+      titleCache.set(key, { title: fromPrompt, ts: Date.now(), pinned: false })
+      saveTitleCache()
+      return fromPrompt
+    }
   }
   return ''
 }
@@ -169,8 +136,8 @@ function normalizeHookData(raw, agentId = 'unknown') {
   const event = EVENT_ALIASES[rawEvent] || rawEvent
   const sessionId = firstString(raw.session_id, raw.sessionId) || 'unknown'
   const cwd = firstString(raw.cwd, raw.working_directory)
-  const sessionTitle = deriveSessionTitle(raw, agentId, sessionId)
-  const message = firstString(
+  const sessionTitle = deriveSessionTitle(raw, agentId, sessionId, event)
+  let message = firstString(
     raw.last_assistant_message,
     raw.lastAssistantMessage,
     raw.responsePreview,
@@ -179,6 +146,8 @@ function normalizeHookData(raw, agentId = 'unknown') {
     raw.response_text,
     raw.prompt,
   )
+  // UserPromptSubmit 的标题就是 prompt 摘要时，正文不再回显同一句
+  if (event === 'UserPromptSubmit' && message && cleanTitle(message) === sessionTitle) message = ''
   const normalizedAgentId = agentId !== 'unknown' ? agentId : raw.agentId || 'unknown'
   return {
     agentId: normalizedAgentId,

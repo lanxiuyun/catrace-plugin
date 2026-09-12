@@ -490,6 +490,7 @@ export default {
     const sessionId = p.sessionId || entry.sessionId || ''
     const theme = themeOf(entry.event)
     const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
+    const project = projectName(entry.cwd)
     const body = entry.message || EVENT_BODY[entry.event] || '状态已更新'
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
@@ -510,9 +511,11 @@ export default {
         }, '×'),
       ]),
       h('div', { class: 'meta-row' }, [
-        projectName(entry.cwd)
-          ? h('span', { class: 'chip project-chip' }, projectName(entry.cwd))
-          : h('span', { class: 'chip project-chip muted' }, '未知项目'),
+        project && project !== title
+          ? h('span', { class: 'chip project-chip' }, project)
+          : !project
+            ? h('span', { class: 'chip project-chip muted' }, '未知项目')
+            : null,
         h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
       ]),
       dump,
