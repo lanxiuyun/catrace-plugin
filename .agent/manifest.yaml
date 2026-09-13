@@ -4,13 +4,15 @@ features:
       - .agent/features/agent-notify/README.md
       - .agent/features/agent-notify/会话标题-三级来源与为什么不读transcript不回写.md
       - .agent/features/agent-notify/toast卡观感-agent徽章品牌图标与body展开滚动.md
+      - .agent/features/agent-notify/设置页-只显示检测到的Agent与按钮状态设计.md
     related:
       - agent-hook-events-docs
 
 devlog:
+  - .agent/devlog/2026-09-13-agent-notify-正文交互设置页检测与分支清理.md
   - .agent/devlog/2026-09-13-agent-notify-标题链路与品牌徽章观感.md
 
 current:
   plan: .agent/features/agent-notify/README.md
-  phase: 标题链路与 toast 观感完成并提交（2026-09-13，未 push）
-  next: 会话结束自动清卡（SessionEnd，先只 Claude）；确认「prompt 当标题」去留；之后统一 push
+  phase: 正文交互、设置页检测过滤与按钮状态完成并提交（2026-09-13，插件与宿主均有本地提交未 push）
+  next: SessionEnd 自动清卡（先只 Claude）；深色主题下 body 渐隐遮罩适配；调试「常用」视图字段重排
