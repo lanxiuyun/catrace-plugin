@@ -1,6 +1,6 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, onMounted } = vue
+const { h, ref, computed, onMounted } = vue
 const { NButton, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
 
 if (typeof h !== 'function') throw new Error('Vue runtime missing')
@@ -28,6 +28,8 @@ const CSS = `
 .an-set .event-row + .event-row { border-top: 0.0625rem solid #f1f5f9; }
 .an-set .event-name { font-size: 0.8125rem; font-weight: 400; color: #334155; }
 .an-set .agent-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.an-set .install-btn { transition: color 0.2s, border-color 0.2s; }
+.an-set .install-btn:hover { color: #7c3aed; border-color: #7c3aed; }
 `
 const EVENTS = [
   { id: 'SessionStart', label: '会话开始' },
@@ -66,6 +68,8 @@ export default {
     ensureStyles()
     const message = useMessage()
     const agents = ref([])
+    const detectedAgents = computed(() => agents.value.filter((a) => a.detected !== false))
+    const undetectedAgents = computed(() => agents.value.filter((a) => a.detected === false))
     const busy = ref('')
     const modes = ref({
       SessionStart: 'auto',
@@ -81,6 +85,7 @@ export default {
     const showDebug = ref(false)
     const debugView = ref('off')
     const debugExpanded = ref(false)
+    const sidecarStale = ref(false)
 
     async function load() {
       try {
@@ -99,9 +104,12 @@ export default {
       try {
         const list = await plugin.sidecar.request('listAgents', {})
         const result = list && list.result ? list.result : list
-        agents.value = Array.isArray(result) ? result : []
+        const rows = Array.isArray(result) ? result : []
+        agents.value = rows
+        sidecarStale.value = rows.length > 0 && rows.some((a) => a.detected === undefined)
       } catch {
-        agents.value = ['claude', 'zcode', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false }))
+        // sidecar 不可达时退回全量展示，至少让用户看到有哪些 agent
+        agents.value = ['claude', 'zcode', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false, detected: true }))
       }
     }
 
@@ -175,22 +183,55 @@ export default {
       h('div', { class: 'an-set' }, [
         section(
           'Agent 联动',
-          '一键写入 agent 的配置文件，让它把状态推送到 Catrace。ZCode 写入 ~/.zcode/cli/config.json（hooks.enabled 会打开）。',
-          agents.value.map((a) =>
-            h('div', { class: 'event-row', key: a.id }, [
-              h('div', { class: 'agent-label' }, [
-                h('span', { class: 'event-name' }, NAMES[a.id] || a.id),
-                h(NTag, { size: 'small', type: a.installed ? 'success' : 'default' }, {
-                  default: () => (a.installed ? '已安装' : '未安装'),
-                }),
-              ]),
-              h(
-                NButton,
-                { size: 'small', loading: busy.value === a.id, onClick: () => toggle(a) },
-                { default: () => (a.installed ? '卸载 Hook' : '安装 Hook') },
-              ),
-            ]),
-          ),
+          '检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',
+          [
+            sidecarStale.value
+              ? h('p', { class: 'section-desc' }, '插件进程是旧版本：请关闭再开启本插件（或点刷新）以启用「只显示检测到的 Agent」。')
+              : null,
+            ...(detectedAgents.value.length
+              ? detectedAgents.value.map((a) =>
+                  h('div', { class: 'event-row', key: a.id }, [
+                    h('div', { class: 'agent-label' }, [
+                      h('span', { class: 'event-name' }, NAMES[a.id] || a.id),
+                      h(NTag, { size: 'small', type: a.installed ? 'success' : 'default' }, {
+                        default: () => (a.installed ? '已安装' : '未安装'),
+                      }),
+                    ]),
+                    h(
+                      NButton,
+                      {
+                        size: 'small',
+                        type: a.installed ? 'error' : 'default',
+                        secondary: !!a.installed,
+                        class: a.installed ? undefined : 'install-btn',
+                        loading: busy.value === a.id,
+                        onClick: () => toggle(a),
+                      },
+                      { default: () => (a.installed ? '卸载 Hook' : '安装 Hook') },
+                    ),
+                  ]),
+                )
+              : [
+                  h('p', { class: 'section-desc', style: 'margin: 0' },
+                    '未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。'),
+                ]),
+            ...undetectedAgents.value.length
+              ? [
+                  h('div', { class: 'event-row' }, [
+                    h('span', { class: 'event-name', style: 'color: #94a3b8' }, '未检测到'),
+                    h(
+                      'div',
+                      { style: 'display: flex; gap: 0.375rem; flex-wrap: wrap; justify-content: flex-end' },
+                      undetectedAgents.value.map((a) =>
+                        h(NTag, { size: 'small', type: 'warning', title: '未检测到配置目录，无法写入 hook' }, {
+                          default: () => NAMES[a.id] || a.id,
+                        }),
+                      ),
+                    ),
+                  ]),
+                ]
+              : [],
+          ],
         ),
         section(
           '调试',

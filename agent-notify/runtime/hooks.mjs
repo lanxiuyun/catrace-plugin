@@ -321,6 +321,20 @@ export function isInstalled(agent) {
   return false
 }
 
+// 机器上是否装过该 agent（以配置目录存在为准）——没装过的 agent 连配置文件都无从写入
+const AGENT_CONFIG_DIRS = {
+  claude: () => path.join(home(), '.claude'),
+  codex: () => path.join(home(), '.codex'),
+  gemini: () => path.join(home(), '.gemini'),
+  zcode: () => path.join(home(), '.zcode', 'cli'),
+}
+
+export function isAgentPresent(agent) {
+  if (agent === 'kimi') return kimiConfigPaths().some((p) => fs.existsSync(path.dirname(p)))
+  const dir = AGENT_CONFIG_DIRS[agent]
+  return dir ? fs.existsSync(dir()) : false
+}
+
 function zcodeConfigPath() {
   return path.join(home(), '.zcode', 'cli', 'config.json')
 }

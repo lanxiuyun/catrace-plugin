@@ -3,7 +3,7 @@ import http from 'node:http'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { AGENTS, installAgent, isInstalled, uninstallAgent } from './hooks.mjs'
+import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -470,7 +470,7 @@ function handleRequest(message) {
         respond(
           requestId,
           true,
-          AGENTS.map((id) => ({ id, installed: isInstalled(id) })),
+          AGENTS.map((id) => ({ id, installed: isInstalled(id), detected: isAgentPresent(id) })),
         )
         break
       case 'install':
