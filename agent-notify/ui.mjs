@@ -65,16 +65,14 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded {
   display: block; -webkit-line-clamp: unset;
+  max-height: 10.875rem;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-.agent-toast .body-toggle {
-  display: flex; justify-content: flex-end; margin: 0 0 0.375rem;
-  color: var(--accent); font-size: 0.6875rem; font-weight: 600; cursor: pointer;
-}
+.agent-toast .body-text:hover { background: var(--light-bg); border-radius: 0.25rem; }
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
 .agent-toast .goto-hint { font-size: 0.6875rem; color: var(--accent); opacity: 0.85; font-weight: 600; }
 .agent-toast .dump-wrap,
@@ -302,12 +300,12 @@ function stripMarkdown(text) {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
 }
 
-// body 常是 assistant 回复的 markdown 原文：取首个自然段再去掉标记符号
+// body 常是 assistant 回复的 markdown 原文：去掉标记符号后整段给卡片，
+// 长度由显示层控制（折叠 3 行，展开最多 10 行可滚动）
 function bodyPreview(entry) {
   const fallback = EVENT_BODY[entry.event] || '状态已更新'
   const raw = entry.message || fallback
-  const firstPara = String(raw).split(/\r?\n\s*\r?\n/).find((s) => s.trim()) || ''
-  return stripMarkdown(firstPara).trim() || fallback
+  return stripMarkdown(raw).trim() || fallback
 }
 
 function toSnake(key) {
@@ -542,6 +540,7 @@ export default {
       dump,
       h('p', {
         class: ['body-text', this.bodyExpanded ? 'is-expanded' : ''],
+        title: this.bodyExpanded ? '点击收起' : '点击展开',
         onClick: (ev) => {
           ev.stopPropagation()
           this.bodyExpanded = !this.bodyExpanded
