@@ -8,7 +8,7 @@ Claude Code、ZCode、Codex、Gemini、Kimi 的 hook 都通过 stdin 发送 JSON
 
 ```text
 hook_raw_data（Agent 原始 JSON）
-  → runtime/hook.cjs 注入 agentId 并转发
+  → runtime/hook.cjs 注入 agentId / catrace_hook_pid / catrace_hook_ppid 并转发
   → runtime/main.mjs normalizeHookData()
   → CatraceHookData（插件内部统一结构）
   → event.payload.entry
@@ -27,6 +27,8 @@ hook_raw_data（Agent 原始 JSON）
   cwd: string,
   timestamp: string,
   message: string,
+  hookPpid: number,
+  pidChain?: number[],
   permission?: {
     toolName: string,
     toolInput: unknown,
@@ -41,6 +43,8 @@ hook_raw_data（Agent 原始 JSON）
 - `sessionId` 同时兼容 `session_id` 和 `sessionId`；缺失时使用 `unknown`。
 - `projectName` 是 `cwd` 的最后一级目录名，供卡片项目标签使用。
 - `message` 按优先级从 `last_assistant_message`、`lastAssistantMessage`、`responsePreview`、`response_preview`、`responseText`、`response_text`、`prompt` 取第一个非空字符串。
+- `hookPpid` 是 hook.cjs 注入的 `catrace_hook_ppid`（hook 的直接父进程 pid），供「前往会话」爬进程链用。
+- `pidChain` 是 sidecar 按会话捕获的进程链（由内向外：hook 父进程 → CLI → shell → 终端），**异步捕获、可能缺失**；命中缓存的事件才带上。见[前往会话 feature 文档](../.agent/features/agent-notify/前往会话-进程链捕获与窗口聚焦.md)。
 - `permission` 统一 Claude/ZCode/Codex 的 `tool_name`/`toolName` 与 `tool_input`/`toolInput`。
 - `raw` 只作为调试视图数据保留，不应成为普通 UI 的业务数据来源。
 
@@ -68,13 +72,12 @@ http://127.0.0.1:23456/permission?agent=claude
 
 ## 会话标题获取顺序
 
-`deriveSessionTitle()` 按以下顺序获取标题：
+`deriveSessionTitle()` 按以下顺序获取标题（**不读 transcript、不回写**，原因与取舍见[会话标题 feature 文档](../.agent/features/agent-notify/会话标题-三级来源与为什么不读transcript不回写.md)）：
 
-1. payload 的 `session_title` 或 `sessionTitle`；
+1. payload 的 `session_title` 或 `sessionTitle`（pinned，不被 prompt 覆盖）；
 2. 会话标题缓存；
-3. ZCode transcript 同目录的 `metadata.json` 中的 `description` 或 `prompt`；
-4. Codex transcript 前 80 行中第一条用户消息；
-5. 没有可用标题时返回空字符串，由 UI 回退到 `projectName`。
+3. `UserPromptSubmit` 首条 prompt 填空（非 pinned，定名后不随后续 prompt 变化）；
+4. 没有可用标题时返回空字符串，由 UI 回退到 `projectName`。
 
 标题会经过空白折叠，并限制为 120 个字符，避免把整段 prompt 直接放进标题。
 
@@ -130,9 +133,9 @@ PermissionRequest
 
 ## 相关代码
 
-- `tools/plugin-demo/agent-notify/runtime/hook.cjs` — 读取 stdin、注入 Agent ID、区分状态/权限转发。
+- `tools/plugin-demo/agent-notify/runtime/hook.cjs` — 读取 stdin、注入 Agent ID 与 hook pid、区分状态/权限转发。
 - `tools/plugin-demo/agent-notify/runtime/hooks.mjs` — 各 Agent 安装规格和事件配置。
-- `tools/plugin-demo/agent-notify/runtime/main.mjs` — 归一化、标题解析/缓存、状态与权限发布。
+- `tools/plugin-demo/agent-notify/runtime/main.mjs` — 归一化、标题解析/缓存、进程链捕获、状态与权限发布。
 - `tools/plugin-demo/agent-notify/ui.mjs` — 只消费统一 entry，raw 仅用于调试字段。
 - `tools/plugin-demo/agent-notify/AGENT_HOOK_EVENTS.md` — 各 Agent hook 事件速查表。
 - [hook-install-development-guide.md](hook-install-development-guide.md) — 安装器和平台命令约定。

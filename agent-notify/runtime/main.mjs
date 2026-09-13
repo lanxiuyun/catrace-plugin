@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import readline from 'node:readline'
+import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 
@@ -131,6 +132,87 @@ function firstString(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim() || ''
 }
 
+// —— 前往会话：终端窗口进程链 ——
+// hook 只带得到直接父 pid，祖先要靠一次全量进程快照向上爬。hook 的直接父可能是
+// CLI 的临时 shell 包装（cmd /c），只在 hook 运行期间存活，所以链必须在收到事件时
+// 立刻爬完并按会话缓存；之后的事件直接用缓存，等不回爬已经死掉的中间进程。
+const PID_CHAIN_MAX_DEPTH = 20
+const PID_CHAIN_MAX_CACHED = 500
+const PID_CHAIN_FAIL_TTL_MS = 30_000
+const PID_CHAIN_SNAPSHOT_TIMEOUT_MS = 6_000
+/** @type {Map<string, number[]>} `agentId:sessionId` -> 进程链（由内向外） */
+const pidChainCache = new Map()
+const pidChainInflight = new Map()
+const pidChainFailAt = new Map()
+
+function execFileText(file, args, timeoutMs) {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: timeoutMs, windowsHide: true, encoding: 'utf8' }, (err, stdout) => {
+      resolve(err ? '' : String(stdout))
+    })
+  })
+}
+
+async function processParentMap() {
+  const parents = new Map()
+  let out
+  if (process.platform === 'win32') {
+    out = await execFileText(
+      'powershell.exe',
+      [
+        '-NoProfile', '-NonInteractive', '-Command',
+        'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "{0} {1}" -f $_.ProcessId, $_.ParentProcessId }',
+      ],
+      PID_CHAIN_SNAPSHOT_TIMEOUT_MS,
+    )
+  } else {
+    out = await execFileText('ps', ['-axo', 'pid=,ppid='], 4_000)
+  }
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
+    if (m) parents.set(Number(m[1]), Number(m[2]))
+  }
+  return parents
+}
+
+async function capturePidChain(hookPpid) {
+  if (!hookPpid || hookPpid <= 1) return []
+  const parents = await processParentMap()
+  const chain = []
+  let pid = hookPpid
+  while (pid > 1 && !chain.includes(pid) && chain.length < PID_CHAIN_MAX_DEPTH) {
+    chain.push(pid)
+    pid = parents.get(pid) || 0
+  }
+  return chain
+}
+
+async function ensurePidChain(key, hookPpid) {
+  const cached = pidChainCache.get(key)
+  if (cached) return cached
+  const failedAt = pidChainFailAt.get(key)
+  if (failedAt && Date.now() - failedAt < PID_CHAIN_FAIL_TTL_MS) return []
+  const pending = pidChainInflight.get(key)
+  if (pending) return pending
+  const task = capturePidChain(hookPpid)
+    .then((chain) => {
+      if (chain.length) {
+        if (pidChainCache.size >= PID_CHAIN_MAX_CACHED) {
+          for (const stale of [...pidChainCache.keys()].slice(0, PID_CHAIN_MAX_CACHED / 2)) {
+            pidChainCache.delete(stale)
+          }
+        }
+        pidChainCache.set(key, chain)
+      } else {
+        pidChainFailAt.set(key, Date.now())
+      }
+      return chain
+    })
+    .finally(() => pidChainInflight.delete(key))
+  pidChainInflight.set(key, task)
+  return task
+}
+
 function normalizeHookData(raw, agentId = 'unknown') {
   const rawEvent = raw.event || raw.hook_event_name || raw.hookEventName || ''
   const event = EVENT_ALIASES[rawEvent] || rawEvent
@@ -158,6 +240,7 @@ function normalizeHookData(raw, agentId = 'unknown') {
     cwd,
     timestamp: firstString(raw.timestamp, raw.created_at) || new Date().toISOString(),
     message,
+    hookPpid: Number(raw.catrace_hook_ppid ?? raw.hook_ppid) || 0,
     permission: event === 'PermissionRequest' ? {
       toolName: firstString(raw.tool_name, raw.toolName, raw.name) || '工具调用',
       toolInput: raw.tool_input ?? raw.toolInput,
@@ -333,6 +416,21 @@ function handleState(payload) {
   if (!config.enabled) return
   const data = normalizeHookData(payload, payload.agentId)
   const { event, sessionId } = data
+  // 前往会话用的进程链：缓存命中直接带上；未命中异步捕获，不阻塞卡片发布
+  if (data.hookPpid && sessionId && sessionId !== 'unknown') {
+    const key = cacheKey(data.agentId, sessionId)
+    const cached = pidChainCache.get(key)
+    if (cached) data.pidChain = cached
+    else {
+      ensurePidChain(key, data.hookPpid)
+        .then((chain) => {
+          if (!chain.length) return
+          const sticky = stickyEntries.get(sessionId)
+          if (sticky && !sticky.pidChain) sticky.pidChain = chain
+        })
+        .catch(() => {})
+    }
+  }
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
     timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {

@@ -90,10 +90,11 @@ const CSS = `
   height: 1.75rem; padding: 0 0.875rem;
   background: #1E293B; color: #ffffff;
   font-size: 0.75rem; font-weight: 600; line-height: 1;
-  border-radius: 0.5rem; cursor: pointer;
+  border: none; border-radius: 0.5rem; cursor: pointer;
   transition: background 0.15s ease;
 }
 .agent-toast .goto-btn:hover { background: #0F172A; }
+.agent-toast .goto-btn.is-failed { cursor: default; }
 .agent-toast .dump-wrap,
 .perm-card .dump-wrap {
   margin: 0.5rem 0 0.625rem;
@@ -420,7 +421,16 @@ export default {
   },
   emits: ['close', 'action'],
   data() {
-    return { copied: false, dumpMode: '', dumpExpanded: false, bodyExpanded: false, bodyClamped: false }
+    return {
+      copied: false,
+      dumpMode: '',
+      dumpExpanded: false,
+      bodyExpanded: false,
+      bodyClamped: false,
+      gotoFailed: false,
+      gotoBusy: false,
+      gotoTimer: null,
+    }
   },
   created() {
     ensureStyles()
@@ -428,6 +438,9 @@ export default {
     const v = p && p.debugView
     this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
     this.dumpExpanded = p && p.debugExpanded === true
+  },
+  beforeUnmount() {
+    if (this.gotoTimer) clearTimeout(this.gotoTimer)
   },
   mounted() {
     this.checkBodyClamped()
@@ -441,6 +454,37 @@ export default {
       if (!el) return
       const clamped = !this.bodyExpanded && el.scrollHeight > el.clientHeight + 1
       if (clamped !== this.bodyClamped) this.bodyClamped = clamped
+    },
+    gotoFailedMark() {
+      this.gotoFailed = true
+      if (this.gotoTimer) clearTimeout(this.gotoTimer)
+      this.gotoTimer = setTimeout(() => {
+        this.gotoFailed = false
+        this.gotoTimer = null
+      }, 2000)
+      const beep = plugin && plugin.shell && plugin.shell.beep
+      if (beep) Promise.resolve(beep()).catch(() => {})
+    },
+    async gotoSession() {
+      if (this.gotoBusy) return
+      const p = (this.event && this.event.payload) || {}
+      const entry = p.entry || (Array.isArray(p.entries) ? p.entries[0] : null) || {}
+      const chain = Array.isArray(entry.pidChain) ? entry.pidChain.filter((n) => Number.isFinite(n) && n > 0) : []
+      if (!chain.length) {
+        this.gotoFailedMark()
+        return
+      }
+      this.gotoBusy = true
+      try {
+        const focus = plugin && plugin.window && plugin.window.focusExternal
+        const ok = focus ? await focus(chain) : false
+        if (ok) this.$emit('close')
+        else this.gotoFailedMark()
+      } catch {
+        this.gotoFailedMark()
+      } finally {
+        this.gotoBusy = false
+      }
     },
     copyDump() {
       const text = dumpText(this.event, this.dumpMode || 'common')
@@ -574,13 +618,23 @@ export default {
         class: ['body-text', this.bodyExpanded ? 'is-expanded' : this.bodyClamped ? 'is-clamped' : ''],
         title: this.bodyExpanded ? '点击收起' : this.bodyClamped ? '点击展开' : undefined,
         onClick: (ev) => {
-          // 短文本没有展开可言：不拦截，点击直接冒泡给卡片的「前往会话」
+          // 正文点击只管展开/收起；跳转只认「前往会话」按钮，短文本点击不冒泡触发
           if (!this.bodyClamped && !this.bodyExpanded) return
           ev.stopPropagation()
           this.bodyExpanded = !this.bodyExpanded
         },
       }, body),
-      h('div', { class: 'hint-row' }, [h('span', { class: 'goto-btn' }, '前往会话')]),
+      h('div', { class: 'hint-row' }, [
+        h('button', {
+          class: ['goto-btn', this.gotoFailed ? 'is-failed' : ''],
+          type: 'button',
+          title: '聚焦该会话所在的终端窗口',
+          onClick: (ev) => {
+            ev.stopPropagation()
+            this.gotoSession()
+          },
+        }, this.gotoFailed ? '未能定位终端窗口' : '前往会话'),
+      ]),
     ])
   },
 }

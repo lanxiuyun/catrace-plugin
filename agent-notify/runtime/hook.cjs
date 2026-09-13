@@ -96,8 +96,10 @@ async function main() {
     : payload.hook_event_name || payload.hookEventName;
   const agentArg = process.argv.find((arg) => arg.startsWith('--agent='));
   const agentId = (agentArg && agentArg.slice('--agent='.length)) || process.env.CATRACE_AGENT_ID || 'unknown';
+  // 注入自身 pid/父 pid：sidecar 在会话首个事件时据此向上爬出终端窗口进程链，
+  // 供「前往会话」聚焦（hook 的直接父可能是临时 shell 包装，只在 hook 存活期内有效）
   const outbound = raw && payload && typeof payload === 'object'
-    ? JSON.stringify({ ...payload, agentId })
+    ? JSON.stringify({ ...payload, agentId, catrace_hook_pid: process.pid, catrace_hook_ppid: process.ppid })
     : raw;
   const event = EVENT_ALIASES[rawEvent] || rawEvent;
 

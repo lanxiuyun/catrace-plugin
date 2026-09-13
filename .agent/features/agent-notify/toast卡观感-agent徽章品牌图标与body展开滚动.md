@@ -27,12 +27,12 @@ Stop 卡的 body 来自 `last_assistant_message`——assistant 回复的 markdo
 2. **无独立按钮、无角标**（用户拍板去掉）：溢出时**底部渐隐遮罩**提示还有内容；hover 三行加 35% 透明度下划线（offset 3px）表明可点；
 3. **展开后 max-height 10 行**（10.875rem）+ `overflow-y: auto`，内部滚动看全文，再点正文收起。
 
-**门控**：短文本（≤3 行）没有展开可言——无 hover 样式、无 title，点击不拦截、直接冒泡给卡片的「前往会话」。`bodyClamped`（mounted/updated 实测 scrollHeight）是 hover 与点击的总开关。
+**门控**：短文本（≤3 行）没有展开可言——无 hover 样式、无 title，点击不处理任何行为（跳转只认「前往会话」按钮，不做整卡冒泡）。`bodyClamped`（mounted/updated 实测 scrollHeight）是 hover 与点击的总开关。
 
 点 body 本身和点按钮都能切换。只剥渲染层，数据层 `entry.message` 保留原文，调试面板「原始」仍看完整 markdown。只做轻量 strip、不渲染完整 markdown：宿主没给插件 markdown 渲染器，自己写 mini renderer 成本不匹配收益。
 
 ## 其他观感决策（用户拍板）
 
 - **状态卡呼吸点已移除**：「任务完成/失败」这类终态卡还在呼吸是伪动态。权限审批卡的琥珀色呼吸点**保留**——「卡住等你操作」是有效信号。
-- **「前往会话」深色实心按钮常驻右下角**（用户明确选了不 hover 化；点击冒泡到宿主卡片跳转处理）。
+- **「前往会话」深色实心按钮常驻右下角**（用户明确选了不 hover 化；点击调用宿主 `window.focusExternal` 聚焦会话所在终端窗口，链路详见[前往会话-进程链捕获与窗口聚焦.md](前往会话-进程链捕获与窗口聚焦.md)）。
 - 调试字段面板是用户按需开的调试工具（`debugView: common/raw`），默认 off；批评观感前先分默认态和用户自开配置。
