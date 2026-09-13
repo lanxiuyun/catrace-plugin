@@ -3,7 +3,7 @@ features:
     docs:
       - .agent/features/agent-notify/README.md
       - .agent/features/agent-notify/会话标题-三级来源与为什么不读transcript不回写.md
-      - .agent/features/agent-notify/toast卡观感-agent徽章品牌图标与body首段strip.md
+      - .agent/features/agent-notify/toast卡观感-agent徽章品牌图标与body展开滚动.md
     related:
       - agent-hook-events-docs
 

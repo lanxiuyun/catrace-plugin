@@ -16,7 +16,7 @@
 ## 子文档
 
 - [会话标题-三级来源与为什么不读transcript不回写.md](会话标题-三级来源与为什么不读transcript不回写.md) — **标题策略与只读不回写的取舍**
-- [toast卡观感-agent徽章品牌图标与body首段strip.md](toast卡观感-agent徽章品牌图标与body首段strip.md) — **徽章图标资产来源与换法、body 首段 strip**
+- [toast卡观感-agent徽章品牌图标与body展开滚动.md](toast卡观感-agent徽章品牌图标与body展开滚动.md) — **徽章图标资产来源与换法、body 3行折叠/10行滚动**
 
 ## 开发流程
 
