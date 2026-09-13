@@ -56,12 +56,24 @@ const CSS = `
   word-break: break-all;
 }
 .agent-toast .body-text {
+  position: relative;
   font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.375rem 0;
   word-break: break-word; cursor: pointer;
   overflow-y: hidden; overflow-x: hidden;
   max-height: 3.3rem;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
   transition: max-height 0.2s ease;
+}
+.agent-toast .body-text.is-clamped::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: 0; height: 1.75rem;
+  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.94));
+  pointer-events: none;
+}
+.agent-toast .body-text.is-clamped:hover {
+  text-decoration: underline;
+  text-decoration-color: rgba(15, 23, 42, 0.35);
+  text-underline-offset: 3px;
 }
 .agent-toast .body-text.is-expanded {
   display: block; -webkit-line-clamp: unset;
@@ -72,9 +84,16 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-.agent-toast .body-text:hover { background: var(--light-bg); border-radius: 0.25rem; }
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
-.agent-toast .goto-hint { font-size: 0.6875rem; color: var(--accent); opacity: 0.85; font-weight: 600; }
+.agent-toast .goto-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 1.75rem; padding: 0 0.875rem;
+  background: #1E293B; color: #ffffff;
+  font-size: 0.75rem; font-weight: 600; line-height: 1;
+  border-radius: 0.5rem; cursor: pointer;
+  transition: background 0.15s ease;
+}
+.agent-toast .goto-btn:hover { background: #0F172A; }
 .agent-toast .dump-wrap,
 .perm-card .dump-wrap {
   margin: 0.5rem 0 0.625rem;
@@ -401,7 +420,7 @@ export default {
   },
   emits: ['close', 'action'],
   data() {
-    return { copied: false, dumpMode: '', dumpExpanded: false, bodyExpanded: false }
+    return { copied: false, dumpMode: '', dumpExpanded: false, bodyExpanded: false, bodyClamped: false }
   },
   created() {
     ensureStyles()
@@ -410,7 +429,19 @@ export default {
     this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
     this.dumpExpanded = p && p.debugExpanded === true
   },
+  mounted() {
+    this.checkBodyClamped()
+  },
+  updated() {
+    this.checkBodyClamped()
+  },
   methods: {
+    checkBodyClamped() {
+      const el = this.$refs.bodyEl
+      if (!el) return
+      const clamped = !this.bodyExpanded && el.scrollHeight > el.clientHeight + 1
+      if (clamped !== this.bodyClamped) this.bodyClamped = clamped
+    },
     copyDump() {
       const text = dumpText(this.event, this.dumpMode || 'common')
       const done = () => {
@@ -539,14 +570,17 @@ export default {
       ]),
       dump,
       h('p', {
-        class: ['body-text', this.bodyExpanded ? 'is-expanded' : ''],
-        title: this.bodyExpanded ? '点击收起' : '点击展开',
+        ref: 'bodyEl',
+        class: ['body-text', this.bodyExpanded ? 'is-expanded' : this.bodyClamped ? 'is-clamped' : ''],
+        title: this.bodyExpanded ? '点击收起' : this.bodyClamped ? '点击展开' : undefined,
         onClick: (ev) => {
+          // 短文本没有展开可言：不拦截，点击直接冒泡给卡片的「前往会话」
+          if (!this.bodyClamped && !this.bodyExpanded) return
           ev.stopPropagation()
           this.bodyExpanded = !this.bodyExpanded
         },
       }, body),
-      h('div', { class: 'hint-row' }, [h('span', { class: 'goto-hint' }, '点击前往会话')]),
+      h('div', { class: 'hint-row' }, [h('span', { class: 'goto-btn' }, '前往会话')]),
     ])
   },
 }
