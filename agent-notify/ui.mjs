@@ -84,7 +84,7 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-.agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+.agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0; }
 .agent-toast .goto-btn {
   display: inline-flex; align-items: center; justify-content: center;
   height: 1.75rem; padding: 0 0.875rem;
