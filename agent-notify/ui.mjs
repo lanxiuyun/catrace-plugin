@@ -299,9 +299,9 @@ const EVENT_BODY = {
 const EVENT_THEMES = {
   PostToolUseFailure: { accent: '#EF4444', title: '#991B1B', body: '#B91C1C', lightBg: '#FECACA', border: '#FECACA', badgeBg: '#FEE2E2', badgeFg: '#B91C1C' },
   StopFailure: { accent: '#EF4444', title: '#991B1B', body: '#B91C1C', lightBg: '#FECACA', border: '#FECACA', badgeBg: '#FEE2E2', badgeFg: '#B91C1C' },
-  Stop: { accent: '#06B6D4', title: '#0F172A', body: '#475569', lightBg: '#CFFAFE', border: '#A5F3FC', badgeBg: '#CFFAFE', badgeFg: '#0E7490' },
+  Stop: { accent: '#10B981', title: '#0F172A', body: '#475569', lightBg: '#A7F3D0', border: '#6EE7B7', badgeBg: '#D1FAE5', badgeFg: '#047857' },
   Notification: { accent: '#8B5CF6', title: '#0F172A', body: '#475569', lightBg: '#E9D5FF', border: '#DDD6FE', badgeBg: '#EDE9FE', badgeFg: '#6D28D9' },
-  SessionStart: { accent: '#10B981', title: '#0F172A', body: '#475569', lightBg: '#A7F3D0', border: '#6EE7B7', badgeBg: '#D1FAE5', badgeFg: '#047857' },
+  SessionStart: { accent: '#6B7280', title: '#0F172A', body: '#475569', lightBg: '#E5E7EB', border: '#D1D5DB', badgeBg: '#F3F4F6', badgeFg: '#4B5563' },
   UserPromptSubmit: { accent: '#6B7280', title: '#0F172A', body: '#475569', lightBg: '#E5E7EB', border: '#D1D5DB', badgeBg: '#F3F4F6', badgeFg: '#4B5563' },
   PreToolUse: { accent: '#F59E0B', title: '#0F172A', body: '#475569', lightBg: '#FEF3C7', border: '#FDE68A', badgeBg: '#FEF3C7', badgeFg: '#B45309' },
   PostToolUse: { accent: '#14B8A6', title: '#0F172A', body: '#475569', lightBg: '#CCFBF1', border: '#99F6E4', badgeBg: '#CCFBF1', badgeFg: '#0F766E' },
