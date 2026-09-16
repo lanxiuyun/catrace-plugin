@@ -66,7 +66,7 @@ const CSS = `
 }
 .agent-toast .body-text {
   position: relative; font-size: 0.75rem; color: var(--body); line-height: 1.45;
-  word-break: break-word; cursor: default; overflow-y: hidden; overflow-x: hidden;
+  margin: 0 0 0.625rem; word-break: break-word; cursor: default; overflow-y: hidden; overflow-x: hidden;
   max-height: 3.3rem; display: -webkit-box; -webkit-line-clamp: 3;
   -webkit-box-orient: vertical; transition: max-height 0.2s ease;
 }
@@ -84,12 +84,6 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-.agent-toast .body-box {
-  margin-bottom: 0.625rem; padding: 0.625rem 0.75rem;
-  background: rgba(248, 250, 252, 0.9); border: 0.0625rem solid #e2e8f0;
-  border-radius: 0.75rem;
-}
-.agent-toast .body-box .body-text { margin: 0; }
 .agent-toast .footer {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
   min-height: 2rem; padding-top: 0.625rem;
@@ -720,7 +714,7 @@ export default {
         h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),
       ]),
       dump,
-      h('div', { class: 'body-box' }, h('p', bodyProps, body)),
+      h('p', bodyProps, body),
       h('div', { class: 'footer' }, [
         timestamp ? h('span', { class: 'timestamp', title: exactTimestamp || undefined }, timestamp) : h('span'),
         h('button', {
