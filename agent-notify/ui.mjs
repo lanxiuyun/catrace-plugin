@@ -344,11 +344,36 @@ function projectName(cwd) {
   return parts[parts.length - 1] || ''
 }
 
-function formatTimestamp(value) {
-  if (!value) return ''
+function parseTimestamp(value) {
+  if (!value) return null
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatRelativeTimestamp(value, now = Date.now()) {
+  const date = parseTimestamp(value)
+  if (!date) return ''
+  const elapsedMs = Math.max(0, now - date.getTime())
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000)
+  if (elapsedMinutes < 1) return '刚刚'
+  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前`
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+  if (elapsedHours < 24) return `${elapsedHours} 小时前`
+  const elapsedDays = Math.floor(elapsedHours / 24)
+  return `${elapsedDays} 天前`
+}
+
+function formatExactTimestamp(value) {
+  const date = parseTimestamp(value)
+  if (!date) return ''
+  return date.toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 const AGENT_BADGES = {
@@ -478,6 +503,8 @@ export default {
       dumpExpanded: false,
       bodyExpanded: false,
       bodyClamped: false,
+      timestampNow: Date.now(),
+      timestampTimer: null,
       gotoFailed: false,
       gotoBusy: false,
       gotoTimer: null,
@@ -490,14 +517,18 @@ export default {
     this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
     this.dumpExpanded = p && p.debugExpanded === true
   },
-  beforeUnmount() {
-    if (this.gotoTimer) clearTimeout(this.gotoTimer)
-  },
   mounted() {
     this.checkBodyClamped()
+    this.timestampTimer = setInterval(() => {
+      this.timestampNow = Date.now()
+    }, 30_000)
   },
   updated() {
     this.checkBodyClamped()
+  },
+  beforeUnmount() {
+    if (this.timestampTimer) clearInterval(this.timestampTimer)
+    if (this.gotoTimer) clearTimeout(this.gotoTimer)
   },
   methods: {
     checkBodyClamped() {
@@ -643,7 +674,8 @@ export default {
     const theme = themeOf(entry.event)
     const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
     const body = bodyPreview(entry)
-    const timestamp = formatTimestamp(entry.timestamp)
+    const timestamp = formatRelativeTimestamp(entry.timestamp, this.timestampNow)
+    const exactTimestamp = formatExactTimestamp(entry.timestamp)
     const badge = agentBadge(entry.agentId)
     const gotoLabel = this.gotoFailed ? '未能定位窗口' : this.gotoBusy ? '正在前往…' : '前往会话'
     const bodyInteractive = this.bodyClamped || this.bodyExpanded
@@ -692,7 +724,7 @@ export default {
       dump,
       h('div', { class: 'body-box' }, h('p', bodyProps, body)),
       h('div', { class: 'footer' }, [
-        timestamp ? h('span', { class: 'timestamp' }, timestamp) : h('span'),
+        timestamp ? h('span', { class: 'timestamp', title: exactTimestamp || undefined }, timestamp) : h('span'),
         h('button', {
           class: [
             'goto-btn',

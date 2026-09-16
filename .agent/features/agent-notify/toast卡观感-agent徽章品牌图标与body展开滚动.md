@@ -31,6 +31,10 @@ Stop 卡的 body 来自 `last_assistant_message`——assistant 回复的 markdo
 
 点 body 本身和点按钮都能切换。只剥渲染层，数据层 `entry.message` 保留原文，调试面板「原始」仍看完整 markdown。只做轻量 strip、不渲染完整 markdown：宿主没给插件 markdown 渲染器，自己写 mini renderer 成本不匹配收益。
 
+## 时间显示
+
+普通状态卡 footer 左侧显示动态相对时间：小于 1 分钟显示「刚刚」，之后依次显示「N 分钟前」「N 小时前」「N 天前」。组件每 30 秒刷新一次，不重新请求或改写事件时间。悬停时间文字可查看完整的本地日期时间（含年月日和秒）。时间基准仍是 `entry.timestamp`：优先 Agent payload 的 `timestamp` / `created_at`，缺失时为 sidecar 收到事件时生成的时间。
+
 ## 其他观感决策（用户拍板）
 
 - **状态卡呼吸点已移除**：「任务完成/失败」这类终态卡还在呼吸是伪动态。权限审批卡的琥珀色呼吸点**保留**——「卡住等你操作」是有效信号。
