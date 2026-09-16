@@ -5,6 +5,7 @@ import path from 'node:path'
 const MARKER = 'catrace-agent-hook'
 const PORT = 23456
 const PERM_TIMEOUT_SECS = 600
+const STATE_HOOK_TIMEOUT_SECS = 15
 const SHARED_EVENTS = [
   'SessionStart',
   'UserPromptSubmit',
@@ -98,7 +99,7 @@ function claudeSpec(scriptPath) {
     type: 'command',
     command: commandFor(scriptPath, 'claude'),
     async: true,
-    timeout: 5,
+    timeout: STATE_HOOK_TIMEOUT_SECS,
   }
   if (win()) spec.shell = 'powershell'
   return spec
@@ -113,7 +114,14 @@ export function installClaude(scriptPath) {
   for (const event of SHARED_EVENTS) {
     if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = []
     const arr = settings.hooks[event]
-    if (!arr.some(containsMarker)) arr.push({ matcher: '', hooks: [{ ...spec }] })
+    const existing = arr.find(containsMarker)
+    if (existing && Array.isArray(existing.hooks)) {
+      for (const hook of existing.hooks) {
+        if (hook && typeof hook === 'object') Object.assign(hook, spec)
+      }
+    } else if (!existing) {
+      arr.push({ matcher: '', hooks: [{ ...spec }] })
+    }
   }
   // 清理旧版 command hook（StopFailure/Notification 已不再为 Claude 注册）
   for (const event of ['StopFailure', 'Notification']) {
@@ -345,7 +353,7 @@ function zcodeHookSpec(scriptPath) {
     command: commandFor(scriptPath, 'zcode'),
     enabled: true,
     async: true,
-    timeout: 5,
+    timeout: STATE_HOOK_TIMEOUT_SECS,
   }
   if (win()) spec.shell = 'powershell'
   return spec
@@ -373,7 +381,7 @@ export function installZcode(scriptPath) {
           hook.command = spec.command
           hook.type = 'command'
           hook.enabled = true
-          hook.timeout = 5
+          hook.timeout = STATE_HOOK_TIMEOUT_SECS
           if (spec.shell) hook.shell = spec.shell
         }
       }

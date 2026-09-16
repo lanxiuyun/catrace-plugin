@@ -5,10 +5,11 @@ import readline from 'node:readline'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
+import { focusExternalWindow } from './focus-windows.mjs'
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = 23456
+const PORT = Number(process.env.CATRACE_AGENT_NOTIFY_PORT) || 23456
 const PERM_WAIT_MS = 540_000
 const DEDUP_MS = 8000
 const TITLE_CACHE_PATH = path.join(__dirname, 'cache', 'session-titles.json')
@@ -139,7 +140,7 @@ function firstString(...values) {
 const PID_CHAIN_MAX_DEPTH = 20
 const PID_CHAIN_MAX_CACHED = 500
 const PID_CHAIN_FAIL_TTL_MS = 30_000
-const PID_CHAIN_SNAPSHOT_TIMEOUT_MS = 6_000
+const PID_CHAIN_SNAPSHOT_TIMEOUT_MS = 3_000
 /** @type {Map<string, number[]>} `agentId:sessionId` -> 进程链（由内向外） */
 const pidChainCache = new Map()
 const pidChainInflight = new Map()
@@ -412,23 +413,23 @@ function dismissSessionCard(sessionId) {
   sessionEventIds.delete(sessionId)
 }
 
-function handleState(payload) {
+async function handleState(payload) {
   if (!config.enabled) return
   const data = normalizeHookData(payload, payload.agentId)
   const { event, sessionId } = data
-  // 前往会话用的进程链：缓存命中直接带上；未命中异步捕获，不阻塞卡片发布
+  // HTTP response 等待首次进程链捕获完成，保证短命 hook 父进程在快照期间仍存活。
   if (data.hookPpid && sessionId && sessionId !== 'unknown') {
     const key = cacheKey(data.agentId, sessionId)
-    const cached = pidChainCache.get(key)
-    if (cached) data.pidChain = cached
-    else {
-      ensurePidChain(key, data.hookPpid)
-        .then((chain) => {
-          if (!chain.length) return
-          const sticky = stickyEntries.get(sessionId)
-          if (sticky && !sticky.pidChain) sticky.pidChain = chain
-        })
-        .catch(() => {})
+    try {
+      const chain = await ensurePidChain(key, data.hookPpid)
+      if (chain.length) {
+        data.pidChain = chain
+        log('pid chain captured', { sessionId, chain })
+      } else {
+        log('pid chain capture failed', { sessionId, hookPpid: data.hookPpid }, 'warn')
+      }
+    } catch (error) {
+      log('pid chain capture error', { sessionId, error: String(error) }, 'warn')
     }
   }
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
@@ -513,6 +514,21 @@ function startHttp() {
       cors(res, 204)
       return
     }
+    if (req.method === 'GET' && url === '/focus') {
+      const rawPids = requestUrl.searchParams.get('pids') || ''
+      const pids = rawPids.split(',').map((pid) => Number(pid))
+      log('focus http request', { pids }, 'info')
+      try {
+        const result = await focusExternalWindow(pids)
+        log('focus result', result, result.ok ? 'info' : 'warn')
+        cors(res, 200, JSON.stringify(result))
+      } catch (error) {
+        const result = { ok: false, category: 'none', restored: 0, candidates: 0 }
+        log('focus failed', { error: String(error) }, 'warn')
+        cors(res, 500, JSON.stringify(result))
+      }
+      return
+    }
     if (req.method !== 'POST' || (url !== '/state' && url !== '/permission')) {
       cors(res, 404)
       return
@@ -526,11 +542,15 @@ function startHttp() {
       handlePermission(req, res, payload, agentId)
       return
     }
+    await handleState(payload)
     cors(res, 200)
-    handleState(payload)
   })
   server.on('error', (err) => log('http bind failed', { error: String(err) }, 'error'))
-  server.listen(PORT, '127.0.0.1', () => log('listening', { port: PORT }))
+  server.listen(PORT, '127.0.0.1', () => {
+    log('listening', { port: PORT })
+    send({ v: 1, op: 'ready' })
+    log('agent-notify ready', { pluginId, pid: process.pid })
+  })
 }
 
 function stopHttp() {
@@ -593,8 +613,6 @@ function shutdown() {
 
 loadTitleCache()
 startHttp()
-send({ v: 1, op: 'ready' })
-log('agent-notify ready', { pluginId, pid: process.pid })
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message

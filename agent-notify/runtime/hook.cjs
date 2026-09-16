@@ -7,7 +7,7 @@ const http = require("http");
 
 const CATRACE_PORT = 23456;
 const STDIN_READ_TIMEOUT_MS = 2000;
-const STATE_POST_TIMEOUT_MS = 500;
+const STATE_POST_TIMEOUT_MS = 8000;
 const PERMISSION_POST_TIMEOUT_MS = 600000;
 
 // 各 agent 事件名归一化到 Claude Code 语义（未列出的事件直接忽略）

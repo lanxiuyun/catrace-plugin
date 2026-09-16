@@ -87,13 +87,20 @@ const CSS = `
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0; }
 .agent-toast .goto-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 1.75rem; padding: 0 0.875rem;
+  min-width: 6.5rem; height: 1.75rem; padding: 0 0.875rem;
   background: #1E293B; color: #ffffff;
   font-size: 0.75rem; font-weight: 600; line-height: 1;
   border: none; border-radius: 0.5rem; cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 .agent-toast .goto-btn:hover { background: #0F172A; }
+.agent-toast .goto-btn:active:not(:disabled) { transform: scale(0.96); }
+.agent-toast .goto-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.1875rem rgba(30, 41, 59, 0.22);
+}
+.agent-toast .goto-btn:disabled { opacity: 0.82; }
+.agent-toast .goto-btn.is-busy { background: #334155; cursor: wait; }
 .agent-toast .goto-btn.is-failed { cursor: default; }
 .agent-toast .dump-wrap,
 .perm-card .dump-wrap {
@@ -469,15 +476,27 @@ export default {
       if (this.gotoBusy) return
       const p = (this.event && this.event.payload) || {}
       const entry = p.entry || (Array.isArray(p.entries) ? p.entries[0] : null) || {}
-      const chain = Array.isArray(entry.pidChain) ? entry.pidChain.filter((n) => Number.isFinite(n) && n > 0) : []
+      const chain = Array.isArray(entry.pidChain)
+        ? entry.pidChain.filter((n) => Number.isFinite(n) && n > 0)
+        : []
       if (!chain.length) {
         this.gotoFailedMark()
         return
       }
       this.gotoBusy = true
       try {
-        const focus = plugin && plugin.window && plugin.window.focusExternal
-        const ok = focus ? await focus(chain) : false
+        const get = plugin && plugin.http && plugin.http.get
+        let ok = false
+        if (get) {
+          const response = await get(
+            `http://127.0.0.1:23456/focus?pids=${encodeURIComponent(chain.join(','))}`,
+          )
+          try {
+            ok = response && response.status === 200 && JSON.parse(response.body).ok === true
+          } catch {
+            ok = false
+          }
+        }
         if (ok) this.$emit('close')
         else this.gotoFailedMark()
       } catch {
@@ -582,6 +601,7 @@ export default {
     const project = projectName(entry.cwd)
     const body = bodyPreview(entry)
     const badge = agentBadge(entry.agentId)
+    const gotoLabel = this.gotoFailed ? '未能定位窗口' : this.gotoBusy ? '正在前往…' : '前往会话'
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [
@@ -626,14 +646,20 @@ export default {
       }, body),
       h('div', { class: 'hint-row' }, [
         h('button', {
-          class: ['goto-btn', this.gotoFailed ? 'is-failed' : ''],
+          class: [
+            'goto-btn',
+            this.gotoBusy ? 'is-busy' : '',
+            this.gotoFailed ? 'is-failed' : '',
+          ],
           type: 'button',
-          title: '聚焦该会话所在的终端窗口',
+          disabled: this.gotoBusy,
+          'aria-busy': this.gotoBusy ? 'true' : 'false',
+          title: this.gotoBusy ? '正在定位会话窗口' : '聚焦该会话所在的应用或终端窗口',
           onClick: (ev) => {
             ev.stopPropagation()
             this.gotoSession()
           },
-        }, this.gotoFailed ? '未能定位终端窗口' : '前往会话'),
+        }, gotoLabel),
       ]),
     ])
   },
