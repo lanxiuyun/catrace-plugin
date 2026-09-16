@@ -46,7 +46,6 @@ const CSS = `
   display: flex; align-items: center; min-width: 0; gap: 0.3125rem;
   margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.6875rem; line-height: 1.3;
 }
-.agent-toast .project-icon { flex: 0 0 auto; color: #94a3b8; font-size: 0.75rem; }
 .agent-toast .project-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agent-toast .chip {
   display: inline-flex; align-items: center; max-width: 100%; height: 1.25rem;
@@ -718,7 +717,6 @@ export default {
         }, '×'),
       ]),
       h('div', { class: 'project-row', title: entry.cwd || undefined }, [
-        h('span', { class: 'project-icon', 'aria-hidden': 'true' }, '▰'),
         h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),
       ]),
       dump,
