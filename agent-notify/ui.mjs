@@ -6,15 +6,21 @@ const STYLE_ID = 'catrace-plugin-agent-notify-css'
 const CSS = `
 .agent-toast {
   display: flex; flex-direction: column; width: 100%; min-height: 0;
+  box-sizing: border-box; padding: 0.875rem 0.875rem 0.75rem;
+  border: 0.0625rem solid var(--border); border-radius: 0.75rem;
+  background: #ffffff;
+  box-shadow: 0 0.375rem 1rem rgba(15, 23, 42, 0.12), inset 0.25rem 0 0 var(--accent);
+  box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, var(--accent) 24%, transparent), inset 0.25rem 0 0 var(--accent);
   font-family: system-ui, -apple-system, Segoe UI, sans-serif;
 }
 .agent-toast .header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 0.5rem; margin-bottom: 0.375rem; min-height: 1.25rem;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; margin-bottom: 0.375rem; min-height: 2rem;
 }
 .agent-toast .header-left {
   display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1;
 }
+.agent-toast .header-left .event-chip { flex: 0 0 auto; }
 .agent-toast .agent-badge {
   display: inline-flex; align-items: center; justify-content: center;
   flex: 0 0 auto; width: 2rem; height: 2rem; border-radius: 0.625rem;
@@ -35,9 +41,13 @@ const CSS = `
   border-radius: 0.375rem; padding: 0; flex-shrink: 0;
 }
 .agent-toast .close-btn:hover { background: var(--light-bg); color: var(--accent); }
-.agent-toast .meta-row {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; margin-bottom: 0.375rem;
+.agent-toast .meta-row { display: flex; align-items: center; gap: 0.375rem; margin-bottom: 0.5rem; }
+.agent-toast .project-row {
+  display: flex; align-items: center; min-width: 0; gap: 0.3125rem;
+  margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.6875rem; line-height: 1.3;
 }
+.agent-toast .project-icon { flex: 0 0 auto; color: #94a3b8; font-size: 0.75rem; }
+.agent-toast .project-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agent-toast .chip {
   display: inline-flex; align-items: center; max-width: 100%; height: 1.25rem;
   padding: 0 0.4375rem; border-radius: 0.25rem; font-size: 0.6875rem; font-weight: 600;
@@ -56,14 +66,37 @@ const CSS = `
   word-break: break-all;
 }
 .agent-toast .body-text {
-  position: relative;
-  font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.375rem 0;
-  word-break: break-word; cursor: default;
-  overflow-y: hidden; overflow-x: hidden;
-  max-height: 3.3rem;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-  transition: max-height 0.2s ease;
+  position: relative; font-size: 0.75rem; color: var(--body); line-height: 1.45;
+  word-break: break-word; cursor: default; overflow-y: hidden; overflow-x: hidden;
+  max-height: 3.3rem; display: -webkit-box; -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical; transition: max-height 0.2s ease;
 }
+.agent-toast .body-text.is-interactive { cursor: pointer; }
+.agent-toast .body-text.is-clamped::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1.75rem;
+  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.94)); pointer-events: none;
+}
+.agent-toast .body-text.is-clamped:hover {
+  text-decoration: underline; text-decoration-color: rgba(15, 23, 42, 0.35); text-underline-offset: 3px;
+}
+.agent-toast .body-text.is-expanded {
+  display: block; -webkit-line-clamp: unset; max-height: 10.875rem; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent;
+}
+.agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
+.agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+.agent-toast .body-box {
+  margin-bottom: 0.625rem; padding: 0.625rem 0.75rem;
+  background: rgba(248, 250, 252, 0.9); border: 0.0625rem solid #e2e8f0;
+  border-radius: 0.75rem;
+}
+.agent-toast .body-box .body-text { margin: 0; }
+.agent-toast .footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  min-height: 2rem; padding-top: 0.625rem;
+  border-top: 0.0625rem solid rgba(226, 232, 240, 0.9);
+}
+.agent-toast .timestamp { color: #94a3b8; font-size: 0.625rem; white-space: nowrap; }
 .agent-toast .body-text.is-interactive { cursor: pointer; }
 .agent-toast .body-text.is-clamped::after {
   content: '';
@@ -223,7 +256,7 @@ const CSS = `
 .agent-toast .dump::-webkit-scrollbar-track,
 .perm-card .dump::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
 .perm-card .dump-wrap { position: relative; margin-top: 0.5rem; }
-.perm-card { display: flex; flex-direction: column; width: 100%; font-family: system-ui, sans-serif; }
+.perm-card { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 0.875rem; border: 0.0625rem solid #FDE68A; border-radius: 0.75rem; background: #ffffff; box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, #F59E0B 24%, transparent), inset 0.25rem 0 0 #F59E0B; font-family: system-ui, sans-serif; }
 .perm-card .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.375rem; }
 .perm-card .header-left { display: flex; align-items: center; gap: 0.5rem; }
 .perm-card .pulse-dot {
@@ -241,7 +274,10 @@ const CSS = `
   border-radius: 0.25rem; padding: 0.0625rem 0.375rem;
 }
 .perm-card .tool-summary { font-size: 0.75rem; color: #b45309; margin: 0.25rem 0 0; font-family: ui-monospace, monospace; word-break: break-all; }
-.perm-card .actions { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.perm-card .actions {
+  display: flex; flex-wrap: wrap; gap: 0.375rem; padding-top: 0.625rem;
+  border-top: 0.0625rem solid rgba(245, 158, 11, 0.22);
+}
 .perm-card .btn { border: none; border-radius: 0.375rem; height: 1.75rem; padding: 0 0.625rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
 .perm-card .btn-allow { background: #059669; color: #fff; }
 .perm-card .btn-deny { background: #fee2e2; color: #991b1b; }
@@ -306,6 +342,13 @@ function projectName(cwd) {
   if (!cwd) return ''
   const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
   return parts[parts.length - 1] || ''
+}
+
+function formatTimestamp(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const AGENT_BADGES = {
@@ -599,8 +642,8 @@ export default {
     const sessionId = p.sessionId || entry.sessionId || ''
     const theme = themeOf(entry.event)
     const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
-    const project = projectName(entry.cwd)
     const body = bodyPreview(entry)
+    const timestamp = formatTimestamp(entry.timestamp)
     const badge = agentBadge(entry.agentId)
     const gotoLabel = this.gotoFailed ? '未能定位窗口' : this.gotoBusy ? '正在前往…' : '前往会话'
     const bodyInteractive = this.bodyClamped || this.bodyExpanded
@@ -630,6 +673,7 @@ export default {
               ? h('svg', { viewBox: '0 0 24 24', fill: 'currentColor', width: '1rem', height: '1rem', 'aria-hidden': 'true' }, [h('path', { d: badge.icon })])
               : badge.label),
           h('h2', { class: 'title' }, title),
+          h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
         ]),
         h('button', {
           class: 'close-btn',
@@ -641,17 +685,14 @@ export default {
           },
         }, '×'),
       ]),
-      h('div', { class: 'meta-row' }, [
-        project && project !== title
-          ? h('span', { class: 'chip project-chip' }, project)
-          : !project
-            ? h('span', { class: 'chip project-chip muted' }, '未知项目')
-            : null,
-        h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
+      h('div', { class: 'project-row', title: entry.cwd || undefined }, [
+        h('span', { class: 'project-icon', 'aria-hidden': 'true' }, '▰'),
+        h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),
       ]),
       dump,
-      h('p', bodyProps, body),
-      h('div', { class: 'hint-row' }, [
+      h('div', { class: 'body-box' }, h('p', bodyProps, body)),
+      h('div', { class: 'footer' }, [
+        timestamp ? h('span', { class: 'timestamp' }, timestamp) : h('span'),
         h('button', {
           class: [
             'goto-btn',

@@ -330,6 +330,7 @@ function publishSession(entry, { gone = false } = {}) {
       actions: gone ? [] : [{ id: 'dismiss', label: '知道了' }],
       payload: {
         sessionId,
+        toastStyle: 'standalone',
         entry,
         debug: debugViewOf() !== 'off',
         debugView: debugViewOf(),
@@ -359,6 +360,7 @@ function publishPermission(id, data) {
       ],
       payload: {
         requestId: id,
+        toastStyle: 'standalone',
         agentId: data.agentId,
         toolName: permission.toolName,
         toolInput: permission.toolInput,
@@ -463,7 +465,7 @@ async function handleState(payload) {
       body: cardBody(data),
       level: data.event === 'PostToolUseFailure' || data.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
+      payload: { sessionId, toastStyle: 'standalone', entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
