@@ -58,12 +58,13 @@ const CSS = `
 .agent-toast .body-text {
   position: relative;
   font-size: 0.75rem; color: var(--body); line-height: 1.45; margin: 0 0 0.375rem 0;
-  word-break: break-word; cursor: pointer;
+  word-break: break-word; cursor: default;
   overflow-y: hidden; overflow-x: hidden;
   max-height: 3.3rem;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
   transition: max-height 0.2s ease;
 }
+.agent-toast .body-text.is-interactive { cursor: pointer; }
 .agent-toast .body-text.is-clamped::after {
   content: '';
   position: absolute; left: 0; right: 0; bottom: 0; height: 1.75rem;
@@ -602,6 +603,22 @@ export default {
     const body = bodyPreview(entry)
     const badge = agentBadge(entry.agentId)
     const gotoLabel = this.gotoFailed ? '未能定位窗口' : this.gotoBusy ? '正在前往…' : '前往会话'
+    const bodyInteractive = this.bodyClamped || this.bodyExpanded
+    const bodyProps = {
+      ref: 'bodyEl',
+      class: [
+        'body-text',
+        bodyInteractive ? 'is-interactive' : '',
+        this.bodyExpanded ? 'is-expanded' : this.bodyClamped ? 'is-clamped' : '',
+      ],
+    }
+    if (bodyInteractive) {
+      bodyProps.title = this.bodyExpanded ? '点击收起' : '点击展开'
+      bodyProps.onClick = (ev) => {
+        ev.stopPropagation()
+        this.bodyExpanded = !this.bodyExpanded
+      }
+    }
 
     return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
       h('div', { class: 'header' }, [
@@ -633,17 +650,7 @@ export default {
         h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
       ]),
       dump,
-      h('p', {
-        ref: 'bodyEl',
-        class: ['body-text', this.bodyExpanded ? 'is-expanded' : this.bodyClamped ? 'is-clamped' : ''],
-        title: this.bodyExpanded ? '点击收起' : this.bodyClamped ? '点击展开' : undefined,
-        onClick: (ev) => {
-          // 正文点击只管展开/收起；跳转只认「前往会话」按钮，短文本点击不冒泡触发
-          if (!this.bodyClamped && !this.bodyExpanded) return
-          ev.stopPropagation()
-          this.bodyExpanded = !this.bodyExpanded
-        },
-      }, body),
+      h('p', bodyProps, body),
       h('div', { class: 'hint-row' }, [
         h('button', {
           class: [
