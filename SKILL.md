@@ -98,7 +98,7 @@ description: >
 
 ### settings.mjs
 
-- Naive 白名单：`NAlert NButton NDatePicker NDivider NInput NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。**无 `NInputNumber`** → `NInput` + `Number()` 钳制。
+- Naive 白名单：`NAlert NButton NDatePicker NDivider NInput NInputNumber NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。数字设置优先使用 `NInputNumber`；需要文本兼容时再用 `NInput` + `Number()` 钳制。
 - `useMessage/useDialog` 必须在 `setup()` 内。
 - 根节点**零外 padding / 零 max-width**（宿主 `.plugin-detail` 管边距）；内部间距可以有。
 - 用户配置 `plugin.config.get/set`（整包）；需要 sidecar 同步时：`await plugin.config.set(cfg); await plugin.sidecar.request('setConfig', cfg)`（`bt-music/settings.mjs:194`）。

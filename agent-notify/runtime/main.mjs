@@ -266,6 +266,7 @@ let config = {
   showDebug: false,
   debugView: 'off',
   debugExpanded: false,
+  autoHideSeconds: 8,
   eventModes: { ...DEFAULT_MODE },
 }
 /** @type {Map<string, object>} sessionId -> entry */
@@ -312,6 +313,12 @@ function modeOf(event) {
   return config.eventModes[event] || DEFAULT_MODE[event] || 'off'
 }
 
+function autoHideMs() {
+  const seconds = Number(config.autoHideSeconds)
+  const clamped = Number.isFinite(seconds) ? Math.min(600, Math.max(3, seconds)) : 8
+  return Math.round(clamped * 1000)
+}
+
 function publishSession(entry, { gone = false } = {}) {
   const sessionId = entry.sessionId || 'unknown'
   const requestId = `publish-${++publishSeq}`
@@ -331,6 +338,7 @@ function publishSession(entry, { gone = false } = {}) {
       payload: {
         sessionId,
         toastStyle: 'standalone',
+        auto_hide_ms: gone ? 0 : autoHideMs(),
         entry,
         debug: debugViewOf() !== 'off',
         debugView: debugViewOf(),
@@ -465,7 +473,7 @@ async function handleState(payload) {
       body: cardBody(data),
       level: data.event === 'PostToolUseFailure' || data.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, toastStyle: 'standalone', entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
+      payload: { sessionId, toastStyle: 'standalone', auto_hide_ms: autoHideMs(), entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
@@ -569,6 +577,8 @@ function applyConfig(input = {}) {
     config.debugView = input.debugView
   }
   if (typeof input.debugExpanded === 'boolean') config.debugExpanded = input.debugExpanded
+  const seconds = Number(input.autoHideSeconds)
+  if (Number.isFinite(seconds)) config.autoHideSeconds = Math.min(600, Math.max(3, Math.round(seconds)))
   if (input.eventModes && typeof input.eventModes === 'object') {
     config.eventModes = { ...DEFAULT_MODE, ...input.eventModes }
   }

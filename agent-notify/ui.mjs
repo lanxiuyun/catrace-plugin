@@ -111,6 +111,14 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+.agent-toast .progress-track { display: none; }
+.agent-toast .progress-fill {
+  width: 100%; height: 100%; border-radius: inherit; background: var(--accent);
+  transform-origin: left center;
+  animation: agent-progress-shrink var(--toast-auto-hide-ms, 8000ms) linear forwards;
+}
+.agent-toast .progress-track.is-paused .progress-fill { animation-play-state: paused; }
+@keyframes agent-progress-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0; }
 .agent-toast .goto-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -487,6 +495,8 @@ export default {
   props: {
     event: { type: Object, required: true },
     isHovered: { type: Boolean, default: false },
+    remainingMs: { type: Number, default: 0 },
+    totalMs: { type: Number, default: 0 },
   },
   emits: ['close', 'action'],
   data() {
@@ -715,6 +725,11 @@ export default {
       ]),
       dump,
       h('p', bodyProps, body),
+      this.totalMs > 0
+        ? h('div', { class: ['progress-track', this.isHovered ? 'is-paused' : ''] }, [
+            h('div', { class: 'progress-fill' }),
+          ])
+        : null,
       h('div', { class: 'footer' }, [
         timestamp ? h('span', { class: 'timestamp', title: exactTimestamp || undefined }, timestamp) : h('span'),
         h('button', {
