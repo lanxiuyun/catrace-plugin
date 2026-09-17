@@ -1,10 +1,10 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, computed, onMounted } = vue
-const { NButton, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
+const { NButton, NInputNumber, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
 
 if (typeof h !== 'function') throw new Error('Vue runtime missing')
-if (!NButton || !NRadioGroup || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
+if (!NButton || !NInputNumber || !NRadioGroup || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
 if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
@@ -85,6 +85,7 @@ export default {
     const showDebug = ref(false)
     const debugView = ref('off')
     const debugExpanded = ref(false)
+    const autoHideSeconds = ref(8)
     const sidecarStale = ref(false)
 
     async function load() {
@@ -98,6 +99,10 @@ export default {
           debugView.value = showDebug.value ? 'raw' : 'off'
         }
         debugExpanded.value = raw && raw.debugExpanded === true
+        const seconds = Number(raw && raw.autoHideSeconds)
+        if (Number.isFinite(seconds) && seconds >= 3 && seconds <= 600) {
+          autoHideSeconds.value = Math.round(seconds)
+        }
       } catch {
         /* ignore */
       }
@@ -119,6 +124,7 @@ export default {
         showDebug: debugView.value !== 'off',
         debugView: debugView.value,
         debugExpanded: debugExpanded.value,
+        autoHideSeconds: autoHideSeconds.value,
         eventModes: { ...modes.value },
       }
       await plugin.config.set(cfg)
@@ -127,6 +133,13 @@ export default {
       } catch {
         /* ignore */
       }
+    }
+
+    function setAutoHideSeconds(value) {
+      const seconds = Number(value)
+      if (!Number.isFinite(seconds) || seconds < 3 || seconds > 600) return
+      autoHideSeconds.value = Math.round(seconds)
+      persistModes().catch((e) => message.error(e instanceof Error ? e.message : String(e)))
     }
 
     async function setDebugView(v) {
@@ -270,26 +283,40 @@ export default {
         section(
           '事件通知策略',
           '默认只对「需要你回来」的事件常驻；可按事件改成不通知 / 自动消失 / 常驻。',
-          EVENTS.map((ev) =>
-            h('div', { class: 'event-row', key: ev.id }, [
-              h('span', { class: 'event-name' }, ev.label),
-              h(
-                NRadioGroup,
-                {
-                  value: modes.value[ev.id],
-                  size: 'small',
-                  onUpdateValue: (v) => setMode(ev.id, v),
-                },
-                {
-                  default: () => [
-                    h(NRadioButton, { value: 'off' }, { default: () => '不通知' }),
-                    h(NRadioButton, { value: 'auto' }, { default: () => '自动消失' }),
-                    h(NRadioButton, { value: 'sticky' }, { default: () => '常驻' }),
-                  ],
-                },
-              ),
+          [
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '自动消失时间（秒）'),
+              h(NInputNumber, {
+                value: autoHideSeconds.value,
+                min: 3,
+                max: 600,
+                step: 1,
+                precision: 0,
+                style: 'width: 7.5rem',
+                onUpdateValue: setAutoHideSeconds,
+              }),
             ]),
-          ),
+            ...EVENTS.map((ev) => (
+              h('div', { class: 'event-row', key: ev.id }, [
+                h('span', { class: 'event-name' }, ev.label),
+                h(
+                  NRadioGroup,
+                  {
+                    value: modes.value[ev.id],
+                    size: 'small',
+                    onUpdateValue: (v) => setMode(ev.id, v),
+                  },
+                  {
+                    default: () => [
+                      h(NRadioButton, { value: 'off' }, { default: () => '不通知' }),
+                      h(NRadioButton, { value: 'auto' }, { default: () => '自动消失' }),
+                      h(NRadioButton, { value: 'sticky' }, { default: () => '常驻' }),
+                    ],
+                  },
+                ),
+              ])
+            )),
+          ],
         ),
       ])
   },
