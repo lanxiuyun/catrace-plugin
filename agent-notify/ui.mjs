@@ -118,10 +118,7 @@ const CSS = `
 }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
 .agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-.agent-toast .progress-track {
-  height: 0.1875rem; margin: 0 0 0.625rem; overflow: hidden;
-  border-radius: 999px; background: var(--light-bg);
-}
+.agent-toast .progress-track { display: none; }
 .agent-toast .progress-fill {
   width: 100%; height: 100%; border-radius: inherit; background: var(--accent);
   transform-origin: left center;
