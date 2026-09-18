@@ -1,6 +1,8 @@
 /** Agent notify toast — one card per sessionId; optional debug dump. */
 const { h } = globalThis.__CATRACE_VUE__ || {}
+const { NButton } = globalThis.__CATRACE_NAIVE__ || {}
 if (typeof h !== 'function') throw new Error('Catrace plugin Vue runtime missing')
+if (!NButton) throw new Error('Catrace plugin naive-ui runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-css'
 const CSS = `
@@ -35,12 +37,7 @@ const CSS = `
   color: var(--title); line-height: 1.3; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.agent-toast .close-btn {
-  width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center;
-  background: transparent; border: none; color: #9C8DB5; cursor: pointer;
-  border-radius: 0.375rem; padding: 0; flex-shrink: 0;
-}
-.agent-toast .close-btn:hover { background: var(--light-bg); color: var(--accent); }
+.agent-toast .close-btn { flex-shrink: 0; }
 .agent-toast .meta-row { display: flex; align-items: center; gap: 0.375rem; margin-bottom: 0.5rem; }
 .agent-toast .project-row {
   display: flex; align-items: center; min-width: 0; gap: 0.3125rem;
@@ -120,23 +117,6 @@ const CSS = `
 .agent-toast .progress-track.is-paused .progress-fill { animation-play-state: paused; }
 @keyframes agent-progress-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .agent-toast .hint-row { display: flex; justify-content: flex-end; margin-bottom: 0; }
-.agent-toast .goto-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 6.5rem; height: 1.75rem; padding: 0 0.875rem;
-  background: #1E293B; color: #ffffff;
-  font-size: 0.75rem; font-weight: 600; line-height: 1;
-  border: none; border-radius: 0.5rem; cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-}
-.agent-toast .goto-btn:hover { background: #0F172A; }
-.agent-toast .goto-btn:active:not(:disabled) { transform: scale(0.96); }
-.agent-toast .goto-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 0.1875rem rgba(30, 41, 59, 0.22);
-}
-.agent-toast .goto-btn:disabled { opacity: 0.82; }
-.agent-toast .goto-btn.is-busy { background: #334155; cursor: wait; }
-.agent-toast .goto-btn.is-failed { cursor: default; }
 .agent-toast .dump-wrap,
 .perm-card .dump-wrap {
   margin: 0.5rem 0 0.625rem;
@@ -168,28 +148,7 @@ const CSS = `
 .perm-card .dump-tools { display: flex; align-items: center; gap: 0.375rem; }
 .agent-toast .dump-tabs,
 .perm-card .dump-tabs {
-  display: flex; gap: 0.0625rem; padding: 0.0625rem;
-  border-radius: 0.3125rem; background: #e9e9e9;
-}
-.agent-toast .dump-tab,
-.perm-card .dump-tab {
-  border: none; border-radius: 0.25rem; height: 1.25rem; padding: 0 0.4375rem;
-  font-size: 0.625rem; font-weight: 700; cursor: pointer;
-  background: transparent; color: #8a8a8a;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
-}
-.agent-toast .dump-tab.is-on,
-.perm-card .dump-tab.is-on {
-  background: #ffffff; color: #475569;
-  box-shadow: 0 0.0625rem 0.125rem rgba(0, 0, 0, 0.1);
-}
-.agent-toast .dump-copy,
-.perm-card .dump-copy {
-  position: static; height: 1.25rem; padding: 0 0.5rem;
-  border: 0.0625rem solid #d6d6d6; border-radius: 0.3125rem;
-  font-size: 0.625rem; font-weight: 700; cursor: pointer;
-  background: #ffffff; color: #64748b;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  display: flex; gap: 0.25rem;
 }
 .agent-toast .dump-fields,
 .perm-card .dump-fields {
@@ -319,16 +278,6 @@ const CSS = `
   min-height: 2rem; margin-top: 0.75rem; padding-top: 0.625rem; border-top: 0.0625rem solid rgba(226, 232, 240, 0.9);
 }
 .perm-card .footer-actions { display: flex; align-items: center; gap: 0.375rem; }
-.perm-card .btn { border: none; border-radius: 0.5rem; height: 1.75rem; padding: 0 0.75rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
-.perm-card .btn-deny { background: #fee2e2; color: #991b1b; }
-.perm-card .btn-prev { background: #f1f5f9; color: #334155; }
-.perm-card .btn-prev:disabled, .perm-card .goto-btn:disabled { opacity: 0.55; cursor: default; }
-.perm-card .goto-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 5.5rem; height: 1.75rem; padding: 0 0.875rem;
-  background: #1E293B; color: #ffffff; font-size: 0.75rem; font-weight: 600;
-  border: none; border-radius: 0.5rem; cursor: pointer;
-}
 `
 
 const EVENT_LABEL = {
@@ -795,22 +744,23 @@ export default {
       const controls = this.dumpExpanded
         ? h('div', { class: 'dump-tools' }, [
             h('div', { class: 'dump-tabs' }, [
-              h('button', {
-                class: ['dump-tab', mode === 'common' ? 'is-on' : ''],
-                type: 'button',
+              h(NButton, {
+                size: 'tiny',
+                secondary: true,
+                type: mode === 'common' ? 'primary' : 'default',
                 onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'common' },
-              }, '常用'),
-              h('button', {
-                class: ['dump-tab', mode === 'raw' ? 'is-on' : ''],
-                type: 'button',
+              }, { default: () => '常用' }),
+              h(NButton, {
+                size: 'tiny',
+                secondary: true,
+                type: mode === 'raw' ? 'primary' : 'default',
                 onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'raw' },
-              }, '原始'),
+              }, { default: () => '原始' }),
             ]),
-            h('button', {
-              class: 'dump-copy',
-              type: 'button',
+            h(NButton, {
+              size: 'tiny',
               onClick: (ev) => { ev.stopPropagation(); this.copyDump() },
-            }, this.copied ? '已复制' : '复制'),
+            }, { default: () => this.copied ? '已复制' : '复制' }),
           ])
         : null
       return h('div', { class: 'dump-wrap' }, [
@@ -894,45 +844,48 @@ export default {
           : h('div', { class: 'tool-block' }, [h('span', { class: 'tool-name' }, toolName)])
       const footer = questions.length
         ? h('div', { class: 'footer' }, [
-            h('button', {
-              class: 'btn btn-deny',
-              type: 'button',
+            h(NButton, {
+              size: 'small',
+              type: 'error',
+              secondary: true,
               disabled: this.permBusy,
               onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
-            }, '拒绝'),
+            }, { default: () => '拒绝' }),
             h('div', { class: 'footer-actions' }, [
               questions.length > 1
                 ? h('span', { class: 'question-progress' }, `${this.permStep + 1} / ${questions.length}`)
                 : null,
               questions.length > 1
-                ? h('button', {
-                    class: 'btn btn-prev',
-                    type: 'button',
+                ? h(NButton, {
+                    size: 'small',
                     disabled: this.permStep <= 0 || this.permBusy,
                     onClick: (ev) => { ev.stopPropagation(); if (this.permStep > 0) this.permStep -= 1 },
-                  }, '上一题')
+                  }, { default: () => '上一题' })
                 : null,
-              h('button', {
-                class: 'goto-btn',
-                type: 'button',
+              h(NButton, {
+                size: 'small',
+                type: 'primary',
+                loading: this.permBusy && isLast,
                 disabled: this.permBusy || !currentComplete || (isLast && !allComplete),
                 onClick: (ev) => { ev.stopPropagation(); this.nextOrSubmitPermission(questions) },
-              }, isLast ? (this.permBusy ? '提交中…' : '提交') : '下一题'),
+              }, { default: () => (isLast ? '提交' : '下一题') }),
             ]),
           ])
         : h('div', { class: 'footer' }, [
-            h('button', {
-              class: 'btn btn-deny',
-              type: 'button',
+            h(NButton, {
+              size: 'small',
+              type: 'error',
+              secondary: true,
               disabled: this.permBusy,
               onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
-            }, '拒绝'),
-            h('button', {
-              class: 'goto-btn',
-              type: 'button',
+            }, { default: () => '拒绝' }),
+            h(NButton, {
+              size: 'small',
+              type: 'primary',
+              loading: this.permBusy,
               disabled: this.permBusy,
               onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('allow') },
-            }, this.permBusy ? '处理中…' : '允许'),
+            }, { default: () => '允许' }),
           ])
       return h('div', { class: 'perm-card', style: themeStyle(themeOf('PermissionRequest')) }, [
         h('div', { class: 'header' }, [
@@ -995,15 +948,17 @@ export default {
           h('h2', { class: 'title' }, title),
           h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
         ]),
-        h('button', {
+        h(NButton, {
           class: 'close-btn',
-          type: 'button',
+          size: 'tiny',
+          quaternary: true,
+          circle: true,
           'aria-label': 'Close',
           onClick: (ev) => {
             ev.stopPropagation()
             this.$emit('close')
           },
-        }, '×'),
+        }, { default: () => '×' }),
       ]),
       h('div', { class: 'project-row', title: entry.cwd || undefined }, [
         h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),
@@ -1017,21 +972,17 @@ export default {
         : null,
       h('div', { class: 'footer' }, [
         timestamp ? h('span', { class: 'timestamp', title: exactTimestamp || undefined }, timestamp) : h('span'),
-        h('button', {
-          class: [
-            'goto-btn',
-            this.gotoBusy ? 'is-busy' : '',
-            this.gotoFailed ? 'is-failed' : '',
-          ],
-          type: 'button',
+        h(NButton, {
+          size: 'small',
+          type: this.gotoFailed ? 'error' : 'primary',
+          loading: this.gotoBusy,
           disabled: this.gotoBusy,
-          'aria-busy': this.gotoBusy ? 'true' : 'false',
           title: this.gotoBusy ? '正在定位会话窗口' : '聚焦该会话所在的应用或终端窗口',
           onClick: (ev) => {
             ev.stopPropagation()
             this.gotoSession()
           },
-        }, gotoLabel),
+        }, { default: () => gotoLabel }),
       ]),
     ])
   },
