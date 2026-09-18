@@ -544,7 +544,6 @@ export default {
       timestampTimer: null,
       gotoFailed: false,
       gotoBusy: false,
-      gotoTimer: null,
       permStep: 0,
       permAnswers: {},
       permBusy: false,
@@ -577,7 +576,6 @@ export default {
   },
   beforeUnmount() {
     if (this.timestampTimer) clearInterval(this.timestampTimer)
-    if (this.gotoTimer) clearTimeout(this.gotoTimer)
   },
   methods: {
     permAnswer(index) {
@@ -684,11 +682,6 @@ export default {
     },
     gotoFailedMark() {
       this.gotoFailed = true
-      if (this.gotoTimer) clearTimeout(this.gotoTimer)
-      this.gotoTimer = setTimeout(() => {
-        this.gotoFailed = false
-        this.gotoTimer = null
-      }, 2000)
       const beep = plugin && plugin.shell && plugin.shell.beep
       if (beep) Promise.resolve(beep()).catch(() => {})
     },
