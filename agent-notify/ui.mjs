@@ -87,27 +87,6 @@ const CSS = `
   border-top: 0.0625rem solid rgba(226, 232, 240, 0.9);
 }
 .agent-toast .timestamp { color: #94a3b8; font-size: 0.625rem; white-space: nowrap; }
-.agent-toast .body-text.is-interactive { cursor: pointer; }
-.agent-toast .body-text.is-clamped::after {
-  content: '';
-  position: absolute; left: 0; right: 0; bottom: 0; height: 1.75rem;
-  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.94));
-  pointer-events: none;
-}
-.agent-toast .body-text.is-clamped:hover {
-  text-decoration: underline;
-  text-decoration-color: rgba(15, 23, 42, 0.35);
-  text-underline-offset: 3px;
-}
-.agent-toast .body-text.is-expanded {
-  display: block; -webkit-line-clamp: unset;
-  max-height: 10.875rem;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
-.agent-toast .body-text.is-expanded::-webkit-scrollbar { width: 0.375rem; }
-.agent-toast .body-text.is-expanded::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
 .agent-toast .progress-track { display: none; }
 .agent-toast .progress-fill {
   width: 100%; height: 100%; border-radius: inherit; background: var(--accent);

@@ -9,7 +9,7 @@ Claude Code、ZCode、Codex、Gemini、Kimi 的 hook 都通过 stdin 发送 JSON
 ```text
 hook_raw_data（Agent 原始 JSON）
   → runtime/hook.cjs 注入 agentId / catrace_hook_pid / catrace_hook_ppid 并转发
-  → runtime/main.mjs normalizeHookData()
+  → runtime/hook-data.mjs normalizeHookData()
   → CatraceHookData（插件内部统一结构）
   → event.payload.entry
   → runtime/ui.mjs

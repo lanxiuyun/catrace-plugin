@@ -1,266 +1,24 @@
-import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import readline from 'node:readline'
-import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 import { focusExternalWindow } from './focus-windows.mjs'
 import { publishTestCard } from './preview-cards.mjs'
+import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS } from './constants.mjs'
+import { cacheKey, cardBody, cardTitle, createTitleCache, normalizeHookData } from './hook-data.mjs'
+import { createPidChainCache } from './pid-chain.mjs'
+import { createPermissionStore, elicitationQuestions } from './permission.mjs'
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.CATRACE_AGENT_NOTIFY_PORT) || 23456
-const PERM_WAIT_MS = 540_000
-const DEDUP_MS = 8000
 const TITLE_CACHE_PATH = path.join(__dirname, 'cache', 'session-titles.json')
-const TITLE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
-const TITLE_MAX_LENGTH = 120
 
-function projectName(cwd) {
-  if (!cwd) return ''
-  const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts[parts.length - 1] || ''
-}
-
-const KNOWN = [
-  'SessionStart',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'Stop',
-  'StopFailure',
-  'Notification',
-  'PermissionRequest',
-]
-const DEFAULT_MODE = {
-  SessionStart: 'auto',
-  UserPromptSubmit: 'auto',
-  PreToolUse: 'off',
-  PostToolUse: 'off',
-  PostToolUseFailure: 'off',
-  Stop: 'sticky',
-  StopFailure: 'sticky',
-  Notification: 'sticky',
-  PermissionRequest: 'sticky',
-}
-const EVENT_ALIASES = {
-  BeforeAgent: 'UserPromptSubmit',
-  AfterAgent: 'Stop',
-  BeforeTool: 'PreToolUse',
-  AfterTool: 'PostToolUse',
-}
-
-const EVENT_BODY = {
-  SessionStart: '会话已开始',
-  UserPromptSubmit: '正在处理你的请求',
-  PreToolUse: '正在调用工具',
-  PostToolUse: '工具调用完成',
-  PostToolUseFailure: '工具调用失败',
-  Stop: '本轮任务已完成，等你继续',
-  StopFailure: '执行中断，请查看终端',
-  Notification: '需要你回来看一眼',
-}
-
-const titleCache = new Map()
-
-function loadTitleCache() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(TITLE_CACHE_PATH, 'utf8'))
-    const now = Date.now()
-    for (const [key, value] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
-      if (value && typeof value.title === 'string' && now - Number(value.ts || 0) < TITLE_CACHE_TTL_MS) {
-        titleCache.set(key, { title: value.title, ts: Number(value.ts), pinned: value.pinned === true })
-      }
-    }
-  } catch {
-    /* cache is optional */
-  }
-}
-
-function saveTitleCache() {
-  try {
-    const now = Date.now()
-    const out = {}
-    for (const [key, value] of titleCache) {
-      if (now - value.ts < TITLE_CACHE_TTL_MS) out[key] = value
-    }
-    fs.mkdirSync(path.dirname(TITLE_CACHE_PATH), { recursive: true })
-    fs.writeFileSync(TITLE_CACHE_PATH, `${JSON.stringify(out, null, 2)}\n`, 'utf8')
-  } catch (error) {
-    log('save title cache failed', { error: String(error) }, 'warn')
-  }
-}
-
-function cleanTitle(value) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
-  return text.length > TITLE_MAX_LENGTH ? `${text.slice(0, TITLE_MAX_LENGTH - 1)}…` : text
-}
-
-function cacheKey(agentId, sessionId) {
-  return `${agentId || 'unknown'}:${sessionId || 'unknown'}`
-}
-
-// 会话标题优先级：payload.session_title（--name、/rename 或宿主自动命名，pinned，
-// 不被 prompt 覆盖）> 缓存 > UserPromptSubmit 首条 prompt 填空（非 pinned，定名后
-// 不随后续 prompt 变化）。不读 transcript：各家落盘滞后，ZCode 的 transcript_path
-// 还是一次性临时目录，metadata.json 永远不在旁边。
-function deriveSessionTitle(payload, agentId, sessionId, event) {
-  const key = cacheKey(agentId, sessionId)
-  const explicit = cleanTitle(payload.session_title || payload.sessionTitle)
-  if (explicit) {
-    const cached = titleCache.get(key)
-    if (!cached || !cached.pinned || cached.title !== explicit) {
-      titleCache.set(key, { title: explicit, ts: Date.now(), pinned: true })
-      saveTitleCache()
-    }
-    return explicit
-  }
-  const cached = titleCache.get(key)
-  if (cached && Date.now() - cached.ts < TITLE_CACHE_TTL_MS) return cached.title
-  if (event === 'UserPromptSubmit') {
-    const fromPrompt = cleanTitle(payload.prompt)
-    if (fromPrompt) {
-      titleCache.set(key, { title: fromPrompt, ts: Date.now(), pinned: false })
-      saveTitleCache()
-      return fromPrompt
-    }
-  }
-  return ''
-}
-
-function firstString(...values) {
-  return values.find((value) => typeof value === 'string' && value.trim())?.trim() || ''
-}
-
-// —— 前往会话：终端窗口进程链 ——
-// hook 只带得到直接父 pid，祖先要靠一次全量进程快照向上爬。hook 的直接父可能是
-// CLI 的临时 shell 包装（cmd /c），只在 hook 运行期间存活，所以链必须在收到事件时
-// 立刻爬完并按会话缓存；之后的事件直接用缓存，等不回爬已经死掉的中间进程。
-const PID_CHAIN_MAX_DEPTH = 20
-const PID_CHAIN_MAX_CACHED = 500
-const PID_CHAIN_FAIL_TTL_MS = 30_000
-const PID_CHAIN_SNAPSHOT_TIMEOUT_MS = 3_000
-/** @type {Map<string, number[]>} `agentId:sessionId` -> 进程链（由内向外） */
-const pidChainCache = new Map()
-const pidChainInflight = new Map()
-const pidChainFailAt = new Map()
-
-function execFileText(file, args, timeoutMs) {
-  return new Promise((resolve) => {
-    execFile(file, args, { timeout: timeoutMs, windowsHide: true, encoding: 'utf8' }, (err, stdout) => {
-      resolve(err ? '' : String(stdout))
-    })
-  })
-}
-
-async function processParentMap() {
-  const parents = new Map()
-  let out
-  if (process.platform === 'win32') {
-    out = await execFileText(
-      'powershell.exe',
-      [
-        '-NoProfile', '-NonInteractive', '-Command',
-        'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "{0} {1}" -f $_.ProcessId, $_.ParentProcessId }',
-      ],
-      PID_CHAIN_SNAPSHOT_TIMEOUT_MS,
-    )
-  } else {
-    out = await execFileText('ps', ['-axo', 'pid=,ppid='], 4_000)
-  }
-  for (const line of out.split(/\r?\n/)) {
-    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
-    if (m) parents.set(Number(m[1]), Number(m[2]))
-  }
-  return parents
-}
-
-async function capturePidChain(hookPpid) {
-  if (!hookPpid || hookPpid <= 1) return []
-  const parents = await processParentMap()
-  const chain = []
-  let pid = hookPpid
-  while (pid > 1 && !chain.includes(pid) && chain.length < PID_CHAIN_MAX_DEPTH) {
-    chain.push(pid)
-    pid = parents.get(pid) || 0
-  }
-  return chain
-}
-
-async function ensurePidChain(key, hookPpid) {
-  const cached = pidChainCache.get(key)
-  if (cached) return cached
-  const failedAt = pidChainFailAt.get(key)
-  if (failedAt && Date.now() - failedAt < PID_CHAIN_FAIL_TTL_MS) return []
-  const pending = pidChainInflight.get(key)
-  if (pending) return pending
-  const task = capturePidChain(hookPpid)
-    .then((chain) => {
-      if (chain.length) {
-        if (pidChainCache.size >= PID_CHAIN_MAX_CACHED) {
-          for (const stale of [...pidChainCache.keys()].slice(0, PID_CHAIN_MAX_CACHED / 2)) {
-            pidChainCache.delete(stale)
-          }
-        }
-        pidChainCache.set(key, chain)
-      } else {
-        pidChainFailAt.set(key, Date.now())
-      }
-      return chain
-    })
-    .finally(() => pidChainInflight.delete(key))
-  pidChainInflight.set(key, task)
-  return task
-}
-
-function normalizeHookData(raw, agentId = 'unknown') {
-  const rawEvent = raw.event || raw.hook_event_name || raw.hookEventName || ''
-  const event = EVENT_ALIASES[rawEvent] || rawEvent
-  const sessionId = firstString(raw.session_id, raw.sessionId) || 'unknown'
-  const cwd = firstString(raw.cwd, raw.working_directory)
-  const sessionTitle = deriveSessionTitle(raw, agentId, sessionId, event)
-  let message = firstString(
-    raw.last_assistant_message,
-    raw.lastAssistantMessage,
-    raw.responsePreview,
-    raw.response_preview,
-    raw.responseText,
-    raw.response_text,
-    raw.prompt,
-  )
-  // UserPromptSubmit 的标题就是 prompt 摘要时，正文不再回显同一句
-  if (event === 'UserPromptSubmit' && message && cleanTitle(message) === sessionTitle) message = ''
-  const normalizedAgentId = agentId !== 'unknown' ? agentId : raw.agentId || 'unknown'
-  return {
-    agentId: normalizedAgentId,
-    event,
-    sessionId,
-    sessionTitle,
-    projectName: projectName(cwd),
-    cwd,
-    timestamp: firstString(raw.timestamp, raw.created_at) || new Date().toISOString(),
-    message,
-    hookPpid: Number(raw.catrace_hook_ppid ?? raw.hook_ppid) || 0,
-    permission: event === 'PermissionRequest' ? {
-      toolName: firstString(raw.tool_name, raw.toolName, raw.name) || '工具调用',
-      toolInput: raw.tool_input ?? raw.toolInput,
-    } : undefined,
-    raw,
-  }
-}
-
-
-function cardTitle(entry) {
-  const named = entry.sessionTitle && String(entry.sessionTitle).trim()
-  if (named) return named
-  return entry.projectName || projectName(entry.cwd) || 'AI 助手'
-}
-
-function cardBody(entry) {
-  return entry.message || EVENT_BODY[entry.event] || '状态已更新'
-}
+const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
+const log = (message, data, level = 'info') => send({ v: 1, op: 'log', level, message, data })
+const { loadTitleCache, deriveSessionTitle } = createTitleCache({ cachePath: TITLE_CACHE_PATH, log })
+const { ensurePidChain } = createPidChainCache()
 
 let config = {
   enabled: true,
@@ -272,17 +30,11 @@ let config = {
 }
 /** @type {Map<string, object>} sessionId -> entry */
 const stickyEntries = new Map()
-/** @type {Map<number, { res: http.ServerResponse, sessionId: string, timer: NodeJS.Timeout }>} */
-const pendingPerm = new Map()
 const dedup = new Map()
-let permId = 1
 let publishSeq = 0
 const publishRequests = new Map()
 const sessionEventIds = new Map()
 let server = null
-
-const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
-const log = (message, data, level = 'info') => send({ v: 1, op: 'log', level, message, data })
 
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
@@ -320,6 +72,14 @@ function autoHideMs() {
   return Math.round(clamped * 1000)
 }
 
+function debugPayload() {
+  return {
+    debug: debugViewOf() !== 'off',
+    debugView: debugViewOf(),
+    debugExpanded: config.debugExpanded,
+  }
+}
+
 function publishSession(entry, { gone = false } = {}) {
   const sessionId = entry.sessionId || 'unknown'
   const requestId = `publish-${++publishSeq}`
@@ -332,7 +92,7 @@ function publishSession(entry, { gone = false } = {}) {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
       title: cardTitle(entry),
-      body: cardBody(entry),
+      body: cardBody(entry, EVENT_BODY),
       level: entry.event === 'PostToolUseFailure' || entry.event === 'StopFailure' ? 'error' : 'info',
       sticky: !gone,
       actions: gone ? [] : [{ id: 'dismiss', label: '知道了' }],
@@ -341,9 +101,7 @@ function publishSession(entry, { gone = false } = {}) {
         toastStyle: 'standalone',
         auto_hide_ms: gone ? 0 : autoHideMs(),
         entry,
-        debug: debugViewOf() !== 'off',
-        debugView: debugViewOf(),
-        debugExpanded: config.debugExpanded,
+        ...debugPayload(),
         raw: entry.raw || null,
       },
       dedupeKey: `agent-notify:session:${sessionId}`,
@@ -378,9 +136,7 @@ function publishPermission(id, data) {
         projectName: data.projectName,
         cwd: data.cwd,
         entry: data,
-        debug: debugViewOf() !== 'off',
-        debugView: debugViewOf(),
-        debugExpanded: config.debugExpanded,
+        ...debugPayload(),
         raw: data.raw,
       },
       dedupeKey: `agent-notify:perm:${id}`,
@@ -388,126 +144,12 @@ function publishPermission(id, data) {
   })
 }
 
-function elicitationQuestions(toolInput) {
-  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return []
-  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
-  return questions.filter((item) => item && typeof item.question === 'string' && item.question.trim())
-}
-
-function remapIndexedElicitationAnswers(toolInput, indexedAnswers) {
-  const questions = elicitationQuestions(toolInput)
-  const source = indexedAnswers && typeof indexedAnswers === 'object' && !Array.isArray(indexedAnswers)
-    ? indexedAnswers
-    : {}
-  const answers = {}
-  for (let i = 0; i < questions.length; i++) {
-    if (!Object.prototype.hasOwnProperty.call(source, String(i))) continue
-    const value = source[String(i)]
-    if (typeof value === 'string' && value.trim()) answers[questions[i].question] = value.trim()
-  }
-  return answers
-}
-
-function validateIndexedElicitationAnswers(toolInput, indexedAnswers) {
-  const questions = elicitationQuestions(toolInput)
-  if (!questions.length) return { ok: false, reason: 'elicitation has no questions' }
-  if (!indexedAnswers || typeof indexedAnswers !== 'object' || Array.isArray(indexedAnswers)) {
-    return { ok: false, reason: 'elicitation answers must be an indexed object' }
-  }
-  const expected = questions.map((_q, index) => String(index))
-  const keys = Object.keys(indexedAnswers)
-  if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) {
-    return { ok: false, reason: 'elicitation answers do not match all questions' }
-  }
-  const answers = remapIndexedElicitationAnswers(toolInput, indexedAnswers)
-  if (Object.keys(answers).length !== questions.length) {
-    return { ok: false, reason: 'elicitation answers are incomplete' }
-  }
-  return { ok: true, answers }
-}
-
-function buildElicitationUpdatedInput(toolInput, answers) {
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
-  const questions = Array.isArray(input.questions) ? input.questions : []
-  return { ...input, questions, answers }
-}
-
-function finishPerm(id, decision, extra = {}) {
-  const pending = pendingPerm.get(id)
-  if (!pending) return false
-  clearTimeout(pending.timer)
-  pendingPerm.delete(id)
-  let body = '{}'
-  if (decision === 'allow') {
-    const payload = { behavior: 'allow' }
-    if (extra.updatedInput) payload.updatedInput = extra.updatedInput
-    body = JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PermissionRequest',
-        decision: payload,
-      },
-    })
-  } else if (decision === 'deny') {
-    body = JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PermissionRequest',
-        decision: { behavior: 'deny' },
-      },
-    })
-  }
-  try {
-    cors(pending.res, 200, body)
-  } catch {
-    /* already closed */
-  }
-  return true
-}
-
-function handlePermissionDecideHttp(payload, res) {
-  if (!payload) {
-    cors(res, 400, JSON.stringify({ ok: false, error: 'invalid json' }))
-    return
-  }
-  const id = Number(payload.id)
-  const decision = payload.decision
-  let answers = payload.answers
-  if (typeof answers === 'string') {
-    try { answers = JSON.parse(answers) } catch { answers = null }
-  }
-  log('permission decide', { id, decision, answerKeys: answers && Object.keys(answers) }, 'info')
-  const result = Number.isInteger(id) && id > 0 ? decidePermission(id, decision, answers) : { ok: false, error: 'invalid id' }
-  cors(res, result.ok ? 200 : 409, JSON.stringify(result))
-}
-
-function decidePermission(id, decision, indexedAnswers) {
-  const pending = pendingPerm.get(id)
-  if (!pending) return { ok: false, error: 'permission request expired' }
-  if (decision === 'deny') {
-    finishPerm(id, 'deny')
-    return { ok: true }
-  }
-  if (decision !== 'allow') return { ok: false, error: 'invalid decision' }
-  const questions = elicitationQuestions(pending.toolInput)
-  if (questions.length) {
-    const validated = validateIndexedElicitationAnswers(pending.toolInput, indexedAnswers)
-    if (!validated.ok) {
-      log('elicitation rejected', { id, reason: validated.reason }, 'warn')
-      return { ok: false, error: validated.reason }
-    }
-    finishPerm(id, 'allow', {
-      updatedInput: buildElicitationUpdatedInput(pending.toolInput, validated.answers),
-    })
-    return { ok: true }
-  }
-  finishPerm(id, 'allow')
-  return { ok: true }
-}
-
-function timeoutSessionPerms(sessionId) {
-  for (const [id, p] of pendingPerm) {
-    if (p.sessionId === sessionId) finishPerm(id, 'timeout')
-  }
-}
+const permissions = createPermissionStore({
+  cors,
+  log,
+  permWaitMs: PERM_WAIT_MS,
+  publishPermission,
+})
 
 function dismissSessionCard(sessionId) {
   if (!sessionId || sessionId === 'unknown') return
@@ -519,7 +161,7 @@ function dismissSessionCard(sessionId) {
 
 async function handleState(payload) {
   if (!config.enabled) return
-  const data = normalizeHookData(payload, payload.agentId)
+  const data = normalizeHookData(payload, payload.agentId, deriveSessionTitle)
   const { event, sessionId } = data
   // HTTP response 等待首次进程链捕获完成，保证短命 hook 父进程在快照期间仍存活。
   if (data.hookPpid && sessionId && sessionId !== 'unknown') {
@@ -537,7 +179,7 @@ async function handleState(payload) {
     }
   }
   if (event === 'UserPromptSubmit' && sessionId && sessionId !== 'unknown') {
-    timeoutSessionPerms(sessionId)
+    permissions.timeoutSessionPerms(sessionId)
     if (stickyEntries.has(sessionId)) {
       stickyEntries.delete(sessionId)
       dismissSessionCard(sessionId)
@@ -564,17 +206,24 @@ async function handleState(payload) {
       eventType: 'agent-notify.state',
       kind: 'agent-notify',
       title: cardTitle(data),
-      body: cardBody(data),
+      body: cardBody(data, EVENT_BODY),
       level: data.event === 'PostToolUseFailure' || data.event === 'StopFailure' ? 'error' : 'info',
       sticky: false,
-      payload: { sessionId, toastStyle: 'standalone', auto_hide_ms: autoHideMs(), entry: data, debug: debugViewOf() !== 'off', debugView: debugViewOf(), debugExpanded: config.debugExpanded, raw: data.raw },
+      payload: {
+        sessionId,
+        toastStyle: 'standalone',
+        auto_hide_ms: autoHideMs(),
+        entry: data,
+        ...debugPayload(),
+        raw: data.raw,
+      },
       dedupeKey: `agent-notify:session:${sessionId}`,
     },
   })
 }
 
 function handlePermission(req, res, payload, agentId) {
-  const data = normalizeHookData(payload, agentId || payload.agentId)
+  const data = normalizeHookData(payload, agentId || payload.agentId, deriveSessionTitle)
   const mode = modeOf('PermissionRequest')
   if (mode === 'off') {
     cors(res, 200, JSON.stringify({
@@ -585,18 +234,7 @@ function handlePermission(req, res, payload, agentId) {
     }))
     return
   }
-  const id = permId++
-  const sessionId = data.sessionId
-  if (sessionId && sessionId !== 'unknown') timeoutSessionPerms(sessionId)
-  const timer = setTimeout(() => finishPerm(id, 'timeout'), PERM_WAIT_MS)
-  pendingPerm.set(id, {
-    res,
-    sessionId,
-    timer,
-    toolName: data.permission && data.permission.toolName,
-    toolInput: data.permission && data.permission.toolInput,
-  })
-  publishPermission(id, data)
+  permissions.startPermission(req, res, data)
 }
 
 function readBody(req) {
@@ -641,7 +279,7 @@ function startHttp() {
     }
     if (url === '/permission-decide') {
       if (req.method === 'GET') {
-        handlePermissionDecideHttp({
+        permissions.handlePermissionDecideHttp({
           id: requestUrl.searchParams.get('id'),
           decision: requestUrl.searchParams.get('decision'),
           answers: requestUrl.searchParams.get('answers'),
@@ -649,7 +287,7 @@ function startHttp() {
         return
       }
       if (req.method === 'POST') {
-        handlePermissionDecideHttp(await readBody(req), res)
+        permissions.handlePermissionDecideHttp(await readBody(req), res)
         return
       }
     }
@@ -685,7 +323,7 @@ function stopHttp() {
   if (!server) return
   server.close()
   server = null
-  for (const id of [...pendingPerm.keys()]) finishPerm(id, 'timeout')
+  for (const id of [...permissions.pendingPerm.keys()]) permissions.finishPerm(id, 'timeout')
 }
 
 function applyConfig(input = {}) {
@@ -732,10 +370,10 @@ function handleRequest(message) {
           kind: publishTestCard(String(params.kind || 'stop'), {
             publishSession,
             publishPermission,
-            pendingPerm,
-            finishPerm,
+            pendingPerm: permissions.pendingPerm,
+            finishPerm: permissions.finishPerm,
             permWaitMs: PERM_WAIT_MS,
-            allocPermId: () => permId++,
+            allocPermId: permissions.allocPermId,
           }),
         })
         break
@@ -798,12 +436,12 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     const m = /^(allow|deny):(\d+)$/.exec(actionId)
     if (m) {
       const id = Number(m[2])
-      const pending = pendingPerm.get(id)
+      const pending = permissions.pendingPerm.get(id)
       if (m[1] === 'allow' && pending && elicitationQuestions(pending.toolInput).length) {
         log('ignore host allow without elicitation answers', { id }, 'warn')
         return
       }
-      finishPerm(id, m[1])
+      permissions.finishPerm(id, m[1])
     }
   }
 })
