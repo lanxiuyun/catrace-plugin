@@ -43,6 +43,8 @@ window.bubbleAPI.decide("deny")
 
 agent-notify **曾经只实现了这一条**；现在有 `questions` 时走 elicitation，见下方「对照」。
 
+审批卡右上角也有自绘灰色 `×`（`ui.mjs` perm-card 分支）：点击等价于**拒绝**（`sendPermissionDecision('deny')`）再关卡，避免用户只想去掉卡片却让 Agent 永久阻塞等待；审批请求进行中（`permBusy`）按钮 disabled。普通状态卡的 `×` 只 emit close，无 deny 语义。
+
 ## AskUserQuestion：卡片内收集答案
 
 识别成功后 `elicitationMode = true`（`src/bubble-renderer.js` 约 1242–1245、1332–1340 行）。
@@ -83,12 +85,45 @@ Hermes 走另一条：`decision: "allow"` + 顶层 `answers`，不是 Claude 的
 ## agent-notify 对照
 
 - 有 `toolInput.questions` → 问答卡；否则普通工具允许/拒绝。
-- 问答提交：`POST`（失败再 `GET`）`http://127.0.0.1:23456/permission-decide`，body `{ id, decision, answers }`，answers 的 key 是题目 index。
-- sidecar `validateIndexedElicitationAnswers` 映射成 `updatedInput.answers[原始题面]`，再 `finishPerm(id, 'allow', { updatedInput })`。
+- 问答提交：`POST`（失败再 `GET`）`http://127.0.0.1:23456/permission-decide`，body `{ id, decision, answers }`，answers 的 key 是题目 index（传字符串化 JSON sidecar 也会自动 parse）。
+- sidecar 校验与映射在 `runtime/permission.mjs`（2026-09-18 sidecar 按职责拆分后从 main.mjs 迁出）：`validateIndexedElicitationAnswers` 全量校验 → `remapIndexedElicitationAnswers` 映射成 `answers[原始题面]` → `buildElicitationUpdatedInput` 组装 → `finishPerm(id, 'allow', { updatedInput })`。
 - 拒绝 / 无 answers 的允许：走宿主 `deny:id` / `allow:id`（旧 sidecar 也能用）。
-- 宿主 `allow:<id>` 在 elicitation 上会被忽略，防止无答案放行。
+- 宿主 `allow:<id>` 在 elicitation 上会被忽略（`main.mjs` resolved 分支显式守卫 + warn 日志），防止无答案放行。
 - Toast 不能 `plugin.sidecar.request`（只允许 main 窗），详见 [Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md](Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md)。
 - 卡片交互细则：[AskUserQuestion卡片-预设选项与无标题textarea互斥-多题进度放右下角.md](AskUserQuestion卡片-预设选项与无标题textarea互斥-多题进度放右下角.md)。
+
+## sidecar 侧：/permission-decide 的回包与校验
+
+`runtime/permission.mjs` 的 `handlePermissionDecideHttp` → `decidePermission`：
+
+| 情形 | HTTP | 结果 |
+|------|------|------|
+| 决策成功（allow / deny） | 200 | `{ ok: true }` |
+| id 不存在 / 已过期 | 409 | `permission request expired` |
+| allow 但校验失败（缺题 / 多 key / 空答案） | 409 | 具体原因，**绝不部分放行** |
+| 非法 decision / 非法 id | 409 | `invalid decision` / `invalid id` |
+| body 不是合法 JSON | 400 | `invalid json` |
+
+UI 端（`ui.mjs` `sendPermissionDecision`）对 404 有特判——提示「sidecar 未加载 /permission-decide，请在插件页点刷新」（旧 sidecar 进程没有该路由）；其他非 2xx 把 `error` 显示到卡片的 `perm-error` 区。
+
+allow + questions 的完整校验链（与 clawd 同构，fail-closed）：
+
+1. `validateIndexedElicitationAnswers`：answers 的 key 集合必须与题目**完全一致**——缺题、多 key、非字符串、空白答案任一命中即拒绝；
+2. `remapIndexedElicitationAnswers`：index 数字 → 原始 `question.question` 题面（round-trip key 是题面不是显示文本，与 clawd 理由相同）；
+3. `buildElicitationUpdatedInput`：`{ ...toolInput, questions, answers }` → 回包 `behavior: "allow"` + `updatedInput`。
+
+deny 不需要 answers，直接 `{ behavior: "deny" }`。
+
+## 生命周期：超时、挤占与过期
+
+- **审批超时**：`PERM_WAIT_MS = 540_000`（9 分钟，`runtime/constants.mjs`）。超时 `finishPerm(id, 'timeout')` 回包是 `{}`——Agent 收到空决策，按未批准自行处理；不是 allow 也不是 deny。
+- **新提问挤占**：同会话新 `UserPromptSubmit` 会 `timeoutSessionPerms` 清掉该会话所有未决审批（用户重新提问 = 撤回等待）。
+- **新请求挤占**：同会话来第二个权限请求时，`startPermission` 也走 `timeoutSessionPerms`，旧请求直接过期。
+- 过期后再点允许 / 拒绝（或 ×）→ 409 `permission request expired`，卡片 `perm-error` 区显示原因，不会误伤已结束的请求。
+
+## 题目 index 的对齐坑（防御性边界）
+
+UI 的 `permissionQuestions`（`ui.mjs`）在 map 时记录**原始数组下标**再 filter 掉无效题；sidecar 的 `elicitationQuestions` 是先 filter、再用**过滤后数组**的下标校验。当 `toolInput.questions` 中间夹着无效题（缺 question 字符串）时两边 index 会错位——此时全量校验必然 key 不匹配 → 409 拒绝。这是刻意 fail-closed：宁可让用户重试，也不把答案安到错误的题上放行。Claude 的 `AskUserQuestion` 不产生空题，正常流程不会触发。
 
 ## clawd 关键文件
 

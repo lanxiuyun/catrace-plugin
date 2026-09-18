@@ -35,8 +35,27 @@ Stop 卡的 body 来自 `last_assistant_message`——assistant 回复的 markdo
 
 普通状态卡 footer 左侧显示动态相对时间：小于 1 分钟显示「刚刚」，之后依次显示「N 分钟前」「N 小时前」「N 天前」。组件每 30 秒刷新一次，不重新请求或改写事件时间。悬停时间文字可查看完整的本地日期时间（含年月日和秒）。时间基准仍是 `entry.timestamp`：优先 Agent payload 的 `timestamp` / `created_at`，缺失时为 sidecar 收到事件时生成的时间。
 
+## 关闭按钮（用户反馈迭代后的定稿）
+
+普通状态卡与权限审批卡统一用**自绘原生 `<button class="close-btn">`**，不用 Naive UI（NButton 的 error/ghost/circle 组合被用户逐一否掉）：
+
+- `2rem × 2rem` 命中区（早期 tiny 按钮点不到是用户直接反馈）、圆角 0.5rem、`×` 字符；
+- `×` 字形 `1.5rem`（权重 400）——命中区加大后用户仍嫌叉本身小，再放大的是字形不是按钮；
+- 常态纯灰 `#94a3b8` 无底色无描边；hover 变红 `#e11d48` + 极浅红底 `#fff1f2`；focus 红色柔和 ring；权限审批中（`permBusy`）disabled 降透明度；
+- 权限卡的 `×` = 拒绝语义，见[权限审批文档](权限审批-clawd的两种批准流程-普通工具allow-deny与AskUserQuestion多问题回传.md)；普通卡的 `×` 只 emit close。
+
+迭代教训：NButton tiny → error secondary → ghost → 去 circle，每轮都被否，最终原生按钮 + 灰叉 hover 红定稿。样式类小控件优先自绘，别在 Naive UI 组合里打转。
+
+## 事件主题色（EVENT_THEMES）
+
+- **会话开始 = 灰**（与 UserPromptSubmit 同灰系）：开场是低信息量事件，不该抢眼；
+- **任务完成（Stop）= 绿**：完成是好消息，绿色语义（用户 2026-09-18 拍板，此前 Stop 是青色、SessionStart 是绿，二者对调）；
+- 其余不变：出错类（StopFailure / PostToolUseFailure）红、等待交互（Notification）紫、PreToolUse 橙、PostToolUse 青绿。
+
 ## 其他观感决策（用户拍板）
 
 - **状态卡呼吸点已移除**：「任务完成/失败」这类终态卡还在呼吸是伪动态。权限卡也不再使用 pulse 圆点，改用和会话卡相同的 agent 徽章 +「等待你批准 / 需要你回答」chip。
-- **「前往会话」深色实心按钮常驻右下角**（用户明确选了不 hover 化；点击通过 `plugin.http` 调 sidecar `/focus`，优先恢复 App 窗口、再恢复 terminal 窗口，链路详见[前往会话-进程链捕获与窗口聚焦.md](前往会话-进程链捕获与窗口聚焦.md)）。
+- **「前往会话」按钮常驻 footer 右侧**：Naive UI `NButton`（small / primary；定位中 loading「正在前往…」，失败变 error 态「未能定位窗口」）；点击通过 `plugin.http` 调 sidecar `/focus`，优先恢复 App 窗口、再恢复 terminal 窗口，链路详见[前往会话-进程链捕获与窗口聚焦.md](前往会话-进程链捕获与窗口聚焦.md)。
+- **正文直接落在卡片底**：曾短暂加过 body-box 浅色容器，用户要求去掉，现仅靠下边距与 footer 分隔线分层。
+- **cwd 行无装饰图标**：只有路径文本（长路径省略号 + hover 完整路径），曾有 ▰ 图标被否。
 - 调试字段面板是用户按需开的调试工具（`debugView: common/raw`），默认 off；批评观感前先分默认态和用户自开配置。

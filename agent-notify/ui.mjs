@@ -42,8 +42,8 @@ const CSS = `
   display: inline-flex; align-items: center; justify-content: center;
   flex: 0 0 2rem; width: 2rem; min-width: 2rem; height: 2rem;
   margin: 0; padding: 0; border: none; border-radius: 0.5rem;
-  background: transparent; color: #94a3b8; font: inherit; font-size: 1.125rem;
-  line-height: 1; cursor: pointer;
+  background: transparent; color: #94a3b8; font: inherit; font-size: 1.5rem;
+  font-weight: 400; line-height: 1; cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 .agent-toast .close-btn:hover,
