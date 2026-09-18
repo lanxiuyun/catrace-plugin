@@ -37,7 +37,25 @@ const CSS = `
   color: var(--title); line-height: 1.3; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.agent-toast .close-btn { flex-shrink: 0; }
+.agent-toast .close-btn,
+.perm-card .close-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 2rem; width: 2rem; min-width: 2rem; height: 2rem;
+  margin: 0; padding: 0; border: none; border-radius: 0.5rem;
+  background: transparent; color: #94a3b8; font: inherit; font-size: 1.125rem;
+  line-height: 1; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.agent-toast .close-btn:hover,
+.perm-card .close-btn:hover {
+  background: #fff1f2; color: #e11d48;
+}
+.agent-toast .close-btn:focus-visible,
+.perm-card .close-btn:focus-visible {
+  outline: none; box-shadow: 0 0 0 0.1875rem rgba(225, 29, 72, 0.15);
+}
+.agent-toast .close-btn:disabled,
+.perm-card .close-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .agent-toast .meta-row { display: flex; align-items: center; gap: 0.375rem; margin-bottom: 0.5rem; }
 .agent-toast .project-row {
   display: flex; align-items: center; min-width: 0; gap: 0.3125rem;
@@ -871,6 +889,16 @@ export default {
             h('h2', { class: 'title' }, permTitle),
             h('span', { class: 'chip event-chip' }, questions.length ? '需要你回答' : '等待你批准'),
           ]),
+          h('button', {
+            class: 'close-btn',
+            type: 'button',
+            disabled: this.permBusy,
+            'aria-label': '关闭并拒绝权限请求',
+            onClick: (ev) => {
+              ev.stopPropagation()
+              this.sendPermissionDecision('deny')
+            },
+          }, '×'),
         ]),
         h('div', { class: 'project-row', title: permCwd || undefined }, [
           h('span', { class: 'project-path' }, permCwd || '未知项目路径'),
@@ -920,17 +948,15 @@ export default {
           h('h2', { class: 'title' }, title),
           h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
         ]),
-        h(NButton, {
+        h('button', {
           class: 'close-btn',
-          size: 'tiny',
-          quaternary: true,
-          circle: true,
-          'aria-label': 'Close',
+          type: 'button',
+          'aria-label': '关闭卡片',
           onClick: (ev) => {
             ev.stopPropagation()
             this.$emit('close')
           },
-        }, { default: () => '×' }),
+        }, '×'),
       ]),
       h('div', { class: 'project-row', title: entry.cwd || undefined }, [
         h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),

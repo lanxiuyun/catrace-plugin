@@ -10,5 +10,5 @@
 
 ## 提交约定
 
+- **用户点名才 commit**：改动先落工作区，等用户验证效果并明确说「提交」再 commit；不要每轮微调各提一笔，同类迭代合并成一笔
 - 本仓库 commit 后，到主仓 `git add tools/plugin-demo` 更新 submodule 指针（两边分开提交，默认不 push）
-- 改完先让用户重载插件实际验证，确认后再 commit
