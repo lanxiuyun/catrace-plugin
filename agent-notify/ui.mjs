@@ -257,31 +257,78 @@ const CSS = `
 .agent-toast .dump::-webkit-scrollbar-track,
 .perm-card .dump::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
 .perm-card .dump-wrap { position: relative; margin-top: 0.5rem; }
-.perm-card { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 0.875rem; border: 0.0625rem solid #FDE68A; border-radius: 0.75rem; background: #ffffff; box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, #F59E0B 24%, transparent), inset 0.25rem 0 0 #F59E0B; font-family: system-ui, sans-serif; }
-.perm-card .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.375rem; }
-.perm-card .header-left { display: flex; align-items: center; gap: 0.5rem; }
-.perm-card .pulse-dot {
-  width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #f59e0b;
-  animation: an-pulse 1.2s ease-in-out infinite;
-}
-.perm-card .title { margin: 0; font-size: 0.875rem; font-weight: 700; color: #92400e; }
-.perm-card .project { font-size: 0.6875rem; color: #b45309; }
+.perm-card { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 0.875rem; border: 0.0625rem solid var(--border); border-radius: 0.75rem; background: #ffffff; box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, var(--accent) 24%, transparent), inset 0.25rem 0 0 var(--accent); font-family: system-ui, sans-serif; }
+.perm-card .header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.375rem; min-height: 2rem; }
+.perm-card .header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; }
+.perm-card .agent-badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 2rem; height: 2rem; border-radius: 0.625rem; color: #ffffff; font-size: 0.75rem; font-weight: 800; letter-spacing: -0.02em; }
+.perm-card .title { flex: 1; min-width: 0; margin: 0; font-size: 0.9375rem; font-weight: 700; color: var(--title); line-height: 1.3; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.perm-card .chip { display: inline-flex; align-items: center; max-width: 100%; height: 1.25rem; padding: 0 0.4375rem; border-radius: 0.25rem; font-size: 0.6875rem; font-weight: 600; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perm-card .event-chip { background: var(--badge-bg); color: var(--badge-fg); border: 0.0625rem solid var(--border); }
+.perm-card .project-row { display: flex; align-items: center; min-width: 0; margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.6875rem; line-height: 1.3; }
+.perm-card .project-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .perm-card .tool-block {
-  background: #fffbeb; border: 0.0625rem solid #fde68a; border-radius: 0.375rem;
+  background: #f8fafc; border: 0.0625rem solid #e2e8f0; border-radius: 0.5rem;
   padding: 0.5rem 0.625rem; margin-bottom: 0.625rem;
 }
 .perm-card .tool-name {
-  font-size: 0.75rem; font-weight: 700; color: #92400e; background: #fef3c7;
+  font-size: 0.75rem; font-weight: 700; color: var(--title); background: var(--badge-bg);
   border-radius: 0.25rem; padding: 0.0625rem 0.375rem;
 }
-.perm-card .tool-summary { font-size: 0.75rem; color: #b45309; margin: 0.25rem 0 0; font-family: ui-monospace, monospace; word-break: break-all; }
-.perm-card .actions {
-  display: flex; flex-wrap: wrap; gap: 0.375rem; padding-top: 0.625rem;
-  border-top: 0.0625rem solid rgba(245, 158, 11, 0.22);
+.perm-card .permission-raw { margin: 0.5rem 0 0; max-height: 7rem; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--body); font: 0.6875rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.perm-card .question-progress { color: #94a3b8; font-size: 0.6875rem; white-space: nowrap; }
+.perm-card .question-text { margin: 0 0 0.375rem; color: var(--title); font-size: 0.8125rem; font-weight: 700; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.perm-card .question-hint { margin: 0 0 0.5rem; color: var(--body); font-size: 0.6875rem; }
+.perm-card .option-list { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.perm-card .option-item {
+  display: flex; align-items: flex-start; gap: 0.625rem; width: 100%; max-width: 100%; min-width: 0;
+  box-sizing: border-box; text-align: left;
+  padding: 0.75rem 0.875rem; border: 0.0625rem solid #e2e8f0; border-radius: 0.75rem;
+  background: #ffffff; color: var(--title); font-size: 0.75rem; line-height: 1.4; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-.perm-card .btn { border: none; border-radius: 0.375rem; height: 1.75rem; padding: 0 0.625rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
-.perm-card .btn-allow { background: #059669; color: #fff; }
+.perm-card .option-item:hover {
+  border-color: #93c5fd; background: #f8fbff;
+}
+.perm-card .option-item.is-on {
+  border-color: #2563eb; background: #eff6ff;
+}
+.perm-card .option-item.is-on:hover { background: #dbeafe; }
+.perm-card .option-radio {
+  flex: 0 0 1rem; width: 1rem; height: 1rem; margin-top: 0.125rem; box-sizing: border-box;
+  border: 0.0625rem solid #cbd5e1; border-radius: 50%; background: #ffffff;
+}
+.perm-card .option-item:hover .option-radio { border-color: #60a5fa; }
+.perm-card .option-item.is-on .option-radio {
+  border-color: #2563eb; box-shadow: inset 0 0 0 0.2rem #2563eb;
+}
+.perm-card .option-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.perm-card .option-item-label { font-weight: 700; color: #0f172a; }
+.perm-card .option-item.is-on .option-item-label { color: #1d4ed8; }
+.perm-card .option-item-description { color: #64748b; font-weight: 400; }
+.perm-card .option-item-other { padding: 0.375rem 0.5rem; cursor: text; }
+.perm-card .option-item-other:hover { border-color: #93c5fd; background: #f8fbff; }
+.perm-card .option-item-other.is-on { border-color: #2563eb; background: #eff6ff; }
+.perm-card .option-other-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; margin: 0; box-sizing: border-box;
+  min-height: 2.5rem; padding: 0.25rem 0.125rem; border: none; border-radius: 0;
+  background: transparent; color: var(--title); font: 0.75rem/1.4 system-ui, sans-serif; resize: vertical; outline: none;
+}
+.perm-card .perm-error { margin: 0 0 0.5rem; color: #b91c1c; font-size: 0.6875rem; line-height: 1.4; }
+.perm-card .footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  min-height: 2rem; margin-top: 0.75rem; padding-top: 0.625rem; border-top: 0.0625rem solid rgba(226, 232, 240, 0.9);
+}
+.perm-card .footer-actions { display: flex; align-items: center; gap: 0.375rem; }
+.perm-card .btn { border: none; border-radius: 0.5rem; height: 1.75rem; padding: 0 0.75rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
 .perm-card .btn-deny { background: #fee2e2; color: #991b1b; }
+.perm-card .btn-prev { background: #f1f5f9; color: #334155; }
+.perm-card .btn-prev:disabled, .perm-card .goto-btn:disabled { opacity: 0.55; cursor: default; }
+.perm-card .goto-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 5.5rem; height: 1.75rem; padding: 0 0.875rem;
+  background: #1E293B; color: #ffffff; font-size: 0.75rem; font-weight: 600;
+  border: none; border-radius: 0.5rem; cursor: pointer;
+}
 `
 
 const EVENT_LABEL = {
@@ -312,6 +359,7 @@ const EVENT_THEMES = {
   SessionStart: { accent: '#6B7280', title: '#0F172A', body: '#475569', lightBg: '#E5E7EB', border: '#D1D5DB', badgeBg: '#F3F4F6', badgeFg: '#4B5563' },
   UserPromptSubmit: { accent: '#6B7280', title: '#0F172A', body: '#475569', lightBg: '#E5E7EB', border: '#D1D5DB', badgeBg: '#F3F4F6', badgeFg: '#4B5563' },
   PreToolUse: { accent: '#F59E0B', title: '#0F172A', body: '#475569', lightBg: '#FEF3C7', border: '#FDE68A', badgeBg: '#FEF3C7', badgeFg: '#B45309' },
+  PermissionRequest: { accent: '#F59E0B', title: '#0F172A', body: '#475569', lightBg: '#FEF3C7', border: '#FDE68A', badgeBg: '#FEF3C7', badgeFg: '#B45309' },
   PostToolUse: { accent: '#14B8A6', title: '#0F172A', body: '#475569', lightBg: '#CCFBF1', border: '#99F6E4', badgeBg: '#CCFBF1', badgeFg: '#0F766E' },
 }
 
@@ -339,12 +387,49 @@ function themeStyle(t) {
   }
 }
 
+const OTHER_KEY = '__other__'
+
+function permissionQuestions(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return []
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
+  return questions
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const question = typeof item.question === 'string' ? item.question.trim() : ''
+      const options = Array.isArray(item.options)
+        ? item.options.map((option) => {
+            if (typeof option === 'string') return { label: option, description: '' }
+            const label = option && typeof option.label === 'string' ? option.label : ''
+            const description = option && typeof option.description === 'string' ? option.description : ''
+            return label ? { label, description } : null
+          }).filter(Boolean)
+        : []
+      return question ? {
+        index,
+        question,
+        header: typeof item.header === 'string' ? item.header : '',
+        multiSelect: item.multiSelect === true,
+        options,
+      } : null
+    })
+    .filter(Boolean)
+}
+
+function permissionInputSummary(toolInput) {
+  if (toolInput == null) return ''
+  if (typeof toolInput === 'string') return toolInput
+  try {
+    return JSON.stringify(toolInput, null, 2)
+  } catch {
+    return String(toolInput)
+  }
+}
+
 function projectName(cwd) {
   if (!cwd) return ''
   const parts = String(cwd).replace(/\\/g, '/').split('/').filter(Boolean)
   return parts[parts.length - 1] || ''
 }
-
 function parseTimestamp(value) {
   if (!value) return null
   const date = new Date(value)
@@ -511,7 +596,19 @@ export default {
       gotoFailed: false,
       gotoBusy: false,
       gotoTimer: null,
+      permStep: 0,
+      permAnswers: {},
+      permBusy: false,
+      permError: '',
     }
+  },
+  watch: {
+    'event.payload.requestId'() {
+      this.permStep = 0
+      this.permAnswers = {}
+      this.permBusy = false
+      this.permError = ''
+    },
   },
   created() {
     ensureStyles()
@@ -534,6 +631,102 @@ export default {
     if (this.gotoTimer) clearTimeout(this.gotoTimer)
   },
   methods: {
+    permAnswer(index) {
+      return this.permAnswers[index] || { selected: [], otherText: '' }
+    },
+    permAnswerText(question) {
+      const answer = this.permAnswers[question.index]
+      if (!answer) return ''
+      const other = String(answer.otherText || '').trim()
+      if (other) return other
+      const labels = (answer.selected || []).filter((key) => key !== OTHER_KEY)
+      return labels.join(', ')
+    },
+    permToggleOption(question, label) {
+      const answer = this.permAnswer(question.index)
+      if (question.multiSelect) {
+        const next = answer.selected.includes(label)
+          ? answer.selected.filter((item) => item !== label)
+          : [...answer.selected.filter((item) => item !== OTHER_KEY), label]
+        this.permAnswers = { ...this.permAnswers, [question.index]: { ...answer, selected: next, otherText: '' } }
+        return
+      }
+      this.permAnswers = {
+        ...this.permAnswers,
+        [question.index]: { selected: [label], otherText: '' },
+      }
+    },
+    permSetOtherText(question, value) {
+      this.permAnswers = {
+        ...this.permAnswers,
+        [question.index]: {
+          selected: [OTHER_KEY],
+          otherText: String(value || ''),
+        },
+      }
+    },
+    permChooseOther(question) {
+      const answer = this.permAnswer(question.index)
+      if (answer.selected.length === 1 && answer.selected[0] === OTHER_KEY) return
+      this.permSetOtherText(question, answer.otherText || '')
+    },
+    collectPermAnswers(questions) {
+      const answers = {}
+      for (const question of questions) {
+        const text = this.permAnswerText(question)
+        if (!text) return null
+        answers[String(question.index)] = text
+      }
+      return answers
+    },
+    async sendPermissionDecision(decision, answers) {
+      const p = (this.event && this.event.payload) || {}
+      if (this.permBusy || p.requestId == null) return
+      this.permError = ''
+      if (decision === 'deny' || !answers) {
+        this.$emit('action', `${decision}:${p.requestId}`)
+        this.$emit('close')
+        return
+      }
+      this.permBusy = true
+      const payload = { id: p.requestId, decision, answers }
+      try {
+        let response = await fetch('http://127.0.0.1:23456/permission-decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (response.status === 404) {
+          const query = new URLSearchParams({
+            id: String(p.requestId),
+            decision,
+            answers: JSON.stringify(answers),
+          })
+          response = await fetch(`http://127.0.0.1:23456/permission-decide?${query}`)
+        }
+        const result = await response.json().catch(() => ({}))
+        if (response.status === 404) {
+          throw new Error('sidecar 未加载 /permission-decide，请在插件页点刷新')
+        }
+        if (!response.ok || result.ok !== true) throw new Error(result.error || 'permission decide failed')
+        this.$emit('close')
+      } catch (error) {
+        console.error('[agent-notify] permission decide failed', error)
+        this.permError = error instanceof Error ? error.message : String(error)
+        this.permBusy = false
+      }
+    },
+    async nextOrSubmitPermission(questions) {
+      const question = questions[this.permStep]
+      if (!question || !this.permAnswerText(question)) return
+      if (this.permStep < questions.length - 1) {
+        this.permStep += 1
+        return
+      }
+      const answers = this.collectPermAnswers(questions)
+      if (!answers) return
+      await this.sendPermissionDecision('allow', answers)
+    },
     checkBodyClamped() {
       const el = this.$refs.bodyEl
       if (!el) return
@@ -652,23 +845,115 @@ export default {
     if (isPerm) {
       const permEntry = p.entry || {}
       const permission = permEntry.permission || {}
-      const permProject = p.projectName || permEntry.projectName || projectName(p.cwd || permEntry.cwd)
-      return h('div', { class: 'perm-card' }, [
+      const permAgent = agentBadge(permEntry.agentId || p.agentId)
+      const permTitle = permEntry.sessionTitle || p.sessionTitle || permEntry.projectName || p.projectName || projectName(p.cwd || permEntry.cwd) || 'AI 助手'
+      const permCwd = p.cwd || permEntry.cwd || ''
+      const toolName = permission.toolName || p.toolName || 'tool'
+      const questions = permissionQuestions(permission.toolInput)
+      const question = questions[this.permStep] || questions[0]
+      const isLast = questions.length > 0 && this.permStep >= questions.length - 1
+      const currentComplete = question ? !!this.permAnswerText(question) : false
+      const allComplete = questions.length > 0 && questions.every((item) => !!this.permAnswerText(item))
+      const answer = question ? this.permAnswer(question.index) : { selected: [], otherText: '' }
+      const permissionBody = questions.length && question
+        ? h('div', { class: 'question-card' }, [
+            h('div', { class: 'question-text' }, question.question),
+            h('div', { class: 'option-list' }, [
+              ...question.options.map((option) => h('button', {
+                class: ['option-item', answer.selected.includes(option.label) ? 'is-on' : ''],
+                type: 'button',
+                onClick: (ev) => { ev.stopPropagation(); this.permToggleOption(question, option.label) },
+              }, [
+                h('span', { class: 'option-radio', 'aria-hidden': 'true' }),
+                h('span', { class: 'option-copy' }, [
+                  h('span', { class: 'option-item-label' }, option.label),
+                  option.description ? h('span', { class: 'option-item-description' }, option.description) : null,
+                ]),
+              ])),
+              h('div', {
+                class: ['option-item', 'option-item-other', answer.selected.includes(OTHER_KEY) ? 'is-on' : ''],
+                onMousedown: (ev) => { ev.stopPropagation(); this.permChooseOther(question) },
+              }, [
+                h('textarea', {
+                  class: 'option-other-input',
+                  value: answer.otherText,
+                  placeholder: '输入你的回答',
+                  rows: 2,
+                  onClick: (ev) => ev.stopPropagation(),
+                  onFocus: () => this.permChooseOther(question),
+                  onInput: (ev) => this.permSetOtherText(question, ev.target.value),
+                }),
+              ]),
+            ]),
+          ])
+        : permissionInputSummary(permission.toolInput)
+          ? h('div', { class: 'tool-block' }, [
+              h('span', { class: 'tool-name' }, toolName),
+              h('pre', { class: 'permission-raw' }, permissionInputSummary(permission.toolInput)),
+            ])
+          : h('div', { class: 'tool-block' }, [h('span', { class: 'tool-name' }, toolName)])
+      const footer = questions.length
+        ? h('div', { class: 'footer' }, [
+            h('button', {
+              class: 'btn btn-deny',
+              type: 'button',
+              disabled: this.permBusy,
+              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
+            }, '拒绝'),
+            h('div', { class: 'footer-actions' }, [
+              questions.length > 1
+                ? h('span', { class: 'question-progress' }, `${this.permStep + 1} / ${questions.length}`)
+                : null,
+              questions.length > 1
+                ? h('button', {
+                    class: 'btn btn-prev',
+                    type: 'button',
+                    disabled: this.permStep <= 0 || this.permBusy,
+                    onClick: (ev) => { ev.stopPropagation(); if (this.permStep > 0) this.permStep -= 1 },
+                  }, '上一题')
+                : null,
+              h('button', {
+                class: 'goto-btn',
+                type: 'button',
+                disabled: this.permBusy || !currentComplete || (isLast && !allComplete),
+                onClick: (ev) => { ev.stopPropagation(); this.nextOrSubmitPermission(questions) },
+              }, isLast ? (this.permBusy ? '提交中…' : '提交') : '下一题'),
+            ]),
+          ])
+        : h('div', { class: 'footer' }, [
+            h('button', {
+              class: 'btn btn-deny',
+              type: 'button',
+              disabled: this.permBusy,
+              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
+            }, '拒绝'),
+            h('button', {
+              class: 'goto-btn',
+              type: 'button',
+              disabled: this.permBusy,
+              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('allow') },
+            }, this.permBusy ? '处理中…' : '允许'),
+          ])
+      return h('div', { class: 'perm-card', style: themeStyle(themeOf('PermissionRequest')) }, [
         h('div', { class: 'header' }, [
           h('div', { class: 'header-left' }, [
-            h('div', { class: 'pulse-dot' }),
-            h('h2', { class: 'title' }, '等待你批准'),
+            h('span', { class: 'agent-badge', title: permAgent.name, style: { background: permAgent.color } },
+              permAgent.img
+                ? h('img', { src: permAgent.img, alt: '', style: { width: '100%', height: '100%', 'border-radius': 'inherit', display: 'block' } })
+                : permAgent.icon
+                  ? h('svg', { viewBox: '0 0 24 24', fill: 'currentColor', width: '1rem', height: '1rem', 'aria-hidden': 'true' }, [h('path', { d: permAgent.icon })])
+                  : permAgent.label),
+            h('h2', { class: 'title' }, permTitle),
+            h('span', { class: 'chip event-chip' }, questions.length ? '需要你回答' : '等待你批准'),
           ]),
-          permProject ? h('span', { class: 'project' }, permProject) : null,
         ]),
-        h('div', { class: 'tool-block' }, [
-          h('span', { class: 'tool-name' }, permission.toolName || p.toolName || 'tool'),
+        h('div', { class: 'project-row', title: permCwd || undefined }, [
+          h('span', { class: 'project-path' }, permCwd || '未知项目路径'),
         ]),
-        h('div', { class: 'actions' }, [
-          h('button', { class: 'btn btn-allow', type: 'button', onClick: () => { this.$emit('action', `allow:${p.requestId}`); this.$emit('close') } }, '允许'),
-          h('button', { class: 'btn btn-deny', type: 'button', onClick: () => { this.$emit('action', `deny:${p.requestId}`); this.$emit('close') } }, '拒绝'),
-        ]),
+        permissionBody,
         dump,
+        this.permError ? h('div', { class: 'perm-error' }, this.permError) : null,
+        footer,
       ])
     }
 

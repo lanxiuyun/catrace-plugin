@@ -29,7 +29,7 @@ const CSS = `
 .an-set .event-name { font-size: 0.8125rem; font-weight: 400; color: #334155; }
 .an-set .agent-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
 .an-set .install-btn { transition: color 0.2s, border-color 0.2s; }
-.an-set .install-btn:hover { color: #7c3aed; border-color: #7c3aed; }
+.an-set .preview-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 `
 const EVENTS = [
   { id: 'SessionStart', label: '会话开始' },
@@ -190,6 +190,20 @@ export default {
       }
     }
 
+    const previewBusy = ref('')
+
+    async function preview(kind) {
+      previewBusy.value = kind
+      try {
+        await plugin.sidecar.request('testCard', { kind })
+        message.success('已弹出测试卡片')
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      } finally {
+        previewBusy.value = ''
+      }
+    }
+
     onMounted(load)
 
     return () =>
@@ -316,6 +330,19 @@ export default {
                 ),
               ])
             )),
+          ],
+        ),
+        section(
+          '调试卡片',
+          '弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',
+          [
+            h('div', { class: 'preview-row' }, [
+              h(NButton, { size: 'small', loading: previewBusy.value === 'stop', onClick: () => void preview('stop') }, { default: () => '任务完成' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'working', onClick: () => void preview('working') }, { default: () => '调用工具中' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'tool', onClick: () => void preview('tool') }, { default: () => '批准工具' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'ask', onClick: () => void preview('ask') }, { default: () => '回答问题' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'ask-multi', onClick: () => void preview('ask-multi') }, { default: () => '多题问答' }),
+            ]),
           ],
         ),
       ])

@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 import { focusExternalWindow } from './focus-windows.mjs'
+import { publishTestCard } from './preview-cards.mjs'
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -296,7 +297,7 @@ function cors(res, status = 200, body = '') {
     'Content-Type': 'application/json',
     'Content-Length': buf.length,
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   })
   res.end(buf)
@@ -387,26 +388,119 @@ function publishPermission(id, data) {
   })
 }
 
-function finishPerm(id, decision) {
+function elicitationQuestions(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return []
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : []
+  return questions.filter((item) => item && typeof item.question === 'string' && item.question.trim())
+}
+
+function remapIndexedElicitationAnswers(toolInput, indexedAnswers) {
+  const questions = elicitationQuestions(toolInput)
+  const source = indexedAnswers && typeof indexedAnswers === 'object' && !Array.isArray(indexedAnswers)
+    ? indexedAnswers
+    : {}
+  const answers = {}
+  for (let i = 0; i < questions.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(source, String(i))) continue
+    const value = source[String(i)]
+    if (typeof value === 'string' && value.trim()) answers[questions[i].question] = value.trim()
+  }
+  return answers
+}
+
+function validateIndexedElicitationAnswers(toolInput, indexedAnswers) {
+  const questions = elicitationQuestions(toolInput)
+  if (!questions.length) return { ok: false, reason: 'elicitation has no questions' }
+  if (!indexedAnswers || typeof indexedAnswers !== 'object' || Array.isArray(indexedAnswers)) {
+    return { ok: false, reason: 'elicitation answers must be an indexed object' }
+  }
+  const expected = questions.map((_q, index) => String(index))
+  const keys = Object.keys(indexedAnswers)
+  if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) {
+    return { ok: false, reason: 'elicitation answers do not match all questions' }
+  }
+  const answers = remapIndexedElicitationAnswers(toolInput, indexedAnswers)
+  if (Object.keys(answers).length !== questions.length) {
+    return { ok: false, reason: 'elicitation answers are incomplete' }
+  }
+  return { ok: true, answers }
+}
+
+function buildElicitationUpdatedInput(toolInput, answers) {
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
+  const questions = Array.isArray(input.questions) ? input.questions : []
+  return { ...input, questions, answers }
+}
+
+function finishPerm(id, decision, extra = {}) {
   const pending = pendingPerm.get(id)
   if (!pending) return false
   clearTimeout(pending.timer)
   pendingPerm.delete(id)
-  const body =
-    decision === 'allow' || decision === 'deny'
-      ? JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PermissionRequest',
-            decision: { behavior: decision },
-          },
-        })
-      : '{}'
+  let body = '{}'
+  if (decision === 'allow') {
+    const payload = { behavior: 'allow' }
+    if (extra.updatedInput) payload.updatedInput = extra.updatedInput
+    body = JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: payload,
+      },
+    })
+  } else if (decision === 'deny') {
+    body = JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        decision: { behavior: 'deny' },
+      },
+    })
+  }
   try {
     cors(pending.res, 200, body)
   } catch {
     /* already closed */
   }
   return true
+}
+
+function handlePermissionDecideHttp(payload, res) {
+  if (!payload) {
+    cors(res, 400, JSON.stringify({ ok: false, error: 'invalid json' }))
+    return
+  }
+  const id = Number(payload.id)
+  const decision = payload.decision
+  let answers = payload.answers
+  if (typeof answers === 'string') {
+    try { answers = JSON.parse(answers) } catch { answers = null }
+  }
+  log('permission decide', { id, decision, answerKeys: answers && Object.keys(answers) }, 'info')
+  const result = Number.isInteger(id) && id > 0 ? decidePermission(id, decision, answers) : { ok: false, error: 'invalid id' }
+  cors(res, result.ok ? 200 : 409, JSON.stringify(result))
+}
+
+function decidePermission(id, decision, indexedAnswers) {
+  const pending = pendingPerm.get(id)
+  if (!pending) return { ok: false, error: 'permission request expired' }
+  if (decision === 'deny') {
+    finishPerm(id, 'deny')
+    return { ok: true }
+  }
+  if (decision !== 'allow') return { ok: false, error: 'invalid decision' }
+  const questions = elicitationQuestions(pending.toolInput)
+  if (questions.length) {
+    const validated = validateIndexedElicitationAnswers(pending.toolInput, indexedAnswers)
+    if (!validated.ok) {
+      log('elicitation rejected', { id, reason: validated.reason }, 'warn')
+      return { ok: false, error: validated.reason }
+    }
+    finishPerm(id, 'allow', {
+      updatedInput: buildElicitationUpdatedInput(pending.toolInput, validated.answers),
+    })
+    return { ok: true }
+  }
+  finishPerm(id, 'allow')
+  return { ok: true }
 }
 
 function timeoutSessionPerms(sessionId) {
@@ -495,7 +589,13 @@ function handlePermission(req, res, payload, agentId) {
   const sessionId = data.sessionId
   if (sessionId && sessionId !== 'unknown') timeoutSessionPerms(sessionId)
   const timer = setTimeout(() => finishPerm(id, 'timeout'), PERM_WAIT_MS)
-  pendingPerm.set(id, { res, sessionId, timer })
+  pendingPerm.set(id, {
+    res,
+    sessionId,
+    timer,
+    toolName: data.permission && data.permission.toolName,
+    toolInput: data.permission && data.permission.toolInput,
+  })
   publishPermission(id, data)
 }
 
@@ -539,6 +639,24 @@ function startHttp() {
       }
       return
     }
+    if (url === '/permission-decide') {
+      if (req.method === 'GET') {
+        handlePermissionDecideHttp({
+          id: requestUrl.searchParams.get('id'),
+          decision: requestUrl.searchParams.get('decision'),
+          answers: requestUrl.searchParams.get('answers'),
+        }, res)
+        return
+      }
+      if (req.method === 'POST') {
+        handlePermissionDecideHttp(await readBody(req), res)
+        return
+      }
+    }
+    if (req.method === 'GET' && url === '/health') {
+      cors(res, 200, JSON.stringify({ ok: true, routes: ['/state', '/permission', '/focus', '/permission-decide'] }))
+      return
+    }
     if (req.method !== 'POST' || (url !== '/state' && url !== '/permission')) {
       cors(res, 404)
       return
@@ -555,9 +673,9 @@ function startHttp() {
     await handleState(payload)
     cors(res, 200)
   })
-  server.on('error', (err) => log('http bind failed', { error: String(err) }, 'error'))
+  server.on('error', (err) => log('http bind failed', { error: String(err), hint: 'port 23456 is still held by an old sidecar; refresh the plugin to kill it' }, 'error'))
   server.listen(PORT, '127.0.0.1', () => {
-    log('listening', { port: PORT })
+    log('listening', { port: PORT, routes: ['/state', '/permission', '/focus', '/permission-decide'] })
     send({ v: 1, op: 'ready' })
     log('agent-notify ready', { pluginId, pid: process.pid })
   })
@@ -608,6 +726,18 @@ function handleRequest(message) {
         break
       case 'uninstall':
         respond(requestId, true, uninstallAgent(String(params.agent || '')))
+        break
+      case 'testCard':
+        respond(requestId, true, {
+          kind: publishTestCard(String(params.kind || 'stop'), {
+            publishSession,
+            publishPermission,
+            pendingPerm,
+            finishPerm,
+            permWaitMs: PERM_WAIT_MS,
+            allocPermId: () => permId++,
+          }),
+        })
         break
       default:
         respond(requestId, false, null, `unknown method: ${method}`)
@@ -666,6 +796,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       return
     }
     const m = /^(allow|deny):(\d+)$/.exec(actionId)
-    if (m) finishPerm(Number(m[2]), m[1])
+    if (m) {
+      const id = Number(m[2])
+      const pending = pendingPerm.get(id)
+      if (m[1] === 'allow' && pending && elicitationQuestions(pending.toolInput).length) {
+        log('ignore host allow without elicitation answers', { id }, 'warn')
+        return
+      }
+      finishPerm(id, m[1])
+    }
   }
 })

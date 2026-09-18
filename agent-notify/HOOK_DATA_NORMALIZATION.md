@@ -45,7 +45,7 @@ hook_raw_data（Agent 原始 JSON）
 - `message` 按优先级从 `last_assistant_message`、`lastAssistantMessage`、`responsePreview`、`response_preview`、`responseText`、`response_text`、`prompt` 取第一个非空字符串。
 - `hookPpid` 是 hook.cjs 注入的 `catrace_hook_ppid`（hook 的直接父进程 pid），供「前往会话」爬进程链用。
 - `pidChain` 是 sidecar 按会话捕获的进程链（由内向外：hook 父进程 → CLI → shell → 终端），**异步捕获、可能缺失**；命中缓存的事件才带上。见[前往会话 feature 文档](../.agent/features/agent-notify/前往会话-进程链捕获与窗口聚焦.md)。
-- `permission` 统一 Claude/ZCode/Codex 的 `tool_name`/`toolName` 与 `tool_input`/`toolInput`。
+- `permission` 统一 Claude/ZCode/Codex 的 `tool_name`/`toolName` 与 `tool_input`/`toolInput`。`AskUserQuestion` 的题面在 `toolInput.questions`，回包不能只写 `behavior: allow`，对照 [clawd 两种批准流程](../.agent/features/agent-notify/权限审批-clawd的两种批准流程-普通工具allow-deny与AskUserQuestion多问题回传.md)。
 - `raw` 只作为调试视图数据保留，不应成为普通 UI 的业务数据来源。
 
 ## Agent ID 的传递
