@@ -14,13 +14,13 @@ Catrace 外部插件：通过 [pywechat](https://github.com/Hello-Mr-Crab/pywech
 
 - 已安装并登录的 **微信 PC 客户端**
 - **Python 3**
-- **pywechat**：
+- **pywechat127**（PyPI 包名不是 `pywechat`）：
 
 ```bash
-pip install pywechat
+pip install pywechat127
 ```
 
-> pywechat 的具体 API 可能随版本变化，启用前请确认已按该项目 README 完成安装。
+微信 4.x 用 `pyweixin`；3.9 才用 `pywechat`（要 3.9 注册表）。Catrace sidecar 的 `python` 必须能 `import pyweixin`。
 
 ## 安装到 Catrace
 
@@ -29,13 +29,13 @@ pip install pywechat
    - 用户插件目录：Catrace 应用内「打开插件目录」后放到 `plugins/pywechat-reply/`
 2. 在 Catrace 插件中心启用「微信 PC 快捷回复」。
 3. 在插件设置页确认依赖已安装，配置轮询间隔，点击「发送测试 Toast」验证链路。
-4. 根据你安装的 pywechat 版本，补全 `runtime/main.py` 中标记为 `TODO` 的读取消息和发送消息代码。
+4. 启用后 sidecar 会调 `Messages.check_new_messages` / `send_messages_to_friend`（`close_weixin=False`）。轮询会抢微信焦点。
 
 ## 配置项
 
 | 项 | 默认值 | 说明 |
 |---|---|---|
-| `pollIntervalMs` | 3000 | pywechat 检查新消息的间隔（毫秒） |
+| `pollIntervalMs` | 8000 | 检查新消息间隔（毫秒）。太短会抢焦点、增加风控 |
 | `debug` | false | 是否打印详细错误堆栈 |
 
 ## 数据流
@@ -59,12 +59,9 @@ pip install pywechat
 - **焦点抢夺**：发送消息时微信窗口需要可操作，可能会短暂抢夺前台焦点。
 - **法律声明**：请勿将本插件用于非法用途或商业用途，由此产生的一切后果由使用者自行承担。
 
-## 待完成
+## 实现
 
-当前 `runtime/main.py` 中的 pywechat 调用是占位实现。你需要根据实际安装的 pywechat 版本补全：
-
-- `fetch_latest_messages()`：如何读取未读消息列表
-- `send_reply(chat_name, text)`：如何打开指定聊天并发送文字
+`runtime/main.py` 已接 `pyweixin.Messages`（失败再试 `pywechat.Messages`）。库的 print 被重定向到 stderr，避免弄脏 JSONL。
 
 ## 许可证
 

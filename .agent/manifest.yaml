@@ -1,0 +1,29 @@
+features:
+  agent-notify:
+    docs:
+      - .agent/features/agent-notify/README.md
+      - .agent/features/agent-notify/会话标题-三级来源与为什么不读transcript不回写.md
+      - .agent/features/agent-notify/toast卡观感-agent徽章品牌图标与body展开滚动.md
+      - .agent/features/agent-notify/设置页-只显示检测到的Agent与按钮状态设计.md
+      - .agent/features/agent-notify/Toast卡片通过toastStyle选择默认或独立外壳.md
+      - .agent/features/agent-notify/外部Toast自动消失进度条必须使用CSS动画.md
+      - .agent/features/agent-notify/前往会话-进程链捕获与窗口聚焦.md
+      - .agent/features/agent-notify/权限审批-clawd的两种批准流程-普通工具allow-deny与AskUserQuestion多问题回传.md
+      - .agent/features/agent-notify/AskUserQuestion卡片-预设选项与无标题textarea互斥-多题进度放右下角.md
+      - .agent/features/agent-notify/AskUserQuestion选项-左侧radio标题在上-选中细蓝边带hover.md
+      - .agent/features/agent-notify/Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md
+      - .agent/features/agent-notify/设置页调试卡片-五种预览抽到preview-cards不要堆进main.md
+    related:
+      - agent-hook-events-docs
+
+devlog:
+  - .agent/devlog/2026-09-18-AskUserQuestion选项改成细蓝边radio.md
+  - .agent/devlog/2026-09-18-AskUserQuestion可交互审批与调试卡片.md
+  - .agent/devlog/2026-09-18-对照clawd沉淀权限审批两种流程.md
+  - .agent/devlog/2026-09-13-agent-notify-正文交互设置页检测与分支清理.md
+  - .agent/devlog/2026-09-13-agent-notify-标题链路与品牌徽章观感.md
+
+current:
+  plan: .agent/features/agent-notify/README.md
+  phase: 问答选项为左侧 radio、标题在上；选中细蓝边 + hover；footer 分割线上方留空
+  next: 用调试卡片再看一遍选中/hover/Other 与底部分割线间距

@@ -1,0 +1,350 @@
+const vue = globalThis.__CATRACE_VUE__ || {}
+const naive = globalThis.__CATRACE_NAIVE__ || {}
+const { h, ref, computed, onMounted } = vue
+const { NButton, NInputNumber, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
+
+if (typeof h !== 'function') throw new Error('Vue runtime missing')
+if (!NButton || !NInputNumber || !NRadioGroup || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
+if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
+
+const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
+const CSS = `
+.an-set { width: 100%; display: flex; flex-direction: column; gap: 1.25rem; }
+.an-set .plugin-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.an-set .section-title {
+  margin: 0; font-size: 0.8125rem; font-weight: 700; color: #475569; letter-spacing: 0.02rem;
+}
+.an-set .section-card {
+  background: #fff; border: 0.0625rem solid #e2e8f0; border-radius: 0.875rem;
+  padding: 0.75rem 1rem; box-shadow: 0 0.0625rem 0.125rem rgba(15, 23, 42, 0.03);
+}
+.an-set .section-desc {
+  margin: 0 0 0.5rem; font-size: 0.75rem; color: #94a3b8; line-height: 1.4;
+}
+.an-set .event-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 0.5rem 0;
+}
+.an-set .event-row + .event-row { border-top: 0.0625rem solid #f1f5f9; }
+.an-set .event-name { font-size: 0.8125rem; font-weight: 400; color: #334155; }
+.an-set .agent-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.an-set .install-btn { transition: color 0.2s, border-color 0.2s; }
+.an-set .preview-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+`
+const EVENTS = [
+  { id: 'SessionStart', label: '会话开始' },
+  { id: 'UserPromptSubmit', label: '开始思考' },
+  { id: 'PreToolUse', label: '调用工具中' },
+  { id: 'PostToolUse', label: '工具调用完成' },
+  { id: 'PostToolUseFailure', label: '工具调用失败' },
+  { id: 'Stop', label: '任务完成' },
+  { id: 'StopFailure', label: '任务出错 / 异常' },
+  { id: 'Notification', label: '等待交互' },
+  { id: 'PermissionRequest', label: '权限请求' },
+]
+const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
+
+function ensureStyles() {
+  if (document.getElementById(STYLE_ID)) return
+  const el = document.createElement('style')
+  el.id = STYLE_ID
+  el.textContent = CSS
+  document.head.appendChild(el)
+}
+
+function section(title, desc, children) {
+  return h('section', { class: 'plugin-section' }, [
+    h('h3', { class: 'section-title' }, title),
+    h('div', { class: 'section-card' }, [
+      desc ? h('p', { class: 'section-desc' }, desc) : null,
+      ...children,
+    ]),
+  ])
+}
+
+export default {
+  name: 'AgentNotifySettings',
+  setup() {
+    ensureStyles()
+    const message = useMessage()
+    const agents = ref([])
+    const detectedAgents = computed(() => agents.value.filter((a) => a.detected !== false))
+    const undetectedAgents = computed(() => agents.value.filter((a) => a.detected === false))
+    const busy = ref('')
+    const modes = ref({
+      SessionStart: 'auto',
+      UserPromptSubmit: 'auto',
+      PreToolUse: 'off',
+      PostToolUse: 'off',
+      PostToolUseFailure: 'off',
+      Stop: 'sticky',
+      StopFailure: 'sticky',
+      Notification: 'sticky',
+      PermissionRequest: 'sticky',
+    })
+    const showDebug = ref(false)
+    const debugView = ref('off')
+    const debugExpanded = ref(false)
+    const autoHideSeconds = ref(8)
+    const sidecarStale = ref(false)
+
+    async function load() {
+      try {
+        const raw = await plugin.config.get()
+        if (raw && raw.eventModes) modes.value = { ...modes.value, ...raw.eventModes }
+        showDebug.value = !!(raw && raw.showDebug)
+        if (raw && (raw.debugView === 'off' || raw.debugView === 'common' || raw.debugView === 'raw')) {
+          debugView.value = raw.debugView
+        } else {
+          debugView.value = showDebug.value ? 'raw' : 'off'
+        }
+        debugExpanded.value = raw && raw.debugExpanded === true
+        const seconds = Number(raw && raw.autoHideSeconds)
+        if (Number.isFinite(seconds) && seconds >= 3 && seconds <= 600) {
+          autoHideSeconds.value = Math.round(seconds)
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        const list = await plugin.sidecar.request('listAgents', {})
+        const result = list && list.result ? list.result : list
+        const rows = Array.isArray(result) ? result : []
+        agents.value = rows
+        sidecarStale.value = rows.length > 0 && rows.some((a) => a.detected === undefined)
+      } catch {
+        // sidecar 不可达时退回全量展示，至少让用户看到有哪些 agent
+        agents.value = ['claude', 'zcode', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false, detected: true }))
+      }
+    }
+
+    async function persistModes() {
+      const cfg = {
+        enabled: true,
+        showDebug: debugView.value !== 'off',
+        debugView: debugView.value,
+        debugExpanded: debugExpanded.value,
+        autoHideSeconds: autoHideSeconds.value,
+        eventModes: { ...modes.value },
+      }
+      await plugin.config.set(cfg)
+      try {
+        await plugin.sidecar.request('setConfig', cfg)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function setAutoHideSeconds(value) {
+      const seconds = Number(value)
+      if (!Number.isFinite(seconds) || seconds < 3 || seconds > 600) return
+      autoHideSeconds.value = Math.round(seconds)
+      persistModes().catch((e) => message.error(e instanceof Error ? e.message : String(e)))
+    }
+
+    async function setDebugView(v) {
+      debugView.value = v
+      showDebug.value = v !== 'off'
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function setDebugExpanded(v) {
+      debugExpanded.value = !!v
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function setMode(event, mode) {
+      modes.value = { ...modes.value, [event]: mode }
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function toggle(agent) {
+      busy.value = agent.id
+      const installing = !agent.installed
+      try {
+        if (installing) await plugin.sidecar.request('install', { agent: agent.id })
+        else await plugin.sidecar.request('uninstall', { agent: agent.id })
+        await load()
+        const now = agents.value.find((x) => x.id === agent.id)
+        if (installing && !now?.installed) {
+          message.error('没有写入成功（该 Agent 的配置目录可能不存在）')
+        } else {
+          message.success(installing ? 'Hook 已安装' : 'Hook 已卸载')
+        }
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      } finally {
+        busy.value = ''
+      }
+    }
+
+    const previewBusy = ref('')
+
+    async function preview(kind) {
+      previewBusy.value = kind
+      try {
+        await plugin.sidecar.request('testCard', { kind })
+        message.success('已弹出测试卡片')
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      } finally {
+        previewBusy.value = ''
+      }
+    }
+
+    onMounted(load)
+
+    return () =>
+      h('div', { class: 'an-set' }, [
+        section(
+          'Agent 联动',
+          '检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',
+          [
+            sidecarStale.value
+              ? h('p', { class: 'section-desc' }, '插件进程是旧版本：请关闭再开启本插件（或点刷新）以启用「只显示检测到的 Agent」。')
+              : null,
+            ...(detectedAgents.value.length
+              ? detectedAgents.value.map((a) =>
+                  h('div', { class: 'event-row', key: a.id }, [
+                    h('div', { class: 'agent-label' }, [
+                      h('span', { class: 'event-name' }, NAMES[a.id] || a.id),
+                      h(NTag, { size: 'small', type: a.installed ? 'success' : 'default' }, {
+                        default: () => (a.installed ? '已安装' : '未安装'),
+                      }),
+                    ]),
+                    h(
+                      NButton,
+                      {
+                        size: 'small',
+                        type: a.installed ? 'error' : 'default',
+                        secondary: !!a.installed,
+                        class: a.installed ? undefined : 'install-btn',
+                        loading: busy.value === a.id,
+                        onClick: () => toggle(a),
+                      },
+                      { default: () => (a.installed ? '卸载 Hook' : '安装 Hook') },
+                    ),
+                  ]),
+                )
+              : [
+                  h('p', { class: 'section-desc', style: 'margin: 0' },
+                    '未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。'),
+                ]),
+            ...undetectedAgents.value.length
+              ? [
+                  h('div', { class: 'event-row' }, [
+                    h('span', { class: 'event-name', style: 'color: #94a3b8' }, '未检测到'),
+                    h(
+                      'div',
+                      { style: 'display: flex; gap: 0.375rem; flex-wrap: wrap; justify-content: flex-end' },
+                      undetectedAgents.value.map((a) =>
+                        h(NTag, { size: 'small', type: 'warning', title: '未检测到配置目录，无法写入 hook' }, {
+                          default: () => NAMES[a.id] || a.id,
+                        }),
+                      ),
+                    ),
+                  ]),
+                ]
+              : [],
+          ],
+        ),
+        section(
+          '调试',
+          '卡片底部可看 hook stdin。常用=去重后的可读 JSON；原始=对方传来的全文。',
+          [
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '调试显示'),
+              h(
+                NRadioGroup,
+                { value: debugView.value, size: 'small', onUpdateValue: setDebugView },
+                {
+                  default: () => [
+                    h(NRadioButton, { value: 'off' }, { default: () => '关闭' }),
+                    h(NRadioButton, { value: 'common' }, { default: () => '常用' }),
+                    h(NRadioButton, { value: 'raw' }, { default: () => '原始' }),
+                  ],
+                },
+              ),
+            ]),
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '默认状态'),
+              h(
+                NRadioGroup,
+                { value: debugExpanded.value ? 'expanded' : 'collapsed', size: 'small', onUpdateValue: (v) => setDebugExpanded(v === 'expanded') },
+                {
+                  default: () => [
+                    h(NRadioButton, { value: 'collapsed' }, { default: () => '折叠' }),
+                    h(NRadioButton, { value: 'expanded' }, { default: () => '展开' }),
+                  ],
+                },
+              ),
+            ]),
+
+          ],
+        ),
+        section(
+          '事件通知策略',
+          '默认只对「需要你回来」的事件常驻；可按事件改成不通知 / 自动消失 / 常驻。',
+          [
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '自动消失时间（秒）'),
+              h(NInputNumber, {
+                value: autoHideSeconds.value,
+                min: 3,
+                max: 600,
+                step: 1,
+                precision: 0,
+                style: 'width: 7.5rem',
+                onUpdateValue: setAutoHideSeconds,
+              }),
+            ]),
+            ...EVENTS.map((ev) => (
+              h('div', { class: 'event-row', key: ev.id }, [
+                h('span', { class: 'event-name' }, ev.label),
+                h(
+                  NRadioGroup,
+                  {
+                    value: modes.value[ev.id],
+                    size: 'small',
+                    onUpdateValue: (v) => setMode(ev.id, v),
+                  },
+                  {
+                    default: () => [
+                      h(NRadioButton, { value: 'off' }, { default: () => '不通知' }),
+                      h(NRadioButton, { value: 'auto' }, { default: () => '自动消失' }),
+                      h(NRadioButton, { value: 'sticky' }, { default: () => '常驻' }),
+                    ],
+                  },
+                ),
+              ])
+            )),
+          ],
+        ),
+        section(
+          '调试卡片',
+          '弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',
+          [
+            h('div', { class: 'preview-row' }, [
+              h(NButton, { size: 'small', loading: previewBusy.value === 'stop', onClick: () => void preview('stop') }, { default: () => '任务完成' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'working', onClick: () => void preview('working') }, { default: () => '调用工具中' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'tool', onClick: () => void preview('tool') }, { default: () => '批准工具' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'ask', onClick: () => void preview('ask') }, { default: () => '回答问题' }),
+              h(NButton, { size: 'small', loading: previewBusy.value === 'ask-multi', onClick: () => void preview('ask-multi') }, { default: () => '多题问答' }),
+            ]),
+          ],
+        ),
+      ])
+  },
+}

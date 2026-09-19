@@ -1,0 +1,21 @@
+{
+  "id": "napcat-qq",
+  "name": "NapCat QQ",
+  "version": "0.1.0",
+  "description": "经 NapCat OneBot 收发 QQ 消息，在 Catrace 弹窗并快捷回复",
+  "main": "ui.mjs",
+  "background": "background.mjs",
+  "settings": "settings.mjs",
+  "icon": "icon.svg",
+  "events": [
+    "napcat-qq",
+    "kind:napcat-qq",
+    "napcat-qq.message"
+  ],
+  "enabledByDefault": false,
+  "sidecar": {
+    "command": "node",
+    "args": ["runtime/main.mjs"],
+    "cwd": "."
+  }
+}

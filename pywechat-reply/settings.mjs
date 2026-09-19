@@ -78,7 +78,7 @@ export default {
     const { context } = props || {}
     const message = useMessage()
     const configRef = ref({})
-    const pollMs = ref(3000)
+    const pollMs = ref(8000)
     const debug = ref(false)
 
     onMounted(async () => {
@@ -86,7 +86,7 @@ export default {
       try {
         const cfg = (await plugin.config.get()) || {}
         configRef.value = cfg
-        pollMs.value = clampInt(cfg.pollIntervalMs, 500, 60000, 3000)
+        pollMs.value = clampInt(cfg.pollIntervalMs, 500, 60000, 8000)
         debug.value = Boolean(cfg.debug)
       } catch (e) {
         console.warn('[pywechat-reply] failed to load config', e)
@@ -135,26 +135,26 @@ export default {
       h('div', { class: 'pwr-settings' }, [
         h('div', { class: 'card warn' }, [
           h('h2', null, '使用风险提示'),
-          h('p', null, '本插件通过 pywechat 模拟真人操作微信 PC 客户端，不属于微信官方 API。'),
+          h('p', null, '本插件通过 pywechat127（pyweixin）模拟操作微信 PC，不是官方 API。'),
           h('p', null, '高频自动操作或发送敏感内容可能导致微信风控、限制登录甚至封号。请仅自用，勿用于商业或违法违规用途。'),
         ]),
         h('div', { class: 'card' }, [
           h('h2', null, '依赖安装'),
-          h('p', null, '启用前请确保已安装 pywechat，且微信 PC 客户端已登录：'),
-          h('div', { class: 'mono' }, 'pip install pywechat'),
-          h('p', { class: 'hint' }, '具体安装方式以 pywechat 仓库 README 为准。'),
+          h('p', null, '启用前请 pip 安装 pywechat127，且微信 PC 已登录。sidecar 用的 python 必须能 import pyweixin：'),
+          h('div', { class: 'mono' }, 'pip install pywechat127'),
+          h('p', { class: 'hint' }, '微信 4.x 走 pyweixin；3.9 才走 pywechat。Catrace 的 python 要和你 pip 的是同一套。'),
         ]),
         h('div', { class: 'card' }, [
           h('h2', null, '轮询设置'),
           h('div', { class: 'row' }, [
             h('div', { class: 'field' }, [
               h('span', { class: 'label' }, '轮询间隔（毫秒）'),
-              h('span', { class: 'hint' }, 'pywechat 检查新消息的频率。太短会增加 CPU 占用和风控概率，建议 3000ms 以上。'),
+              h('span', { class: 'hint' }, '轮询会操作微信窗口、抢焦点。建议 8000ms 以上。'),
             ]),
             h(NInput, {
               value: String(pollMs.value),
               onUpdateValue: (v) => {
-                pollMs.value = clampInt(v, 500, 60000, 3000)
+                pollMs.value = clampInt(v, 500, 60000, 8000)
               },
               style: { width: '8rem' },
             }),

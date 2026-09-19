@@ -119,12 +119,12 @@ export default {
     isHovered: { type: Boolean, default: false },
   },
   emits: ['action'],
-  setup(props) {
-    const { event, onAction } = props || {}
-    const payload = event?.payload || {}
-    const chatName = event?.title || payload.chatName || '微信'
+  setup(props, { emit }) {
+    const event = props.event || {}
+    const payload = event.payload || {}
+    const chatName = event.title || payload.chatName || '微信'
     const sender = payload.sender || ''
-    const body = event?.body || ''
+    const body = event.body || ''
     const replyText = ref('')
     const sending = ref(false)
 
@@ -134,15 +134,7 @@ export default {
       const text = replyText.value.trim()
       if (!text || sending.value) return
       sending.value = true
-      if (typeof onAction === 'function') {
-        onAction({
-          actionId: 'reply',
-          payload: {
-            ...payload,
-            text,
-          },
-        })
-      }
+      emit('action', 'reply', { text })
     }
 
     function onKeydown(e) {
@@ -184,7 +176,7 @@ export default {
             '发送',
           ),
         ]),
-        h('p', { class: 'hint' }, '依赖 pywechat 操控微信 PC 客户端'),
+        h('p', { class: 'hint' }, '通过 pywechat127 操控微信 PC，发送会抢焦点'),
       ])
   },
 }

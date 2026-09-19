@@ -1,5 +1,8 @@
 # runtime state (sidecar/background 运行时产物，勿入库)
+**/runtime/cache/
 **/runtime/state.json
+**/runtime/local.json
+**/runtime/media/
 127.0.0.1
 
 # OS junk
