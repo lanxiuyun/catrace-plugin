@@ -71,7 +71,7 @@ description: >
 
 - `events` 是 publish 白名单：把以后要发的 `eventType`、裸 `kind`、`kind:<id>` 都列全。漏了 → 不发 Toast。
 - `sidecar.env` 可选；宿主最后注入 `CATRACE_PLUGIN_ID`、`CATRACE_PROTOCOL_VERSION=1`（覆盖同名）。
-- 宿主不跑 `npm install`；`command:"node"` 要用户 PATH 有 Node。
+- 宿主不跑 `npm install`。`command:"node"`：系统 Node 优先；没有则宿主插件页整页引导一键装便携 Node（Windows x64，写入应用数据目录，不必重启应用）。
 - **文件必须是 UTF-8、合法 JSON**（宿主 `serde_json` 严格解析）。
 
 ## 4. 写各文件
