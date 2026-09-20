@@ -13,10 +13,12 @@ features:
       - .agent/features/agent-notify/AskUserQuestion选项-左侧radio标题在上-选中细蓝边带hover.md
       - .agent/features/agent-notify/Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md
       - .agent/features/agent-notify/设置页调试卡片-五种预览抽到preview-cards不要堆进main.md
+      - .agent/features/agent-notify/sidecar按职责拆文件-ui仍必须单文件blob.md
     related:
       - agent-hook-events-docs
 
 devlog:
+  - .agent/devlog/2026-09-20-agent-notify-sidecar按职责拆分.md
   - .agent/devlog/2026-09-18-AskUserQuestion选项改成细蓝边radio.md
   - .agent/devlog/2026-09-18-AskUserQuestion可交互审批与调试卡片.md
   - .agent/devlog/2026-09-18-对照clawd沉淀权限审批两种流程.md
@@ -25,5 +27,4 @@ devlog:
 
 current:
   plan: .agent/features/agent-notify/README.md
-  phase: 问答选项为左侧 radio、标题在上；选中细蓝边 + hover；footer 分割线上方留空
-  next: 用调试卡片再看一遍选中/hover/Other 与底部分割线间距
+  phase: sidecar 已按职责拆 ESM；Toast UI 仍是单文件 Blob

@@ -4,11 +4,15 @@
 
 ## 涉及文件
 
-- `agent-notify/runtime/main.mjs` — sidecar：HTTP `/state` `/permission` `/focus` `/permission-decide`、归一化、标题缓存、sticky
+- `agent-notify/runtime/main.mjs` — sidecar 编排：HTTP `/state` `/permission` `/focus` `/permission-decide`、sticky
+- `agent-notify/runtime/hook-data.mjs` — hook JSON 归一化与会话标题缓存
+- `agent-notify/runtime/pid-chain.mjs` — 会话进程链捕获
+- `agent-notify/runtime/permission.mjs` — 权限审批 / elicitation
+- `agent-notify/runtime/focus-windows.mjs` — Windows 前往会话
 - `agent-notify/runtime/preview-cards.mjs` — 设置页调试卡片 fixture，不要堆回 main
 - `agent-notify/runtime/hook.cjs` — hook 脚本：stdin、事件别名、转发 `/state` 或阻塞 `/permission`
-- `agent-notify/runtime/hooks.mjs` — 五家 agent 安装/卸载/检测
-- `agent-notify/ui.mjs` — 会话卡与权限/问答卡
+- `agent-notify/runtime/hooks.mjs` 与 `runtime/hooks/*.mjs` — 五家 agent 安装/卸载/检测
+- `agent-notify/ui.mjs` — 会话卡与权限/问答卡（宿主 Blob 加载，必须单文件）
 - `agent-notify/settings.mjs` — 安装、事件策略、底部「调试卡片」
 - 协议与字段差异的完整说明：[../agent-notify/AGENT_HOOK_EVENTS.md](../../agent-notify/AGENT_HOOK_EVENTS.md)、[../agent-notify/HOOK_DATA_NORMALIZATION.md](../../agent-notify/HOOK_DATA_NORMALIZATION.md)
 
@@ -27,6 +31,7 @@
 - [AskUserQuestion选项-左侧radio标题在上-选中细蓝边带hover.md](AskUserQuestion选项-左侧radio标题在上-选中细蓝边带hover.md) — **选项观感：radio + 上下标题描述，选中细蓝边**
 - [Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md](Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md) — **Toast 用本机 HTTP；404 多半是旧 sidecar 占 23456**
 - [设置页调试卡片-五种预览抽到preview-cards不要堆进main.md](设置页调试卡片-五种预览抽到preview-cards不要堆进main.md) — **设置页底部调试卡片与 fixture 抽离**
+- [sidecar按职责拆文件-ui仍必须单文件blob.md](sidecar按职责拆文件-ui仍必须单文件blob.md) — **sidecar 可拆 ESM；Toast UI 不能 import 兄弟文件**
 
 ## 开发流程
 
