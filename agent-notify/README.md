@@ -19,3 +19,5 @@
 - `runtime/focus-windows.mjs`：前往会话窗口聚焦
 - `runtime/hooks/`：各 Agent 的 hook 安装器
 - `runtime/hook.cjs`：Agent 侧 hook 脚本
+- `runtime/sound.mjs`：提示音模式解析
+- `assets/agent-notify.wav`：内置提示音

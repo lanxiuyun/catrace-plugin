@@ -1,10 +1,10 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
 const { h, ref, computed, onMounted } = vue
-const { NButton, NInputNumber, NRadioButton, NRadioGroup, NSwitch, NTag, useMessage } = naive
+const { NButton, NInput, NInputNumber, NRadioButton, NRadioGroup, NSlider, NSwitch, NTag, useMessage } = naive
 
 if (typeof h !== 'function') throw new Error('Vue runtime missing')
-if (!NButton || !NInputNumber || !NRadioGroup || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
+if (!NButton || !NInput || !NInputNumber || !NRadioGroup || !NSlider || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
 if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
@@ -30,6 +30,10 @@ const CSS = `
 .an-set .agent-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
 .an-set .install-btn { transition: color 0.2s, border-color 0.2s; }
 .an-set .preview-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.an-set .sound-path { display: flex; align-items: center; gap: 0.5rem; max-width: 18rem; justify-content: flex-end; }
+.an-set .sound-path .sound-input { max-width: 12rem; }
+.an-set .sound-volume { display: flex; align-items: center; gap: 0.5rem; }
+.an-set .sound-volume .ed-unit { font-size: 0.75rem; color: #94a3b8; min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; }
 `
 const EVENTS = [
   { id: 'SessionStart', label: '会话开始' },
@@ -87,6 +91,10 @@ export default {
     const debugExpanded = ref(false)
     const autoHideSeconds = ref(8)
     const sidecarStale = ref(false)
+    const soundMode = ref('builtin')
+    const soundPath = ref('')
+    const soundVolume = ref(1)
+    let soundVolumeTimer = null
 
     async function load() {
       try {
@@ -103,6 +111,12 @@ export default {
         if (Number.isFinite(seconds) && seconds >= 3 && seconds <= 600) {
           autoHideSeconds.value = Math.round(seconds)
         }
+        if (raw && (raw.soundMode === 'builtin' || raw.soundMode === 'custom' || raw.soundMode === 'muted')) {
+          soundMode.value = raw.soundMode
+        }
+        soundPath.value = raw && raw.soundPath ? String(raw.soundPath) : ''
+        const volume = Number(raw && raw.soundVolume)
+        if (Number.isFinite(volume)) soundVolume.value = Math.min(1, Math.max(0, volume))
       } catch {
         /* ignore */
       }
@@ -126,6 +140,9 @@ export default {
         debugExpanded: debugExpanded.value,
         autoHideSeconds: autoHideSeconds.value,
         eventModes: { ...modes.value },
+        soundMode: soundMode.value,
+        soundPath: soundPath.value,
+        soundVolume: soundVolume.value,
       }
       await plugin.config.set(cfg)
       try {
@@ -191,6 +208,56 @@ export default {
     }
 
     const previewBusy = ref('')
+
+    function persistSoundSoon() {
+      if (soundVolumeTimer) clearTimeout(soundVolumeTimer)
+      soundVolumeTimer = setTimeout(() => {
+        persistModes().catch((e) => message.error(e instanceof Error ? e.message : String(e)))
+      }, 200)
+    }
+
+    async function setSoundMode(mode) {
+      soundMode.value = mode
+      try {
+        await persistModes()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function pickSoundFile() {
+      try {
+        const path = await plugin.dialog.showOpenDialog({
+          filters: [
+            { name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'flac'] },
+            { name: 'All', extensions: ['*'] },
+          ],
+        })
+        if (path) {
+          soundPath.value = path
+          await persistModes()
+        }
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    async function playPreview() {
+      try {
+        if (soundMode.value === 'muted') return
+        const pluginDir = await plugin.path.getPluginDir()
+        const path = soundMode.value === 'custom'
+          ? (soundPath.value || '').trim()
+          : `${String(pluginDir || '').replace(/[\\/]+$/, '')}/assets/agent-notify.wav`
+        if (!path) {
+          message.error('请先选择音频文件')
+          return
+        }
+        await plugin.audio.play(path, { volume: soundVolume.value })
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
 
     async function preview(kind) {
       previewBusy.value = kind
@@ -330,6 +397,69 @@ export default {
                 ),
               ])
             )),
+          ],
+        ),
+        section(
+          '提示音',
+          'Agent 通知弹出时播放。内置为迁移前的 agent-notify.wav；自定义需本地 wav / mp3 / ogg / flac。',
+          [
+            h('div', { class: 'event-row' }, [
+              h('span', { class: 'event-name' }, '提示音模式'),
+              h(
+                NRadioGroup,
+                { value: soundMode.value, size: 'small', onUpdateValue: setSoundMode },
+                {
+                  default: () => [
+                    h(NRadioButton, { value: 'builtin' }, { default: () => '内置' }),
+                    h(NRadioButton, { value: 'custom' }, { default: () => '自定义' }),
+                    h(NRadioButton, { value: 'muted' }, { default: () => '静音' }),
+                  ],
+                },
+              ),
+            ]),
+            soundMode.value !== 'muted'
+              ? h('div', { class: 'event-row' }, [
+                  h('span', { class: 'event-name' }, '提示音音量'),
+                  h('div', { class: 'sound-volume' }, [
+                    h(NSlider, {
+                      value: soundVolume.value,
+                      min: 0,
+                      max: 1,
+                      step: 0.05,
+                      style: 'width: 8rem',
+                      onUpdateValue: (v) => {
+                        soundVolume.value = v
+                        persistSoundSoon()
+                      },
+                    }),
+                    h('span', { class: 'ed-unit' }, `${Math.round(soundVolume.value * 100)}%`),
+                  ]),
+                ])
+              : null,
+            soundMode.value === 'custom'
+              ? h('div', { class: 'event-row' }, [
+                  h('span', { class: 'event-name' }, '音频文件路径'),
+                  h('div', { class: 'sound-path' }, [
+                    h(NInput, {
+                      value: soundPath.value,
+                      size: 'small',
+                      class: 'sound-input',
+                      placeholder: '选择或输入本地音频文件',
+                      onUpdateValue: (v) => {
+                        soundPath.value = v
+                      },
+                      onBlur: persistModes,
+                    }),
+                    h(NButton, { size: 'small', onClick: pickSoundFile }, { default: () => '选择文件' }),
+                  ]),
+                ])
+              : null,
+            soundMode.value !== 'muted'
+              ? h('div', { class: 'event-row' }, [
+                  h('span', { class: 'event-name' }, '试听'),
+                  h(NButton, { size: 'small', onClick: playPreview }, { default: () => '预览' }),
+                ])
+              : null,
           ],
         ),
         section(

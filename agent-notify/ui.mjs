@@ -554,6 +554,12 @@ export default {
       this.permBusy = false
       this.permError = ''
     },
+    'event.payload.soundNonce': {
+      immediate: true,
+      handler(nonce) {
+        if (nonce) this.playNotifySound()
+      },
+    },
   },
   created() {
     ensureStyles()
@@ -575,6 +581,29 @@ export default {
     if (this.timestampTimer) clearInterval(this.timestampTimer)
   },
   methods: {
+    async playNotifySound() {
+      const payload = (this.event && this.event.payload) || {}
+      const mode = payload.soundMode || 'builtin'
+      if (mode === 'muted') return
+      const volume = Math.min(1, Math.max(0, Number(payload.soundVolume) || 1))
+      try {
+        const audio = plugin && plugin.audio
+        if (!audio || typeof audio.play !== 'function') return
+        let path = ''
+        if (mode === 'custom') {
+          path = String(payload.soundPath || '').trim()
+        } else {
+          const pluginDir = plugin.path && typeof plugin.path.getPluginDir === 'function'
+            ? await plugin.path.getPluginDir()
+            : ''
+          path = `${String(pluginDir || '').replace(/[\\/]+$/, '')}/assets/agent-notify.wav`
+        }
+        if (!path) return
+        await audio.play(path, { volume })
+      } catch (error) {
+        console.warn('[agent-notify] play sound failed', error)
+      }
+    },
     permAnswer(index) {
       return this.permAnswers[index] || { selected: [], otherText: '' }
     },
