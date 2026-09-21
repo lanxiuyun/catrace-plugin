@@ -17,7 +17,11 @@ features:
     related:
       - agent-hook-events-docs
 
+bugs:
+  - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
+
 devlog:
+  - .agent/devlog/2026-09-20-agent-notify-codex前往会话透明窗.md
   - .agent/devlog/2026-09-20-agent-notify-sidecar按职责拆分.md
   - .agent/devlog/2026-09-18-AskUserQuestion选项改成细蓝边radio.md
   - .agent/devlog/2026-09-18-AskUserQuestion可交互审批与调试卡片.md

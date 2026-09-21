@@ -3,11 +3,61 @@ import { execFile } from 'node:child_process'
 const MAX_PID_COUNT = 20
 const FOCUS_TIMEOUT_MS = 8_000
 
+export const WS_EX_TRANSPARENT = 0x00000020
+export const WS_EX_TOOLWINDOW = 0x00000080
+export const WS_EX_APPWINDOW = 0x00040000
+export const WS_EX_NOACTIVATE = 0x08000000
+export const WS_EX_LAYERED = 0x00080000
+
+const BLOCKED_WINDOW_CLASSES = [
+  'OleDdeWndClass',
+  'CodexComputerUseSwiftOverlay',
+  'Chrome_StatusTrayWindow',
+  'OwlElectron_NotifyIconHostWindow',
+  'Base_PowerMessageWindow',
+]
+
 export function normalizePidChain(pidChain) {
   return [...new Set((Array.isArray(pidChain) ? pidChain : [])
     .map((pid) => Number(pid))
     .filter((pid) => Number.isInteger(pid) && pid > 1))]
     .slice(0, MAX_PID_COUNT)
+}
+
+export function isBlockedWindowClass(className) {
+  const name = String(className || '')
+  if (!name) return false
+  if (BLOCKED_WINDOW_CLASSES.some((item) => item.toLowerCase() === name.toLowerCase())) return true
+  return /overlay/i.test(name)
+}
+
+/**
+ * Decide whether a top-level HWND is a user-facing app/terminal window.
+ * Hidden overlays (Codex computer-use, Electron ghost Chrome_WidgetWin_1)
+ * must not be restored — ShowWindow(SW_SHOW) on them creates an uncloseable
+ * transparent sheet that only dies with the app.
+ */
+export function isFocusableAppWindow(win) {
+  if (!win) return false
+  if (win.owner) return false
+  if (!String(win.title || '').trim()) return false
+  if (isBlockedWindowClass(win.className)) return false
+  const ex = Number(win.exStyle) || 0
+  if ((ex & WS_EX_TRANSPARENT) !== 0) return false
+  if ((ex & WS_EX_NOACTIVATE) !== 0 && (ex & WS_EX_APPWINDOW) === 0) return false
+  if ((ex & WS_EX_TOOLWINDOW) !== 0 && (ex & WS_EX_APPWINDOW) === 0) return false
+  if ((ex & WS_EX_LAYERED) !== 0 && win.alpha === 0) return false
+  if (!win.visible && !win.iconic) return false
+  const width = Number(win.width) || 0
+  const height = Number(win.height) || 0
+  if (!win.iconic && (width < 80 || height < 80)) return false
+  return true
+}
+
+export function selectFocusWindows(windows) {
+  return (Array.isArray(windows) ? windows : [])
+    .filter(isFocusableAppWindow)
+    .sort((a, b) => ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0)))
 }
 
 function execFileText(file, args, timeoutMs) {
@@ -29,20 +79,70 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public static class CatraceSessionFocus {
+  const int GWL_EXSTYLE = -20;
+  const int WS_EX_TRANSPARENT = 0x00000020;
+  const int WS_EX_TOOLWINDOW = 0x00000080;
+  const int WS_EX_APPWINDOW = 0x00040000;
+  const int WS_EX_NOACTIVATE = 0x08000000;
+  const int WS_EX_LAYERED = 0x00080000;
+  const int SW_RESTORE = 9;
+
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command);
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int maxCount);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr hWnd, out uint key, out byte alpha, out uint flags);
   [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
   [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint pid);
   [DllImport("kernel32.dll")] public static extern bool FreeConsole();
   [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr data);
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left, Top, Right, Bottom; }
+
+  static bool IsBlockedClass(string className) {
+    if (String.Equals(className, "OleDdeWndClass", StringComparison.OrdinalIgnoreCase)) return true;
+    if (String.Equals(className, "CodexComputerUseSwiftOverlay", StringComparison.OrdinalIgnoreCase)) return true;
+    if (String.Equals(className, "Chrome_StatusTrayWindow", StringComparison.OrdinalIgnoreCase)) return true;
+    if (String.Equals(className, "OwlElectron_NotifyIconHostWindow", StringComparison.OrdinalIgnoreCase)) return true;
+    if (String.Equals(className, "Base_PowerMessageWindow", StringComparison.OrdinalIgnoreCase)) return true;
+    return className.IndexOf("Overlay", StringComparison.OrdinalIgnoreCase) >= 0;
+  }
+
+  static bool IsCandidate(IntPtr hWnd) {
+    if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return false;
+    if (GetWindow(hWnd, 4) != IntPtr.Zero) return false;
+    if (GetWindowTextLength(hWnd) <= 0) return false;
+    bool iconic = IsIconic(hWnd);
+    bool visible = IsWindowVisible(hWnd);
+    if (!visible && !iconic) return false;
+    var className = new StringBuilder(256);
+    GetClassName(hWnd, className, className.Capacity);
+    if (IsBlockedClass(className.ToString())) return false;
+    int ex = GetWindowLong(hWnd, GWL_EXSTYLE);
+    if ((ex & WS_EX_TRANSPARENT) != 0) return false;
+    if ((ex & WS_EX_NOACTIVATE) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
+    if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
+    if ((ex & WS_EX_LAYERED) != 0) {
+      uint key, flags; byte alpha;
+      if (GetLayeredWindowAttributes(hWnd, out key, out alpha, out flags) && alpha == 0) return false;
+    }
+    if (!iconic) {
+      RECT rect;
+      if (!GetWindowRect(hWnd, out rect)) return false;
+      if ((rect.Right - rect.Left) < 80 || (rect.Bottom - rect.Top) < 80) return false;
+    }
+    return true;
+  }
 
   public static IntPtr[] FindTopLevelWindows(uint[] targetPids) {
     var wanted = new HashSet<uint>(targetPids ?? new uint[0]);
@@ -51,15 +151,17 @@ public static class CatraceSessionFocus {
       uint pid;
       GetWindowThreadProcessId(hWnd, out pid);
       if (!wanted.Contains(pid)) return true;
-      bool hasTitle = GetWindowTextLength(hWnd) > 0;
-      bool hasOwner = GetWindow(hWnd, 4) != IntPtr.Zero;
-      var className = new StringBuilder(256);
-      GetClassName(hWnd, className, className.Capacity);
-      bool isInternal = String.Equals(className.ToString(), "OleDdeWndClass", StringComparison.OrdinalIgnoreCase);
-      if (hasTitle && !hasOwner && !isInternal) found.Add(hWnd);
+      if (IsCandidate(hWnd)) found.Add(hWnd);
       return true;
     }, IntPtr.Zero);
+    found.Sort((a, b) => Area(b).CompareTo(Area(a)));
     return found.ToArray();
+  }
+
+  static int Area(IntPtr hWnd) {
+    RECT rect;
+    if (!GetWindowRect(hWnd, out rect)) return 0;
+    return Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top);
   }
 
   public static IntPtr FindConsoleWindow(uint pid) {
@@ -72,9 +174,10 @@ public static class CatraceSessionFocus {
 
   public static bool Restore(IntPtr hWnd) {
     if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return false;
-    ShowWindow(hWnd, 5);
-    ShowWindow(hWnd, 9);
-    System.Threading.Thread.Sleep(120);
+    if (IsIconic(hWnd)) {
+      ShowWindow(hWnd, SW_RESTORE);
+      System.Threading.Thread.Sleep(120);
+    }
     return IsWindowVisible(hWnd);
   }
 
@@ -103,7 +206,7 @@ $otherPids = New-Object System.Collections.Generic.List[uint32]
 foreach ($candidatePid in $seedPids) {
   if (-not $processes.ContainsKey($candidatePid)) { continue }
   $name = [string]$processes[$candidatePid].Name
-  if ($name -match '^(ZCode|Codex|Claude|Code|Cursor|Trae|Windsurf|Kiro)(\.exe)?$') {
+  if ($name -match '^(ZCode|Codex|Claude|Code|Cursor|Trae|Windsurf|Kiro|ChatGPT)(\.exe)?$') {
     $appPids.Add([uint32]$candidatePid)
   } elseif ($name -match '^(WindowsTerminal|wezterm-gui|alacritty|kitty|Tabby|Wave)(\.exe)?$') {
     $terminalPids.Add([uint32]$candidatePid)
