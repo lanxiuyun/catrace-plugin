@@ -107,6 +107,7 @@ description: >
 ### background.mjs
 
 - 注入同 ui；优先只用 `plugin.*`，少做 DOM。
+- Toast 按钮/缺省标题语言：`plugin.i18n.getLocale()`（`zh-CN` | `en-US`）。**禁止**读 `document.documentElement.lang`（宿主 `index.html` 默认 `lang="en"`，中文界面会出英文按钮）。
 - 调度：`setInterval` 或分钟对齐（`timer/background.mjs:417`）。
 - 活跃门控：`plugin.activity.get()`；休息锚点：`plugin.activity.getLastRealRest()`。
 - 配置 → `plugin.config`；上次触发/计数器 → `plugin.storage`（`timer/background.mjs:214`）。

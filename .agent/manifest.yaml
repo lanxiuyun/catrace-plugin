@@ -1,4 +1,10 @@
 features:
+  timer:
+    docs:
+      - .agent/features/timer/README.md
+      - .agent/features/timer/Toast按钮语言读宿主locale不要读html-lang.md
+    related:
+      - agent-notify
   agent-notify:
     docs:
       - .agent/features/agent-notify/README.md
@@ -22,6 +28,7 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-09-21-timer-toast按钮语言读宿主locale.md
   - .agent/devlog/2026-09-20-agent-notify-codex前往会话透明窗.md
   - .agent/devlog/2026-09-20-agent-notify-sidecar按职责拆分.md
   - .agent/devlog/2026-09-18-AskUserQuestion选项改成细蓝边radio.md
