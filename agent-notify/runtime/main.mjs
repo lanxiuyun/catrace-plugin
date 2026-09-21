@@ -9,6 +9,7 @@ import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS } from './constants.mj
 import { cacheKey, cardBody, cardTitle, createTitleCache, normalizeHookData } from './hook-data.mjs'
 import { createPidChainCache } from './pid-chain.mjs'
 import { createPermissionStore, elicitationQuestions } from './permission.mjs'
+import { normalizeSoundConfig } from './sound.mjs'
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -27,7 +28,9 @@ let config = {
   debugExpanded: false,
   autoHideSeconds: 8,
   eventModes: { ...DEFAULT_MODE },
+  ...normalizeSoundConfig({}),
 }
+let soundSeq = 0
 /** @type {Map<string, object>} sessionId -> entry */
 const stickyEntries = new Map()
 const dedup = new Map()
@@ -80,6 +83,19 @@ function debugPayload() {
   }
 }
 
+function soundPayload({ play = true } = {}) {
+  const sound = normalizeSoundConfig(config)
+  if (!play || sound.soundMode === 'muted' || (sound.soundMode === 'custom' && !sound.soundPath)) {
+    return { soundMode: sound.soundMode, soundPath: sound.soundPath, soundVolume: sound.soundVolume }
+  }
+  return {
+    soundMode: sound.soundMode,
+    soundPath: sound.soundPath,
+    soundVolume: sound.soundVolume,
+    soundNonce: `${Date.now()}-${++soundSeq}`,
+  }
+}
+
 function publishSession(entry, { gone = false } = {}) {
   const sessionId = entry.sessionId || 'unknown'
   const requestId = `publish-${++publishSeq}`
@@ -102,6 +118,7 @@ function publishSession(entry, { gone = false } = {}) {
         auto_hide_ms: gone ? 0 : autoHideMs(),
         entry,
         ...debugPayload(),
+        ...soundPayload({ play: !gone }),
         raw: entry.raw || null,
       },
       dedupeKey: `agent-notify:session:${sessionId}`,
@@ -137,6 +154,7 @@ function publishPermission(id, data) {
         cwd: data.cwd,
         entry: data,
         ...debugPayload(),
+        ...soundPayload(),
         raw: data.raw,
       },
       dedupeKey: `agent-notify:perm:${id}`,
@@ -215,6 +233,7 @@ async function handleState(payload) {
         auto_hide_ms: autoHideMs(),
         entry: data,
         ...debugPayload(),
+        ...soundPayload(),
         raw: data.raw,
       },
       dedupeKey: `agent-notify:session:${sessionId}`,
@@ -338,6 +357,7 @@ function applyConfig(input = {}) {
   if (input.eventModes && typeof input.eventModes === 'object') {
     config.eventModes = { ...DEFAULT_MODE, ...input.eventModes }
   }
+  Object.assign(config, normalizeSoundConfig(input, config))
 }
 
 function handleRequest(message) {

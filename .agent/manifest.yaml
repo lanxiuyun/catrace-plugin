@@ -14,6 +14,7 @@ features:
       - .agent/features/agent-notify/Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md
       - .agent/features/agent-notify/设置页调试卡片-五种预览抽到preview-cards不要堆进main.md
       - .agent/features/agent-notify/sidecar按职责拆文件-ui仍必须单文件blob.md
+      - .agent/features/agent-notify/提示音-内置自定义静音与toast播放.md
     related:
       - agent-hook-events-docs
 

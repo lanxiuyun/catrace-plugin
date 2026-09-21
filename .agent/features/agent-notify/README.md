@@ -13,7 +13,9 @@
 - `agent-notify/runtime/hook.cjs` — hook 脚本：stdin、事件别名、转发 `/state` 或阻塞 `/permission`
 - `agent-notify/runtime/hooks.mjs` 与 `runtime/hooks/*.mjs` — 五家 agent 安装/卸载/检测
 - `agent-notify/ui.mjs` — 会话卡与权限/问答卡（宿主 Blob 加载，必须单文件）
-- `agent-notify/settings.mjs` — 安装、事件策略、底部「调试卡片」
+- `agent-notify/settings.mjs` — 安装、事件策略、提示音、底部「调试卡片」
+- `agent-notify/runtime/sound.mjs` — 内置/自定义/静音解析
+- `agent-notify/assets/agent-notify.wav` — 内置提示音
 - 协议与字段差异的完整说明：[../agent-notify/AGENT_HOOK_EVENTS.md](../../agent-notify/AGENT_HOOK_EVENTS.md)、[../agent-notify/HOOK_DATA_NORMALIZATION.md](../../agent-notify/HOOK_DATA_NORMALIZATION.md)
 
 宿主侧（junction 挂载、插件目录约定、toast 窗口机制）见 Catrace 主仓 `.agent/`（features/agent-notification、architecture/desktop-event-os）。
@@ -32,6 +34,7 @@
 - [Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md](Toast窗口不能调sidecar.request-刷新卡片不等于重启sidecar.md) — **Toast 用本机 HTTP；404 多半是旧 sidecar 占 23456**
 - [设置页调试卡片-五种预览抽到preview-cards不要堆进main.md](设置页调试卡片-五种预览抽到preview-cards不要堆进main.md) — **设置页底部调试卡片与 fixture 抽离**
 - [sidecar按职责拆文件-ui仍必须单文件blob.md](sidecar按职责拆文件-ui仍必须单文件blob.md) — **sidecar 可拆 ESM；Toast UI 不能 import 兄弟文件**
+- [提示音-内置自定义静音与toast播放.md](提示音-内置自定义静音与toast播放.md) — **迁移时漏掉的提示音：设置 + `soundNonce` 播放**
 
 ## 开发流程
 
