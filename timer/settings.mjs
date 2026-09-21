@@ -644,6 +644,39 @@ function earliestDailyMinutes(rule) {
   return min
 }
 
+function isZh(locale) {
+  return String(locale || '').toLowerCase().startsWith('zh')
+}
+
+function defaultTitle(locale) {
+  return isZh(locale) ? '定时提醒' : 'Timed Reminder'
+}
+
+function defaultBody(locale) {
+  return isZh(locale) ? '该处理这件事了。' : "It's time for this reminder."
+}
+
+function actionLabel(locale, id) {
+  const map = {
+    zh: { ack: '知道了', snooze_5: '5 分钟后', skip: '跳过' },
+    en: { ack: 'Got it', snooze_5: 'Snooze 5m', skip: 'Skip' },
+  }
+  const table = isZh(locale) ? map.zh : map.en
+  return table[id] || id
+}
+
+async function getLocale() {
+  try {
+    if (plugin.i18n && typeof plugin.i18n.getLocale === 'function') {
+      const lang = String((await plugin.i18n.getLocale()) || '').trim()
+      if (lang) return isZh(lang) ? 'zh-CN' : 'en-US'
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'zh-CN'
+}
+
 function compareRules(a, b) {
   // 1) enabled first
   const ae = a.enabled !== false ? 1 : 0
@@ -1151,17 +1184,18 @@ export default {
             console.warn('[timer settings] test audio failed', e)
           }
         }
+        const locale = await getLocale()
         await plugin.events.publish({
           eventType: 'reminder.timer.due',
           kind: 'timer',
           level: 'info',
-          title: (r.title || '').trim() || '定时提醒',
-          body: (r.body || '').trim() || '该处理这件事了。',
+          title: (r.title || '').trim() || defaultTitle(locale),
+          body: (r.body || '').trim() || defaultBody(locale),
           sticky: !!r.sticky,
           actions: [
-            { id: 'ack', label: '知道了' },
-            { id: 'snooze_5', label: '5 分钟后' },
-            { id: 'skip', label: '跳过' },
+            { id: 'ack', label: actionLabel(locale, 'ack') },
+            { id: 'snooze_5', label: actionLabel(locale, 'snooze_5') },
+            { id: 'skip', label: actionLabel(locale, 'skip') },
           ],
           payload: {
             rule_id: r.id,

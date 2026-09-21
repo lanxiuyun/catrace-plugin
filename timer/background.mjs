@@ -174,20 +174,24 @@ function pruneDailyKeys(keys, keepPrefix) {
   return others.concat(today)
 }
 
+function isZh(locale) {
+  return String(locale || '').toLowerCase().startsWith('zh')
+}
+
 function defaultTitle(locale) {
-  return locale === 'zh-CN' ? '定时提醒' : 'Timed Reminder'
+  return isZh(locale) ? '定时提醒' : 'Timed Reminder'
 }
 
 function defaultBody(locale) {
-  return locale === 'zh-CN' ? '该处理这件事了。' : "It's time for this reminder."
+  return isZh(locale) ? '该处理这件事了。' : "It's time for this reminder."
 }
 
 function actionLabel(locale, id) {
   const map = {
-    'zh-CN': { ack: '知道了', snooze_5: '5 分钟后', skip: '跳过' },
+    zh: { ack: '知道了', snooze_5: '5 分钟后', skip: '跳过' },
     en: { ack: 'Got it', snooze_5: 'Snooze 5m', skip: 'Skip' },
   }
-  const table = locale === 'zh-CN' ? map['zh-CN'] : map.en
+  const table = isZh(locale) ? map.zh : map.en
   return table[id] || id
 }
 
@@ -256,10 +260,16 @@ async function saveRuntime(settings) {
 
 async function getLocale() {
   try {
-    const lang = (document.documentElement.lang || '').trim()
-    if (lang) return lang.startsWith('zh') ? 'zh-CN' : lang
-  } catch {
-    /* ignore */
+    if (plugin.i18n && typeof plugin.i18n.getLocale === 'function') {
+      const lang = String((await plugin.i18n.getLocale()) || '').trim()
+      if (lang) return isZh(lang) ? 'zh-CN' : 'en-US'
+    }
+  } catch (e) {
+    try {
+      await plugin.log.warn('plugin.i18n.getLocale failed', { error: String(e) })
+    } catch {
+      /* ignore */
+    }
   }
   return 'zh-CN'
 }
