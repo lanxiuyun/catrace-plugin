@@ -1,7 +1,7 @@
 {
   "id": "timer",
   "name": "定时提醒",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "自定义间隔或定点提醒",
   "main": "ui.mjs",
   "background": "background.mjs",

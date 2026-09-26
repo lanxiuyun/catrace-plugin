@@ -164,7 +164,7 @@ await plugin.events.publish({
 
 ## 7. 提交
 
-1. 递增 `manifest.version`。
+1. 递增 `manifest.version`。宿主 release 只在 bundled version **严格大于** `app_data/plugins/<id>` 时覆盖；不 bump 则老用户永远拿不到这次修复（#81：timer locale 改了代码仍停在 0.1.0）。
 2. 要随宿主 release 打包 → 宿主 `tauri.conf.json` `bundle.resources` 补一行（当前只打 `timer`/`bt-music`/`sidecar-echo`）。
 3. commit 推本仓库 `main`；宿主 `git add tools/plugin-demo` 更新 submodule 指针。
 4. 更新 `README.md` 插件列表与 `develop.md` 插件索引。
