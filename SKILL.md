@@ -118,11 +118,14 @@ description: >
 
 JSONL v1：stdout 输出、stdin 读入，均为 UTF-8 JSON Lines，字段 `v:1`。
 
-- Sidecar→宿主：`ready` · `publish` · `log` · `response` · `error`
-- 宿主→Sidecar：`config` · `resolved` · `shutdown`（**必须结束进程**）· RPC（`requestId`+`method`+`params`）
+- Sidecar→宿主：`ready` · `publish` · `log` · `response` · `error` · 请求-响应能力调用（带 `requestId`，宿主回 `response`）：`storage.get` · `storage.set` · `activity.get` · `clipboard.write_text` · `shell.open_url`（仅 http/https） · `config.get` · `config.set`
+- 宿主→Sidecar：`config` · `resolved`（**携带完整事件 payload + actionId**，sidecar 可直接处理卡片动作）· `shutdown`（**必须结束进程**）· RPC（`requestId`+`method`+`params`）
 - 每个 RPC 必回 `op:'response'` 且 `requestId` 一致；stderr 进宿主日志。
+- 宿主能力 op（activity/clipboard/shell/config）在宿主侧按「插件已安装且启用」鉴权；超时 2.5s 内无 `response` 应按失败处理并 fail-open。
 - 落盘状态写 `runtime/state.json`（已在 `.gitignore`，勿提交个人数据）。
-- 范本：`github-notify/runtime/main.mjs`、`sidecar-echo/runtime/main.mjs`。
+- 范本：`github-notify/runtime/main.mjs`、`smsforwarder-notify/runtime/main.mjs`（storage/activity/动作处理）、`sidecar-echo/runtime/main.mjs`。
+
+**新插件建议用 sidecar 承载后台逻辑，不再新增 `background` 字段**：background.mjs 跑在宿主隐藏 WebView 里，每个启用插件多一个 renderer 进程（~60MB 私有内存）；sidecar 已具备等价能力（定时器 + activity/clipboard/config/storage/shell）。存量 background 插件仍被支持，迁移范本见 github-notify / smsforwarder-notify v0.2.0 / v0.1.8（背景：轻量模式，宿主 issue #82）。
 
 **publish 字段**：
 

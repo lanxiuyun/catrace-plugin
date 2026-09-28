@@ -48,11 +48,46 @@ const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
 const log = (message, data, level = 'info') =>
   send({ v: 1, op: 'log', level, message, data })
 
+/** Activity heartbeat + storage pulse (migrated from background.mjs). */
+const ACTIVITY_POLL_MS = 5_000
+const PULSE_KEY = 'activity_pulse'
+
+/**
+ * Pending host-RPC calls (activity.get / storage.set / shell.open_url),
+ * keyed by requestId. Responses arrive as op:"response" on stdin.
+ * @type {Map<string, { resolve: (v: any) => void, reject: (e: Error) => void, timer: ReturnType<typeof setTimeout> }>}
+ */
+const pendingHostCalls = new Map()
+let hostCallSeq = 0
+
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
   if (ok) message.result = result ?? null
   else message.error = error || 'request failed'
   send(message)
+}
+
+/** Call a host-side capability op and await its op:"response" (2.5s timeout). */
+function callHost(op, extra = {}) {
+  const requestId = `${pluginId}-host-${++hostCallSeq}`
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingHostCalls.delete(requestId)
+      reject(new Error(`host ${op} timeout`))
+    }, 2500)
+    pendingHostCalls.set(requestId, { resolve, reject, timer })
+    send({ v: 1, op, requestId, ...extra })
+  })
+}
+
+function handleHostResponse(message) {
+  const requestId = message.requestId
+  const pending = requestId && pendingHostCalls.get(requestId)
+  if (!pending) return
+  pendingHostCalls.delete(requestId)
+  clearTimeout(pending.timer)
+  if (message.ok) pending.resolve(message.result)
+  else pending.reject(new Error(message.error || 'host request failed'))
 }
 
 function clampInt(value, min, max, fallback) {
@@ -389,6 +424,56 @@ function mayPublishNow() {
   return true
 }
 
+/** Heartbeat tick: host activity snapshot → memory gate + storage pulse. */
+async function tickActivity() {
+  let active = false
+  try {
+    const snapshot = await callHost('activity.get')
+    active = !!(snapshot && snapshot.active)
+  } catch (error) {
+    // fail-open: host without activity.get (older host) behaves like before
+    log('activity.get failed', { error: String(error) }, 'warn')
+    return
+  }
+  hostActivityActive = active
+  hostActivityAt = Date.now()
+  try {
+    await callHost('storage.set', {
+      key: PULSE_KEY,
+      value: { active, at: Date.now() },
+    })
+  } catch {
+    /* storage pulse is best-effort */
+  }
+}
+
+let activityTimer = null
+
+function scheduleActivity() {
+  if (activityTimer) clearInterval(activityTimer)
+  activityTimer = setInterval(() => {
+    tickActivity().catch(() => {})
+  }, ACTIVITY_POLL_MS)
+  activityTimer.unref?.()
+}
+
+/** Toast action dispatch (migrated from background.mjs). */
+function handleResolved(message) {
+  log('toast resolved by host', {
+    eventId: message.eventId,
+    actionId: message.actionId,
+    resolutionKind: message.resolutionKind,
+  })
+  if (message.kind !== 'github-notify') return
+  if (message.actionId !== 'open') return
+  const payload = message.payload && typeof message.payload === 'object' ? message.payload : {}
+  const url = payload.html_url || payload.htmlUrl || ''
+  if (!url) return
+  callHost('shell.open_url', { url }).catch((error) => {
+    log('open_url failed', { error: String(error), url }, 'warn')
+  })
+}
+
 function statusPayload() {
   return {
     pluginId,
@@ -656,6 +741,10 @@ setTimeout(() => {
   schedule()
 }, 800).unref?.()
 
+// Activity heartbeat (replaces background.mjs WebView poller)
+tickActivity().catch(() => {})
+scheduleActivity()
+
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message
   try {
@@ -679,11 +768,12 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     return
   }
 
+  if (message.op === 'response') {
+    handleHostResponse(message)
+    return
+  }
+
   if (message.op === 'resolved') {
-    log('toast resolved by host', {
-      eventId: message.eventId,
-      actionId: message.actionId,
-      resolutionKind: message.resolutionKind,
-    })
+    handleResolved(message)
   }
 })

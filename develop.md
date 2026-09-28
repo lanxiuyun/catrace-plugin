@@ -105,10 +105,12 @@
 
 协议：**stdin/stdout UTF-8 JSON Lines**，字段 `v: 1`。
 
-- Sidecar → 宿主（stdout）：`ready` · `publish` · `log` · `response` · `error`
-- 宿主 → Sidecar（stdin）：`config`（启动/配置变更）· `resolved`（Toast 用户操作）· `shutdown`（禁用/退出，**必须结束进程**）· 带 `requestId`+`method` 的 RPC
-- 每个 RPC 必须 `op: 'response'` 且 `requestId` 一致；stderr 会进宿主日志。
+- Sidecar → 宿主（stdout）：`ready` · `publish` · `log` · `response` · `error` · 请求-响应能力调用（带 `requestId`，宿主回 `response`）：`storage.get` · `storage.set` · `activity.get` · `clipboard.write_text` · `shell.open_url`（仅 http/https） · `config.get` · `config.set`
+- 宿主 → Sidecar（stdin）：`config`（启动/配置变更）· `resolved`（Toast 用户操作，**携带完整事件 payload + actionId**）· `shutdown`（禁用/退出，**必须结束进程**）· 带 `requestId`+`method` 的 RPC
+- 每个 RPC 必须 `op: 'response'` 且 `requestId` 一致；stderr 会进宿主日志。能力 op 超时（建议 2.5s）按失败处理并 fail-open。
 - 参考 `github-notify/runtime/main.mjs`（config/state 落盘、shutdown、RPC）与 `sidecar-echo/runtime/main.mjs`（端到端闭环）。
+
+**新插件建议用 sidecar 承载后台逻辑，不再新增 `background` 字段**（每个 background 插件多一个 ~60MB 私有内存的隐藏 WebView；sidecar 能力已对齐，迁移范本：github-notify v0.2.0 / smsforwarder-notify v0.1.8）。
 
 **publish 字段**：
 
