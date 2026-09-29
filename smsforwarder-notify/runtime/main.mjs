@@ -154,6 +154,51 @@ function handleHostResponse(message) {
   if (pending) pending.resolve(message.ok ? message.result ?? null : null)
 }
 
+/**
+ * Generic host capability call (activity.get / clipboard.write_text /
+ * config.get / config.set). Resolves null on timeout / error (fail-soft,
+ * same semantics as storageGet).
+ */
+function hostCall(op, extra = {}) {
+  return new Promise((resolve) => {
+    const requestId = `host-${++storageReqSeq}`
+    storagePending.set(requestId, { resolve, timer: null })
+    send({ v: 1, op, requestId, ...extra })
+    const timer = setTimeout(() => {
+      if (storagePending.has(requestId)) {
+        storagePending.delete(requestId)
+        resolve(null)
+      }
+    }, 2500)
+    const pending = storagePending.get(requestId)
+    if (pending) pending.timer = timer
+  })
+}
+
+/** Activity snapshot poller (migrated from background.mjs): host → storage. */
+const ACTIVITY_KEY = 'activitySnapshot'
+const ACTIVITY_POLL_MS = 5000
+let activityTimer = null
+
+async function refreshActivitySnapshot() {
+  try {
+    const snap = await hostCall('activity.get')
+    if (!snap || typeof snap !== 'object') return
+    await storageSet(ACTIVITY_KEY, { active: Boolean(snap.active), at: Date.now() })
+  } catch {
+    /* best-effort; isUserActive fails open when the snapshot goes stale */
+  }
+}
+
+function startActivityPoller() {
+  if (activityTimer) return
+  void refreshActivitySnapshot()
+  activityTimer = setInterval(() => {
+    void refreshActivitySnapshot()
+  }, ACTIVITY_POLL_MS)
+  activityTimer.unref?.()
+}
+
 /** True when the user is currently active; unknown/stale state fails open (allow push). */
 async function isUserActive() {
   try {
@@ -1839,6 +1884,138 @@ log('smsforwarder-notify sidecar ready', {
   protocol: process.env.CATRACE_PROTOCOL_VERSION,
 })
 
+/**
+ * Card action dispatch (migrated from background.mjs). Host sidecar
+ * `op:"resolved"` carries the full event payload + actionId.
+ */
+async function handleSmsAction(message) {
+  if (message.kind !== 'smsforwarder-notify') return
+  const payload = message.payload && typeof message.payload === 'object' ? message.payload : {}
+  const title = String(payload.title || '')
+  const body = String(payload.body || '')
+  const actionId = String(message.actionId || '')
+
+  if (actionId === 'copy-otp' || actionId === 'copy-body') {
+    let text = ''
+    if (actionId === 'copy-otp') {
+      text = String(payload.otp || '') || extractOtp(title, body)
+    } else {
+      text = String(body || title || '').trim()
+    }
+    if (!text) {
+      log(`${actionId} empty`, {}, 'warn')
+      return
+    }
+    const res = await hostCall('clipboard.write_text', { text })
+    if (res === null) log('clipboard write failed', { action: actionId }, 'warn')
+    else log(`${actionId} ok`, { len: String(text).length })
+    return
+  }
+
+  if (actionId === 'block-app') {
+    await blockApp(payload)
+    return
+  }
+  if (actionId === 'block-title') {
+    await blockTitle(payload)
+  }
+}
+
+/** Read-modify-write the host config store (sidecar memory may lack fields). */
+async function mutateHostConfig(mutate) {
+  const stored = await hostCall('config.get')
+  const cfg = stored && typeof stored === 'object' ? { ...stored } : { ...config }
+  const changed = mutate(cfg)
+  if (!changed) return false
+  const res = await hostCall('config.set', { config: cfg })
+  if (res === null) {
+    log('config persist failed', {}, 'warn')
+    return false
+  }
+  // Keep sidecar memory in sync for the affected arrays
+  if (Array.isArray(cfg.filters)) config.filters = cfg.filters
+  if (Array.isArray(cfg.appBlacklist)) config.appBlacklist = cfg.appBlacklist
+  if (Array.isArray(cfg.mmsTitleBlacklist)) config.mmsTitleBlacklist = cfg.mmsTitleBlacklist
+  return true
+}
+
+async function blockTitle(payload) {
+  const rawTitle = String(payload.title || '').trim()
+  const value = stripTitleNoise(rawTitle) || rawTitle
+  if (!value) {
+    log('block-title missing title', {}, 'warn')
+    return
+  }
+  const appContains = String(payload.appName || '').trim() || String(payload.packageName || '').trim()
+  const added = await mutateHostConfig((cfg) => {
+    const list = Array.isArray(cfg.filters) ? cfg.filters.slice() : []
+    const dup = list.some((f) => {
+      if (!f || f.field !== 'title') return false
+      const sameVal = String(f.value || '').toLowerCase() === value.toLowerCase()
+      const sameApp =
+        String(f.appContains || '').toLowerCase() === String(appContains || '').toLowerCase()
+      return sameVal && sameApp && (f.match === 'contains' || f.match === 'equals')
+    })
+    if (dup) {
+      log('block-title already filtered', {})
+      return false
+    }
+    list.push({
+      id: newFilterId(),
+      enabled: true,
+      field: 'title',
+      match: 'contains',
+      value,
+      appContains,
+    })
+    cfg.filters = list.slice(0, 50)
+    return true
+  })
+  if (added) log('block-title added', { value, appContains })
+}
+
+async function blockApp(payload) {
+  const pkg = String(payload.packageName || '').trim()
+  const isLockscreenSms = pkg && LOCKSCREEN_PACKAGES.has(pkg.toLowerCase())
+  const targets = []
+  if (!isLockscreenSms && pkg) targets.push(pkg)
+  if (!isLockscreenSms && String(payload.appName || '').trim()) {
+    targets.push(String(payload.appName).trim())
+  }
+  const mmsSender = isLockscreenSms ? String(payload.title || '').trim() : ''
+  const added = await mutateHostConfig((cfg) => {
+    if (isLockscreenSms) {
+      if (!mmsSender) {
+        log('block-app missing mms title', {}, 'warn')
+        return false
+      }
+      const list = Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist.slice() : []
+      if (!list.some((x) => String(x || '').toLowerCase() === mmsSender.toLowerCase())) {
+        list.push(mmsSender)
+        added.push(mmsSender)
+      }
+      cfg.mmsTitleBlacklist = list.slice(0, 200)
+    } else {
+      const list = Array.isArray(cfg.appBlacklist) ? cfg.appBlacklist.slice() : []
+      for (const t of targets) {
+        if (!t) continue
+        const hit = list.some(
+          (x) =>
+            String(x || '').toLowerCase() === t.toLowerCase() ||
+            t.toLowerCase().includes(String(x || '').toLowerCase()),
+        )
+        if (!hit) {
+          list.push(t)
+          added.push(t)
+        }
+      }
+      cfg.appBlacklist = list.slice(0, 200)
+    }
+    return added.length > 0
+  })
+  if (added) log('block-app added', { added })
+}
+
 setTimeout(() => {
   loadThreads()
     .catch(() => {})
@@ -1854,6 +2031,9 @@ setTimeout(() => {
       }
     })
 }, 300).unref?.()
+
+// Activity snapshot poller (replaces background.mjs WebView poller)
+startActivityPoller()
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message
@@ -1899,6 +2079,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       actionId: message.actionId,
       resolutionKind: message.resolutionKind,
     })
+    void handleSmsAction(message)
     return
   }
 
