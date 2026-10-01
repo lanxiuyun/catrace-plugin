@@ -3,6 +3,36 @@ import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
+// stdout 是 JSONL 协议通道：裸 console.* 会污染协议（宿主报 invalid stdout JSONL）。
+// 统一改道为结构化 log op——debug 级别默认被宿主日志门槛滤掉（CATRACE_LOG_LEVEL=debug 还原）。
+const __catraceEmitLog = (level, args) =>
+  process.stdout.write(
+    `${JSON.stringify({
+      v: 1,
+      op: 'log',
+      level,
+      message: args
+        .map((a) => {
+          try {
+            return typeof a === 'object' ? JSON.stringify(a) : String(a)
+          } catch {
+            return '[unstringifiable]'
+          }
+        })
+        .join(' '),
+    })}
+`,
+  )
+for (const [method, level] of [
+  ['debug', 'debug'],
+  ['log', 'info'],
+  ['info', 'info'],
+  ['warn', 'warn'],
+  ['error', 'error'],
+]) {
+  console[method] = (...args) => __catraceEmitLog(level, args)
+}
+
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'dota2-typewriter'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(__dirname, 'typewriter.ps1')

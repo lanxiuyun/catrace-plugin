@@ -1,7 +1,7 @@
 {
   "id": "linuxdo-notify",
   "name": "LINUX DO 通知",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "轮询 linux.do 通知，活跃时弹出回复/提及等提醒卡片",
   "main": "ui.mjs",
   "background": "background.mjs",
