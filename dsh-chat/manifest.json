@@ -1,0 +1,15 @@
+{
+  "id": "dsh-chat",
+  "name": "DSH 对话小窗",
+  "version": "0.1.0",
+  "description": "在 Catrace 小窗里看 DeepSeek Harness（DSH）的对话，并直接向 DSH 提问。",
+  "main": "ui.mjs",
+  "settings": "settings.mjs",
+  "events": ["dsh-chat", "kind:dsh-chat", "dsh-chat.window", "dsh-chat.notice"],
+  "enabledByDefault": false,
+  "sidecar": {
+    "command": "node",
+    "args": ["runtime/main.mjs"],
+    "cwd": "."
+  }
+}

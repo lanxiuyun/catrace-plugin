@@ -1,4 +1,9 @@
 features:
+  dsh-chat:
+    docs:
+      - .agent/features/dsh-chat/README.md
+    related:
+      - agent-notify
   timer:
     docs:
       - .agent/features/timer/README.md
@@ -28,6 +33,10 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-10-03-dsh-chat去装饰与grid轨道归零.md
+  - .agent/devlog/2026-10-03-dsh-chat-A2真GUI反代进小窗.md
+  - .agent/devlog/2026-10-03-dsh-chat小窗可读性与设置页可编辑性.md
+  - .agent/devlog/2026-10-03-dsh-chat会话日志与SDK提问与小窗卡槽宽度.md
   - .agent/devlog/2026-09-21-timer-toast按钮语言读宿主locale.md
   - .agent/devlog/2026-09-20-agent-notify-codex前往会话透明窗.md
   - .agent/devlog/2026-09-20-agent-notify-sidecar按职责拆分.md
