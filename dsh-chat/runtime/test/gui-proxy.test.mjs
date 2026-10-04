@@ -10,7 +10,7 @@ import { createHash, createHmac } from 'node:crypto'
 import http from 'node:http'
 import test from 'node:test'
 
-import { cookieNameFor, discoverHost, mintAuthCookie, normalizeAuthority, parseBrowserSessionSecret } from '../lib/dsh-gui.mjs'
+import { cookieNameFor, describeDiscoveryFailure, discoverHost, mintAuthCookie, normalizeAuthority, parseBrowserSessionSecret } from '../lib/dsh-gui.mjs'
 import { buildCropCss, escapeStyleText, injectIntoHtml, startGuiProxy } from '../lib/gui-proxy.mjs'
 
 const SECRET = Buffer.from('0123456789abcdef0123456789abcdef', 'utf8').toString('base64url') // 32 字节
@@ -129,6 +129,43 @@ test('discoverHost：在漂移区间里认出假 host；cookie 用该端口的 a
 test('discoverHost：没有 host 时返回 null（不抛错）', async () => {
   const found = await discoverHost({ secret: SECRET, from: 1, drift: 0 })
   assert.equal(found, null)
+})
+
+test('403 准入栅栏：要认出这是"桌面版拒了非渲染器请求"，而不是"没找到 host"', async (t) => {
+  // 复刻桌面端的 rejectBrowserRequest：纯文本 forbidden + nosniff
+  const server = http.createServer((req, res) => {
+    res.statusCode = 403
+    res.setHeader('content-type', 'text/plain; charset=utf-8')
+    res.setHeader('x-content-type-options', 'nosniff')
+    res.end('forbidden')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  t.after(() => server.close())
+
+  const diag = []
+  const found = await discoverHost({ secret: SECRET, from: port, drift: 0, diag })
+  assert.equal(found, null, '403 不算找到 host')
+  assert.equal(diag.length, 1)
+  assert.equal(diag[0].status, 403)
+  assert.match(diag[0].body, /forbidden/)
+
+  const message = describeDiscoveryFailure(diag)
+  assert.match(message, /允许在浏览器中打开/, '必须给出可执行的补救动作')
+  assert.match(message, /设置浏览器访问/, '要点名设置项')
+  assert.ok(!/没找到正在运行的 DSH host/.test(message), '别把准入问题说成"没找到 host"')
+})
+
+test('探测失败原因：403 / 401 / 连不上 分别给不同的话术', () => {
+  assert.match(describeDiscoveryFailure([{ status: 403 }]), /403 forbidden/)
+  assert.match(describeDiscoveryFailure([{ status: 401 }]), /凭据被拒/)
+  assert.match(describeDiscoveryFailure([{ status: 0 }]), /确认 DSH Desktop 在运行/)
+  assert.match(describeDiscoveryFailure([]), /允许在浏览器中打开/)
+  assert.match(
+    describeDiscoveryFailure([{ status: 0 }, { status: 0 }, { status: 403 }]),
+    /403 forbidden/,
+    '混合结果里只要出现过 403，就按准入问题报',
+  )
 })
 
 test('反代：改写 Host/Cookie/删 Origin、注入会话、透传字节、401 透传', async (t) => {
@@ -295,6 +332,23 @@ test('去装饰 CSS：左栏"轨道归零"；顶栏默认整条隐藏，关掉�
   assert.ok(!/display:\s*none/.test(allVisible), '全都显示时不应有任何隐藏规则')
   assert.ok(!/flex:\s*0 0 auto/.test(allVisible), '全都显示时不要改官方排列')
   assert.match(allVisible, /min-height:\s*0/, '行高收紧应始终生效')
+})
+
+test('紧凑留白：默认不注入，开了才收紧官方留白', () => {
+  const off = buildCropCss({})
+  assert.ok(!/clearance/.test(off), '默认不该动官方留白变量')
+  const on = buildCropCss({ compactSpacing: true })
+  // 官方默认 --dsh-composer-side-clearance: 16px，滚动区每侧因此是 32px；归零省 16px/侧
+  assert.match(on, /--dsh-composer-side-clearance:\s*0px/, '应把官方留白变量归零')
+  assert.match(on, /\[class\*="_viewArea"\] \[class\*="_scroll"\]\s*\{[^}]*padding-left/, '应收紧对话区滚动内边距')
+  assert.match(on, /\[class\*="_composerSeat"\]\s*\{[^}]*padding-left/, '应让输入框贴边')
+  assert.match(on, /\[class\*="_body"\]\s*\{[^}]*gap:/, '应收紧消息块间距')
+  // 故意不动 --dsh-chat-content-width：最小 680px 在 360px 里不生效，且被宽表格 calc 用到，改成百分比会跑版
+  assert.ok(!/--dsh-chat-content-width/.test(on), '不要动 content-width（有跑版风险）')
+  assert.ok(
+    buildCropCss({ compactSpacing: true, customCss: 'x{}' }).trimEnd().endsWith('x{}'),
+    '自定义 CSS 必须仍排在最后',
+  )
 })
 
 test('反代：注入去装饰 CSS 与会话预选（首屏 HTML）', async (t) => {

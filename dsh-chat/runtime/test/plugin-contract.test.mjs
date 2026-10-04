@@ -168,21 +168,27 @@ test('默认值必须与 sidecar 的 lib/config.mjs 一致（防两处漂移）'
   const libSource = read('runtime/lib/config.mjs')
   const block = libSource.match(/DEFAULT_CONFIG = Object\.freeze\(\{([\s\S]*?)\}\)/)
   assert.ok(block, '没解析到 lib/config.mjs 的 DEFAULT_CONFIG')
-  const fromLib = {}
-  for (const line of block[1].split('\n')) {
-    const match = line.match(/^\s*([A-Za-z][A-Za-z0-9]*):\s*(.+?),?\s*(?:\/\/.*)?$/)
-    if (!match) continue
-    fromLib[match[1]] = match[2].trim().replace(/,$/, '')
+  /**
+   * 逐行解析 `key: value, // 注释`。两个坑都踩过：
+   * ① 一条正则同时吃值+注释时，惰性匹配会把注释吞进值里；
+   * ② 仓库是 CRLF，行尾 `\r` 会让 `/\/\/.*$/` 匹配失败（`.` 不匹配 `\r`，`$` 就不在末尾）。
+   * 所以：先去掉 `\r`，再剥注释，最后才匹配。
+   */
+  const parseDefaults = (text) => {
+    const out = {}
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.replace(/\r$/, '').replace(/\/\/.*$/, '')
+      const match = line.match(/^\s*([A-Za-z][A-Za-z0-9]*):\s*(.+?)\s*,?\s*$/)
+      if (!match) continue
+      out[match[1]] = match[2].trim().replace(/,$/, '')
+    }
+    return out
   }
+  const fromLib = parseDefaults(block[1])
   const settingsSource = read('settings.mjs')
   const settingsBlock = settingsSource.match(/const DEFAULTS = \{([\s\S]*?)\n\}/)
   assert.ok(settingsBlock, '没解析到 settings.mjs 的 DEFAULTS')
-  const fromSettings = {}
-  for (const line of settingsBlock[1].split('\n')) {
-    const match = line.match(/^\s*([A-Za-z][A-Za-z0-9]*):\s*(.+?),?\s*(?:\/\/.*)?$/)
-    if (!match) continue
-    fromSettings[match[1]] = match[2].trim().replace(/,$/, '')
-  }
+  const fromSettings = parseDefaults(settingsBlock[1])
   assert.deepEqual(
     Object.keys(fromSettings).sort(),
     Object.keys(fromLib).sort(),
@@ -256,12 +262,16 @@ test('sidecar：HTTP 桥必须校验 token，且只绑回环', () => {
 
 test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「设置没用」）', () => {
   const settings = read('settings.mjs')
-  // 1) 保存路径必须带上这些键，否则一点开关就被 compose() 丢掉
+  // 1) 保存路径必须**遍历 DEFAULTS 全键**（而不是逐个登记）：漏键 = 每次保存被抹回默认值
   assert.match(settings, /const SHOW_KEYS = \[/, '应有统一的显示项清单')
-  assert.match(settings, /for \(const key of SHOW_KEYS\) out\[key\] = Boolean/, 'compose() 必须把显示项写进保存对象')
-  // 2) 加载路径要以 sidecar 的生效配置为准（存盘缺键时不能显示成关）
+  assert.match(
+    settings,
+    /for \(const key of Object\.keys\(DEFAULTS\)\)/,
+    'compose() 必须遍历 DEFAULTS 全键（曾经只写 SHOW_KEYS → compactSpacing/customCss 被丢掉）',
+  )
+  // 2) 加载路径要以 sidecar 的生效配置为准（存盘缺键时不能显示成关），同样遍历全键
   assert.match(settings, /call\('status'\)[\s\S]{0,120}config/, 'loadConfig 应读取 sidecar 的生效配置')
-  assert.match(settings, /for \(const key of BOOL_KEYS\) text\.value\[key\] = Boolean/, '所有布尔键都要从合并结果回填')
+  assert.match(settings, /for \(const key of Object\.keys\(DEFAULTS\)\)/, '加载路径同样要遍历全键回填')
   // 3) 改完要能立刻看到效果：自动重开小窗
   assert.match(settings, /openGui/, '标签改动后应自动重开小窗（否则用户以为设置没用）')
   // 4) 用标签云呈现：点亮 = 显示，悬停有说明
@@ -319,6 +329,11 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   assert.match(settings, /classCheatSheet/, '设置页应渲染 class 速查表')
   assert.match(settings, /可改的 class 速查/, '速查表要有标题')
   assert.match(settings, /smallButton\('插入'/, '速查表每行要能一键插入规则骨架')
+  // 紧凑留白：独立开关（配置 + 界面 + 传给反代）
+  assert.match(main, /compactSpacing: config\.compactSpacing/, 'sidecar 必须把紧凑留白传给 buildCropCss')
+  assert.match(settings, /text\.value\.compactSpacing/, '设置页要有紧凑留白开关')
+  assert.match(settings, /'紧凑留白'/, '开关要有名字')
+  assert.match(settings, /compactSpacing:\s*false/, 'settings.mjs 的 DEFAULTS 里要有 compactSpacing（否则保存时被丢）')
   // 5) 契约版本自检：两边常量必须一致，且侧车要在 status 里报出来
   const versionOf = (text, file) => {
     const m = text.match(/CONTRACT_VERSION\s*=\s*(\d+)/)

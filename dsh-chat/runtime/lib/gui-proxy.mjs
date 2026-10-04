@@ -55,6 +55,31 @@ function tidyHeaderRules({ iconsHidden, hidesSomething }) {
   return rules
 }
 
+/**
+ * 「紧凑留白」：不改官方渲染管线，只把官方留白收到小窗尺度。
+ *
+ * 依据（都是从官方 CSS 里读出来的硬事实）：
+ *  - `.uPhUma_body { --dsh-composer-side-clearance: 16px }`，滚动区/审批卡都是
+ *    `padding: 16px calc(var(--dsh-composer-side-clearance) + 16px)` → 每侧 32px。
+ *    归零即省 16px/侧（360px 窗口下约 9% 宽度）。
+ *  - `--dsh-chat-content-width: var(--dsh-chat-user-width, clamp(680px, …*0.64, 920px))` 最小 680px，
+ *    在 360px 里本就不生效；**故意不动它**——它还被宽表格的 `calc((100cqw - content-width)/2)` 用到，
+ *    改成百分比会让那条 calc 失效（消息里的宽表格会跑版）。
+ */
+function compactSurfaceRules() {
+  return [
+    '[class*="_body"] { --dsh-composer-side-clearance: 0px !important; }',
+    // 滚动区侧边留白：32px → 8px（只在对话区里生效，不碰输入框内部那个同名的 _scroll）
+    '[class*="_viewArea"] [class*="_scroll"] { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }',
+    // 输入框贴边一点
+    '[class*="_composerSeat"] { padding-left: 0.25rem !important; padding-right: 0.25rem !important; }',
+    // 消息块之间的垂直间距：16px → 10px（360px 高度宝贵）
+    '[class*="_body"] { gap: 0.625rem !important; }',
+    // 回到底部 / 加载更早那类浮层跟着贴边
+    '[class*="_toBottomSlot"] { padding-inline: 0.5rem !important; }',
+  ]
+}
+
 export function buildCropCss({
   rail = true,
   header = true,
@@ -68,6 +93,7 @@ export function buildCropCss({
   messageMeta = true,
   forceLabels = false,
   tidy = true,
+  compactSpacing = false,
   customCss = '',
 } = {}) {
   const rules = []
@@ -106,6 +132,7 @@ export function buildCropCss({
     }
   }
   if (composerStatus) rules.push('[class*="_dock"], .cm-stat-dock { display: none !important; }')
+  if (compactSpacing) rules.push(...compactSurfaceRules())
   if (forceLabels) {
     // 官方用容器查询在窄宽下把顶栏文字标签折叠成只剩图标（实测原文）：
     //   智能体团队  @container (width<=480px){ .vhh34W_triggerLabel{display:none} }

@@ -306,6 +306,61 @@
 把它们点灰即可。标签云支持 `needs` 依赖：这两项的 `needs: ['showHeader','showHeaderIcons']`，
 依赖没点亮就置灰并在 tip 里说明要先点亮谁。
 
+### 紧凑留白（独立开关，`compactSpacing`）
+
+设置页「小窗外观」顶部一个开关，默认关；与 show* 标签互不影响，进 `guiSignature()` 所以切换会重建反代。
+规则在 `gui-proxy.compactSurfaceRules()`：
+
+| 项 | 官方 | 紧凑留白 |
+|---|---|---|
+| `--dsh-composer-side-clearance` | **16px**（滚动区/审批卡 `padding: 16px calc(clearance + 16px)` ⇒ 每侧 32px） | **0**（每侧 16px） |
+| 对话区 `_viewArea _scroll` 内边距 | 每侧 32px | 8px |
+| `_composerSeat` | 有侧边留白 | 贴边 0.25rem |
+| `_body` 消息块间距 | 16px | 10px |
+
+**故意不动 `--dsh-chat-content-width`**：官方默认 `var(--dsh-chat-user-width, clamp(680px, …*0.64, 920px))`，最小 680px，
+在 360px 窗口里本就不生效；而且它被消息里宽表格的 `calc((100cqw - content-width)/2)` 用到，改成百分比会让那条 calc 失效、表格跑版。
+
+（历史：orb 的 overlay 紧凑面本身也只有 38 行 CSS，核心就是 `--dsh-composer-side-clearance:0px` + `content-width:100%`；
+360px 下与我们这套几乎等价——它"看起来更好"的真正原因是**外壳自绘**。曾做过一版自绘外壳 `shell` 形态，
+用户看过后回退并另存到 `orb` 分支，不在本分支。）
+
+### 「真 GUI」打不开的 403 forbidden：桌面版渲染器准入（2026-10-05 排查）
+
+**现象**：点「小窗打开（真 GUI）」弹「没找到正在运行的 DSH host…」；实测宿主在 43120 正常监听，
+但**所有**请求（含不带 cookie、含根 HTML）都返回 **403 + `text/plain` `forbidden`**。
+
+**根因**（读桌面端代码确认，不是猜）：
+
+- `resources\app\lib\desktop-browser-access-*.js`：
+  `createDesktopBrowserAccess(ordinaryBrowserEnabled, token = randomBytes(32).toString('base64url'))`，
+  请求头常量 `x-dsh-desktop-renderer`；`decideDesktopBrowserAccess()`：token 匹配 → `renderer`（放行）；
+  否则 `!ordinaryBrowserEnabled || url 带 dsh-desktop-* 查询参数` → **`denied`**。
+- `resources\app\lib\webserver.js` 的 `rejectBrowserRequest()` = 403 + `text/plain` + `nosniff` + `forbidden`
+  （与实测响应一字不差）。
+- token 只在内存里（`randomBytes`，经 `rendererAccessHeader` 注入 Electron 网络会话），**第三方进程读不到** ⇒
+  反代（Node 发请求）必然被拒。别和 `dsh-client-connection` 的 `admit()` 混：那里是 403 栅栏之后的一层 401 认证。
+
+**结论**：A2 反代路线**依赖用户开启「允许在浏览器中打开」**（桌面版 →「设置浏览器访问」；
+桌面版自己提示"浏览器访问仅在兼容模式下可用"）。未开启时镜像卡 / SDK 提问仍可用（那条路自己起 `dsh --profile sdk`，不经过栅栏）。
+
+**插件侧改动**：`discoverHost` 支持 `diag` 收集每端口探测结果，`describeDiscoveryFailure()` 把 403/401/连不上
+翻译成可执行话术；`openGui` 与 `guiStatus.lastError` 都带上该原因（原来一律报"没找到 host"，误导性极强）。
+
+### 踩过三次的坑：`compose()` 漏键 → 「改了没区别 + 插件重启就还原」
+
+`settings.mjs` 的 `compose()` 早先只把 `SHOW_KEYS` 写回保存对象，而 `{...DEFAULTS}` 又把没登记的键抹回默认值：
+
+- 第一次：新增的 show* 键没进 `SHOW_KEYS`；
+- 第二次：`customCss`（不在任何列表里 → 用户的自定义 CSS 每次保存都被清空）；
+- 第三次：`compactSpacing`（用户报「紧凑留白看来关了，怎么没区别 + 插件一重启设置又还原」）。
+
+**结构性修法（已落地）**：`compose()` 与 `loadConfig()` 都改成
+`for (const key of Object.keys(DEFAULTS))` + 按默认值类型处理（number → clamp / boolean → Boolean / 其余 → String），
+**新增配置键不必登记任何列表**。护栏：`ui-render.test.mjs` 断言"保存对象必须包含 `DEFAULTS` 的每个键"、
+"打开 `紧凑留白` 后保存对象里必须是 true"、"自定义 CSS 必须原样保存"；`plugin-contract.test.mjs` 静态断言
+必须出现 `for (const key of Object.keys(DEFAULTS))`。
+
 ## 已知边界 / 以后要接的话
 
 - **审批**：SDK 没有应答通道，工具调用按 profile 默认策略（`workspace-write` / `ask`）走。

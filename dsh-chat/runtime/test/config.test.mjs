@@ -26,6 +26,7 @@ test('默认值符合契约', () => {
     autoOpenWindow: false,
     httpPort: 23457,
     guiPort: 23458,
+    compactSpacing: false,
     showRail: false,
     showHeader: false,
     showTabs: false,
@@ -40,6 +41,18 @@ test('默认值符合契约', () => {
     customCss: '',
   })
   assert.ok(Object.isFrozen(DEFAULT_CONFIG))
+})
+
+test('紧凑留白：独立开关，进签名（改了要重建反代才生效）', async () => {
+  const { guiSignature, normalizeConfig } = await import('../lib/config.mjs')
+  assert.equal(DEFAULT_CONFIG.compactSpacing, false, '默认关')
+  assert.equal(normalizeConfig({ compactSpacing: true }).compactSpacing, true, '能开')
+  assert.equal(normalizeConfig({ compactSpacing: 'yes' }).compactSpacing, false, '非布尔回退默认')
+  assert.notEqual(
+    guiSignature({ ...DEFAULT_CONFIG, compactSpacing: true }),
+    guiSignature(DEFAULT_CONFIG),
+    '开了紧凑留白必须改变签名，否则不会重建反代 → 看起来没生效',
+  )
 })
 
 test('show* ↔ 反代裁剪项：一对一映射，且任一开关都会改变签名', async () => {

@@ -54,7 +54,10 @@ export const GUI_CLASS_GROUPS = [
     title: '对话区与输入框',
     hint: '',
     items: [
+      { selector: '[class*="_body"]', desc: '对话主体容器（官方留白变量与消息块间距都挂在这层）；_body 很宽，改它请只动变量/gap 这类安全属性' },
       { selector: '[class*="_viewArea"]', desc: '对话滚动区（消息列表）' },
+      { selector: '[class*="_viewArea"] [class*="_scroll"]', desc: '对话区的滚动容器；左右内边距用的是官方留白变量（紧凑留白会收紧它）' },
+      { selector: '[class*="_toBottomSlot"]', desc: '「回到底部」浮层的定位槽' },
       { selector: '[class*="_scrollBody"]', desc: '对话滚动容器' },
       { selector: '[class*="_composerSeat"]', desc: '输入框整体容器（含下方状态条）' },
       { selector: '[class*="_composerStack"]', desc: '输入框堆叠容器' },

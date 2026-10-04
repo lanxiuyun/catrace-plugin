@@ -93,6 +93,20 @@ dsh --profile sdk（stdio JSON-RPC）──写──┘                         
 | 消息操作行 | 关 | 每条消息的复制/点赞/分享/时间 + 「本轮费用」 | `[class*="_actions"]`（小写，区分大小写所以不会命中 `headerActions`）+ `.cm-note` |
 | 顶栏文字标签 | 关 | **反向**开关：点亮后**强制显示**官方在窄宽下折叠掉的文字 | 官方用容器查询折叠（下面单独说），这里用一条 `!important` 盖回来 |
 
+### 紧凑留白（独立开关）
+
+设置页「小窗外观」顶部还有一个 **紧凑留白** 开关（默认关，与上面的标签互不影响）：
+
+| 项 | 官方 | 紧凑留白 |
+|---|---|---|
+| `--dsh-composer-side-clearance` | **16px** → 滚动区/审批卡每侧 `16+16` = **32px** | **0** → 每侧 16px（360px 下多出约 **16px/侧**） |
+| 对话区滚动内边距 | 每侧 32px | **8px** |
+| 输入框 | 有侧边留白 | 贴边（0.25rem） |
+| 消息块间距 | 16px | **10px** |
+
+`--dsh-chat-content-width` **故意不动**：官方默认 `var(--dsh-chat-user-width, clamp(680px, …*0.64, 920px))` 最小 **680px**，
+在 360px 里本来就不生效；且被消息里宽表格的 `calc((100cqw - content-width)/2)` 用到，改成百分比会让表格跑版。
+
 **为什么"只隐藏"会难看（以及怎么修的）**：官方顶栏是 `[_titleCluster][_headerActions][_headerUtilities][_headerCorner]` 的 flex 行，
 其中 `_titleCluster{flex:1}` 会吃掉所有剩余空间。我们把官方标题藏掉后，这个空列依然占着地方 →
 剩下的 chips 被挤在中间、和右边的图标之间留一条空隙，行高还撑着 → 观感很散。
@@ -164,6 +178,7 @@ dsh --profile sdk（stdio JSON-RPC）──写──┘                         
 | 你改的东西 | 怎么生效 | 要重启插件吗 |
 |---|---|---|
 | 显示哪些元素（标签云） | 保存 → 设置页**主动把配置推给 sidecar**（`applyConfig`）→ sidecar 关掉旧反代 → 设置页自动重开小窗（~1s） | 否 |
+| **紧凑留白** | 同上（它也在反代签名里，切了会重建反代并自动重开小窗） | 否 |
 | GUI 代理端口 | 同上（自动重开小窗） | 否 |
 | 本机端口 | sidecar 自动重绑 HTTP 桥 + 自动重新发布卡片（拿新端口） | 否 |
 | 显示条数 / 轮询间隔 | 卡片每轮从 `status.config` 读生效配置，**下一轮就变** | 否 |
@@ -173,6 +188,12 @@ dsh --profile sdk（stdio JSON-RPC）──写──┘                         
 **怎么知道自己踩到了这一条**：设置页顶部会出现一条橙色提示「插件侧车（runtime）还在运行旧代码…」——
 `settings.mjs` 与 `runtime/main.mjs` 各有一个 `CONTRACT_VERSION`（改动/新增 RPC 时两边一起 +1），
 `status` 会把它报回来，不一致就提示。
+
+**「改了没区别 / 插件重启后设置还原」的根因（踩过三次）**：`settings.mjs` 的 `compose()` 早先只把
+`SHOW_KEYS` 里的键写回保存对象，于是**没登记进列表的键**（`compactSpacing`、`customCss`）每次保存都被
+`{...DEFAULTS}` 抹回默认值 —— 界面点了没效果，重启当然还原。
+现在 `compose()` 与 `loadConfig()` 都**遍历 `DEFAULTS` 全键、按默认值类型处理**，新增配置键不用再登记；
+`ui-render.test.mjs` 里有一条通用护栏：保存对象必须包含 `DEFAULTS` 的每一个键（新增键忘了处理会立刻失败）。
 
 **注意一个宿主缺口（本插件已自行绕过）**：宿主的 `set_plugin_config`（`src-tauri/src/plugins.rs`）
 只写 store + 给前端发 `catrace:plugin-config-changed`，**不会**把新配置推给正在运行的 sidecar
@@ -211,6 +232,19 @@ dsh --profile sdk（stdio JSON-RPC）──写──┘                         
 | 平台 | Windows / macOS | 命令解析对 Windows 的 `dsh.cmd` 做了处理 |
 
 「运行状态」里 Node 不合格会直接标红。
+
+### 「真 GUI」模式的前置条件：DSH 桌面版要允许浏览器访问
+
+「真 GUI（反代官方界面）」是从本插件 sidecar 里**用 HTTP/WS 去访问 DSH 桌面版的本机 web 服务**再转给 iframe 的。
+DSH 桌面版为此加了一道**渲染器准入**栅栏（`desktop-browser-access`）：
+
+- 每个 Desktop 代次会随机生成一个 32 字节 token，只注入 **Electron 渲染器**的网络会话（请求头 `x-dsh-desktop-renderer`）；
+- 非渲染器进程（就是我们）拿不到这个 token，会被 `rejectBrowserRequest()` 以 **403 + 纯文本 `forbidden`** 拒掉；
+- 唯一出路：在 DSH 桌面版 → **「设置浏览器访问」→ 打开「允许在浏览器中打开」**（设备范围选"只有这台电脑上的浏览器"）。
+  桌面版自己的提示是 *"浏览器访问仅在兼容模式下可用"*，所以可能要把该 Profile 切成**兼容模式**（会重启应用）。
+
+没开这个开关时，「真 GUI」会失败并明确报 **403 forbidden + 该怎么做**（而不是含糊的"没找到 host"）。
+此时**镜像卡 / SDK 提问仍然可用**：那条路是 sidecar 自己起 `dsh --profile sdk` 子进程，不经过桌面版的栅栏。
 
 ## 用法
 

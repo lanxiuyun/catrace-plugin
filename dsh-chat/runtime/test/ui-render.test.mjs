@@ -111,6 +111,53 @@ function collectSwitches(node, out = []) {
   return out
 }
 
+/** 收集树里任意一种 naive 组件节点 */
+function collectNaive(node, name, out = []) {
+  if (node === null || node === undefined || node === false) return out
+  if (typeof node === 'function') return collectNaive(node(), name, out)
+  if (Array.isArray(node)) {
+    for (const child of node) collectNaive(child, name, out)
+    return out
+  }
+  if (typeof node !== 'object') return out
+  if (node.type && node.type.__naive === name) out.push(node)
+  if ('type' in node) collectNaive(node.children, name, out)
+  else for (const value of Object.values(node)) collectNaive(value, name, out)
+  return out
+}
+
+/** 找到 title 为 rowTitle 的那个 SettingRow 节点（用来定位某一行里的控件） */
+function findRow(node, rowTitle) {
+  if (node === null || node === undefined || node === false) return null
+  if (typeof node === 'function') return findRow(node(), rowTitle)
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findRow(child, rowTitle)
+      if (hit) return hit
+    }
+    return null
+  }
+  if (typeof node !== 'object') return null
+  if (node.type && node.props?.title === rowTitle) return node
+  if ('type' in node) return findRow(node.children, rowTitle)
+  for (const value of Object.values(node)) {
+    const hit = findRow(value, rowTitle)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** 从 settings.mjs 源码里解析 DEFAULTS 的键集合（用来自动覆盖"以后新增的键"） */
+function parseDefaultsKeys(source) {
+  const block = source.replace(/\r/g, '').match(/const DEFAULTS = \{([\s\S]*?)\n\}/)
+  if (!block) return []
+  return block[1]
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, '').match(/^\s*([A-Za-z][A-Za-z0-9]*):/))
+    .filter(Boolean)
+    .map((match) => match[1])
+}
+
 test('ui.mjs：能加载、setup 出 render，并在空态渲染出小窗骨架', async () => {
   installStubs()
   const mod = await loadSurface('ui.mjs')
@@ -182,6 +229,20 @@ test('settings.mjs：点开关后保存对象必须带上这些键（防「设�
 
   for (const tag of collectTags(render())) tag.props['onUpdate:checked'](false)
   for (const sw of collectSwitches(render())) sw.props['onUpdate:value'](false)
+
+  // 紧凑留白 + 自定义 CSS：这两个键都不在 SHOW_KEYS 里，曾经被 compose() 漏掉 →
+  // 每次保存都被抹回默认值 ⇒ 用户看到「改了没区别 + 插件重启就还原」。
+  const compactRow = findRow(render(), '紧凑留白')
+  assert.ok(compactRow, '设置页必须有「紧凑留白」这一行')
+  const compactSwitch = collectNaive(compactRow, 'NSwitch')[0]
+  assert.ok(compactSwitch, '「紧凑留白」行里要有开关')
+  assert.equal(typeof compactSwitch.props['onUpdate:value'], 'function', '开关必须绑定 onUpdate:value')
+  compactSwitch.props['onUpdate:value'](true)
+
+  const cssInput = collectNaive(render(), 'NInput').find((input) => input.props?.type === 'textarea')
+  assert.ok(cssInput, '自定义 CSS 输入框必须在')
+  cssInput.props['onUpdate:value']('/* marker */')
+
   await new Promise((resolve) => setTimeout(resolve, 900))
 
   assert.ok(saved.length > 0, '改开关必须触发保存')
@@ -202,7 +263,14 @@ test('settings.mjs：点开关后保存对象必须带上这些键（防「设�
   for (const key of expected) {
     assert.equal(last[key], false, `保存对象必须包含 ${key}（否则 sidecar 会回退默认值 → 设置没用）`)
   }
-  assert.equal(typeof last.customCss, 'string', '自定义 CSS 也必须一起保存')
+  assert.equal(last.compactSpacing, true, '保存对象必须带上 compactSpacing=true（否则重启还原、反代也不会注入紧凑 CSS）')
+  assert.equal(last.customCss, '/* marker */', '自定义 CSS 必须一起保存')
+  // 通用护栏：保存对象必须覆盖 DEFAULTS 的所有键。以后新增键若忘了在 compose() 里处理，这条会立刻失败。
+  const defaultsKeys = parseDefaultsKeys(readFileSync(join(ROOT, 'settings.mjs'), 'utf8'))
+  assert.ok(defaultsKeys.length >= 15, `没解析到 DEFAULTS 键（拿到 ${defaultsKeys.length} 个）`)
+  for (const key of defaultsKeys) {
+    assert.ok(key in last, `保存对象缺键 ${key}：每次保存都会被抹回默认值 → 用户看到「设置没用/重启还原」`)
+  }
 
   // 关键：宿主不会把新配置推给正在运行的 sidecar（只在启动时发一次），
   // 所以设置页必须自己 push 一次 applyConfig，否则改设置要 disable/enable 插件才生效。

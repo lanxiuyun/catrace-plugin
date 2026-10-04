@@ -26,6 +26,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   autoOpenWindow: false, // 插件启用后自动弹一次小窗
   httpPort: 23457, // 卡片访问 sidecar 的本机 HTTP 端口；0 = 交给系统分配
   guiPort: 23458, // 「真 GUI」同源反代的端口；固定端口是为了让 iframe 的 origin 稳定（localStorage 状态可复用）
+  /**
+   * 紧凑留白：把官方留白变量与滚动区/输入框/消息间距收到小窗尺度（详见 gui-proxy.compactSurfaceRules）。
+   * 独立开关——官方默认 `--dsh-composer-side-clearance: 16px`，滚动区因此每侧 32px；归零后能多出约 16px/侧宽度。
+   */
+  compactSpacing: false,
   // 真 GUI 的「显示哪些元素」开关（true = 显示；反代按 !showX 生成去装饰 CSS，详见 gui-proxy.buildCropCss）
   // 官方顶栏默认整条隐藏（标题由卡片那行显示）；showHeader=false 时下面几个顶栏子项无意义
   showRail: false, // 左侧 56px 图标栏
@@ -100,12 +105,13 @@ export function forceLabelsFor(cfg) {
   return Boolean((cfg || {}).showHeaderLabels)
 }
 
-/** 反代输出的签名：guiPort / 任一 show* / 自定义 CSS 变化都必须变（漏一个 → 改了设置不重建反代 → 看起来"没用"） */
+/** 反代输出的签名：guiPort / 任一 show* / 紧凑留白 / 自定义 CSS 变化都必须变（漏一个 → 改了设置不重建反代 → 看起来"没用"） */
 export function guiSignature(cfg) {
   const source = cfg || {}
   return JSON.stringify([
     Number(source.guiPort) || 0,
     ...SHOW_KEYS.map((key) => Boolean(source[key])),
+    Boolean(source.compactSpacing),
     String(source.customCss ?? ''),
   ])
 }
@@ -129,6 +135,7 @@ const BOOLEANS = [
   'showComposerStatus',
   'showMessageMeta',
   'showHeaderLabels',
+  'compactSpacing',
 ]
 
 /** 读取并 trim 字符串；非字符串返回 null */

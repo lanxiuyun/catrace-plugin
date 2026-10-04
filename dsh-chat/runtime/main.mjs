@@ -20,7 +20,7 @@ import { createInterface } from 'node:readline'
 
 import { cropFlagsFor, DEFAULT_CONFIG, forceLabelsFor, guiSignature, normalizeConfig } from './lib/config.mjs'
 import { GUI_CLASS_GROUPS, listGuiClasses } from './lib/gui-classes.mjs'
-import { callApi, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
+import { callApi, describeDiscoveryFailure, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
 import { buildCropCss, startGuiProxy } from './lib/gui-proxy.mjs'
 import { DshSdkClient } from './lib/sdk-client.mjs'
 import { buildSpawnPlan, resolveDshCommand } from './lib/spawn-plan.mjs'
@@ -288,7 +288,7 @@ async function methodOpenWindow(params = {}) {
 }
 
 /** GUI 复用状态（A2：把真 DSH GUI 代理进小窗） */
-const gui = { proxy: null, target: null, lastError: null, startedAt: 0, lastSessionId: '' }
+const gui = { proxy: null, target: null, lastError: null, startedAt: 0, lastSessionId: '', diag: [] }
 
 /**
  * 确保「真 GUI」可用：发现正在运行的 DSH host → 自签 cookie → 起同源反代。
@@ -303,20 +303,27 @@ async function ensureGui() {
   }
   const secret = readBrowserSessionSecret({ dshHome: config.dshHome || undefined })
   if (!secret) throw new Error('读不到 ~/.dsh/.credentials.yaml 里的 client-connection/browser-session 密钥')
-  const found = await discoverHost({ secret })
-  if (!found) throw new Error('没找到正在运行的 DSH host（默认 43120，含 +32 漂移）；请确认 DSH Desktop 在运行')
+  gui.diag = []
+  const found = await discoverHost({ secret, diag: gui.diag })
+  if (!found) {
+    gui.lastError = describeDiscoveryFailure(gui.diag)
+    throw new Error(gui.lastError)
+  }
+  const cssText = buildCropCss({
+    ...cropFlagsFor(config),
+    forceLabels: forceLabelsFor(config),
+    compactSpacing: config.compactSpacing,
+    customCss: config.customCss,
+  })
   const proxy = await startGuiProxy({
     targetPort: found.port,
     authority: found.authority,
     cookie: found.cookie,
     port: Number(config.guiPort) || 0,
-    cssText: buildCropCss({
-      ...cropFlagsFor(config),
-      forceLabels: forceLabelsFor(config),
-      customCss: config.customCss,
-    }),
+    cssText,
     log,
   })
+  gui.cssBytes = Buffer.byteLength(cssText, 'utf8')
   gui.proxy = proxy
   gui.target = { port: found.port, authority: found.authority, sessions: found.sessions }
   gui.startedAt = Date.now()
@@ -338,6 +345,9 @@ async function methodGuiStatus() {
     guiSessionId: gui.lastSessionId || '',
     // 实际注入的裁剪项（true = 隐藏），由 show* 取反而来，便于排查"设置了没生效"
     crop: cropFlagsFor(config),
+    // 紧凑留白是否已进当前反代 + 注入的 CSS 字节数：用户问"怎么没区别"时先看这两个数
+    compactSpacing: Boolean(config.compactSpacing),
+    cssBytes: gui.cssBytes ?? null,
   }
 }
 

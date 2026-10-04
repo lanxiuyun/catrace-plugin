@@ -42,6 +42,7 @@ const DEFAULTS = {
   autoOpenWindow: false,
   httpPort: 23457,
   guiPort: 23458,
+  compactSpacing: false,
   customCss: '',
   // 小窗里"显示哪些元素"（true = 显示）；与 runtime/lib/config.mjs 的 DEFAULT_CONFIG 逐键一致
   showRail: false,
@@ -278,7 +279,12 @@ const DshChatSettings = {
       'showMessageMeta',
       'showHeaderLabels',
     ]
-    const BOOL_KEYS = ['followLatest', 'autoOpenWindow', ...SHOW_KEYS]
+    /**
+     * 布尔开关（小窗显示项 + 行为开关 + 紧凑留白）：保存与加载都必须带上，漏一个就等于「设置没用」。
+     * 注意：**新增键不需要在这里登记**——compose()/loadConfig() 都是遍历 DEFAULTS 全键、按值类型处理，
+     * 这个列表只用于"空值回退"那类需要显式认识的场景。
+     */
+    const BOOL_KEYS = ['followLatest', 'autoOpenWindow', 'compactSpacing', ...SHOW_KEYS]
 
     function clamp(text_, key) {
       const { min, max } = LIMITS[key]
@@ -287,15 +293,25 @@ const DshChatSettings = {
       return Math.min(max, Math.max(min, Math.round(n)))
     }
 
+    /**
+     * 组装要写盘的配置。
+     *
+     * **遍历 DEFAULTS 的全键、按默认值类型处理**——这是刻意设计：早先只把 SHOW_KEYS 写回，
+     * 结果 `compactSpacing`、`customCss` 这类"没登记进列表"的键每次保存都被抹回默认值，
+     * 用户看到的就是「改了没区别 + 重启还原」。加键不再需要改这里。
+     */
     function compose() {
       const out = { ...DEFAULTS }
-      for (const key of TEXT_KEYS) out[key] = String(text.value[key] ?? DEFAULTS[key]).trim()
-      for (const key of NUM_KEYS) out[key] = clamp(nums.value[key], key)
-      out.followLatest = Boolean(text.value.followLatest)
-      out.autoOpenWindow = Boolean(text.value.autoOpenWindow)
-      out.mirrorSessionId = String(text.value.mirrorSessionId || '')
-      // 小窗显示项：必须一起提交，否则保存时会被丢掉（曾经漏了 → 「设置没用」）
-      for (const key of SHOW_KEYS) out[key] = Boolean(text.value[key])
+      for (const key of Object.keys(DEFAULTS)) {
+        const fallback = DEFAULTS[key]
+        if (NUM_KEYS.includes(key)) {
+          out[key] = clamp(nums.value[key], key)
+        } else if (typeof fallback === 'boolean') {
+          out[key] = Boolean(text.value[key])
+        } else {
+          out[key] = String(text.value[key] ?? fallback).trim()
+        }
+      }
       // 空字符串要回退默认（sidecar 的 normalizeConfig 也这么处理）
       for (const key of ['dshCommand', 'profile', 'provider', 'model', 'cardTitle']) {
         if (!out[key]) out[key] = DEFAULTS[key]
@@ -357,9 +373,13 @@ const DshChatSettings = {
         effective = null
       }
       const merged = { ...DEFAULTS, ...(stored && typeof stored === 'object' ? stored : {}), ...(effective || {}) }
-      for (const key of TEXT_KEYS) text.value[key] = String(merged[key] ?? DEFAULTS[key])
-      for (const key of NUM_KEYS) nums.value[key] = String(merged[key] ?? DEFAULTS[key])
-      for (const key of BOOL_KEYS) text.value[key] = Boolean(merged[key] ?? DEFAULTS[key])
+      // 同样遍历 DEFAULTS 全键：漏键会让开关显示成默认值（看起来"设置还原了"）
+      for (const key of Object.keys(DEFAULTS)) {
+        const fallback = DEFAULTS[key]
+        if (NUM_KEYS.includes(key)) nums.value[key] = String(merged[key] ?? fallback)
+        else if (typeof fallback === 'boolean') text.value[key] = Boolean(merged[key] ?? fallback)
+        else text.value[key] = String(merged[key] ?? fallback)
+      }
       text.value.mirrorSessionId = String(merged.mirrorSessionId || '')
       loaded.value = true
     }
@@ -841,6 +861,21 @@ const DshChatSettings = {
         '小窗外观',
         '点亮 = 在小窗里显示，灰掉 = 隐藏；鼠标悬停看每一项的说明。改动会自动重开小窗（~1 秒生效）。',
         [
+          row(
+            '紧凑留白',
+            NSwitch
+              ? h(NSwitch, {
+                  size: 'small',
+                  value: Boolean(text.value.compactSpacing),
+                  'onUpdate:value': (value) => {
+                    text.value.compactSpacing = value
+                    scheduleSave()
+                    reopenGuiSoon()
+                  },
+                })
+              : null,
+            '开 = 把官方留白与滚动区/输入框/消息间距收到小窗尺度（官方输入框每侧留白 32px → 16px，多出约 16px/侧宽度；消息间距 16px → 10px）',
+          ),
           ...GROUPS.filter((group) => !group.when || group.when()).map((group) =>
             h('div', { class: 'dsh-chat-settings__group' }, [
               group.title ? h('div', { class: 'dsh-chat-settings__group-title' }, group.title) : null,

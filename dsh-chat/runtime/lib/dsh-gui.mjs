@@ -117,7 +117,14 @@ export function callApi({ port, cookie, method, args = {}, timeoutMs = 5000, hos
           } catch {
             /* 401/403 会是空体或 HTML */
           }
-          resolve({ status: res.statusCode, ok: parsed?.result?.ok ?? null, value: parsed?.result?.value, error: parsed?.result?.error ?? null })
+          resolve({
+            status: res.statusCode,
+            ok: parsed?.result?.ok ?? null,
+            value: parsed?.result?.value,
+            error: parsed?.result?.error ?? null,
+            // 原文留一小段：403 时宿主回的是纯文本 `forbidden`，要靠它区分"准入被拒"和"没这个 host"
+            body: text.slice(0, 120),
+          })
         })
       },
     )
@@ -133,15 +140,41 @@ export function callApi({ port, cookie, method, args = {}, timeoutMs = 5000, hos
 /**
  * 找到一个「活着且能认证」的 DSH host：从 43120 起按桌面自身的 +1..+32 漂移区间逐个探活。
  * 每个端口都要用**该端口对应的 authority** 重新签 cookie（cookie 绑定 authority）。
+ *
+ * @param diag 可选：把每个端口的探测结果收进来，供调用方给出**能执行的**失败原因（而不是一律"没找到 host"）。
  */
-export async function discoverHost({ secret, from = DESKTOP_DEFAULT_PORT, drift = DESKTOP_MAX_PORT_DRIFT, now = Date.now() } = {}) {
+export async function discoverHost({ secret, from = DESKTOP_DEFAULT_PORT, drift = DESKTOP_MAX_PORT_DRIFT, now = Date.now(), diag } = {}) {
   for (let port = from; port <= from + drift; port += 1) {
     const authority = `127.0.0.1:${port}`
     const cookie = mintAuthCookie({ secret, authority, now })
     const probe = await callApi({ port, cookie, method: 'session/list', args: { _request: {} } })
+    if (Array.isArray(diag)) diag.push({ port, status: probe.status, body: probe.body ?? '' })
     if (probe.status === 200 && probe.ok === true) {
       return { port, authority, cookie, sessions: probe.value?.items?.length ?? 0 }
     }
   }
   return null
+}
+
+/**
+ * 把 discoverHost 的探测记录翻译成**能执行的**失败原因。
+ *
+ * 背景（DSH 桌面版新增的准入栅栏，`desktop-browser-access`）：
+ * 每个 Desktop 代次会随机生成一个 32 字节 token，只交给 Electron 渲染器的网络会话（请求头
+ * `x-dsh-desktop-renderer`）。其它进程（包括本插件的反代）拿不到这个 token，
+ * 于是被 `rejectBrowserRequest()` 以 **403 纯文本 `forbidden`** 拒掉——
+ * 唯一出路是用户在桌面版里开启「允许在浏览器中打开」。
+ */
+export function describeDiscoveryFailure(diag = []) {
+  const entries = Array.isArray(diag) ? diag : []
+  if (entries.some((e) => e.status === 403)) {
+    return 'DSH 桌面版拒绝了非渲染器请求（403 forbidden）：这是桌面版的准入栅栏。请在 DSH 桌面版 →「设置浏览器访问」→ 打开「允许在浏览器中打开」（设备范围选"只有这台电脑上的浏览器"）；提示里说明浏览器访问仅在兼容模式下可用，可能要把该 Profile 切成兼容模式。'
+  }
+  if (entries.some((e) => e.status === 401)) {
+    return '凭据被拒（401）：浏览器会话密钥已轮换。请在 DSH 桌面版里重新执行一次「在浏览器中打开」以刷新凭据，然后重试。'
+  }
+  if (entries.length > 0 && entries.every((e) => e.status === 0)) {
+    return '没找到正在运行的 DSH host（默认 43120，含 +32 漂移）；请确认 DSH Desktop 在运行'
+  }
+  return '没找到可用的 DSH host（默认 43120，含 +32 漂移）；请确认 DSH Desktop 在运行，并已开启「允许在浏览器中打开」'
 }
