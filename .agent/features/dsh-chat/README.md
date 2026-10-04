@@ -3,6 +3,15 @@
 在 Catrace 小窗里看 DeepSeek Harness（DSH）的对话，并能直接向 DSH 提问。本文写「为什么这样做」，
 使用方式见插件目录 `dsh-chat/README.md`。
 
+## 子文档
+
+- [参考项目orb的悬浮窗怎么实现的-以及为什么本插件没做自绘外壳.md](参考项目orb的悬浮窗怎么实现的-以及为什么本插件没做自绘外壳.md)
+  — 别人的小窗是四层结构（自建窗口/自绘壳页/官方对话记录/直连 API）；我们做不到哪两层、试过什么、结论
+- [紧凑留白-官方留白变量与不该动的content-width.md](紧凑留白-官方留白变量与不该动的content-width.md)
+  — 官方留白出自哪个声明、开关改哪几条、为什么不能动 `content-width`、怎么确认真的生效
+- [设置改了没反应或插件重启还原-compose漏键踩了三次.md](设置改了没反应或插件重启还原-compose漏键踩了三次.md)
+  — 本插件最高频困惑源的根因与护栏（`compose()` 只写回登记过的键）
+
 ## 需求边界
 
 - 目标：把 DSH 的对话搬进 Catrace 的一个常驻小窗（Toast sticky 卡）——**能看**（含正在跑的那一轮），
@@ -308,22 +317,9 @@
 
 ### 紧凑留白（独立开关，`compactSpacing`）
 
-设置页「小窗外观」顶部一个开关，默认关；与 show* 标签互不影响，进 `guiSignature()` 所以切换会重建反代。
-规则在 `gui-proxy.compactSurfaceRules()`：
-
-| 项 | 官方 | 紧凑留白 |
-|---|---|---|
-| `--dsh-composer-side-clearance` | **16px**（滚动区/审批卡 `padding: 16px calc(clearance + 16px)` ⇒ 每侧 32px） | **0**（每侧 16px） |
-| 对话区 `_viewArea _scroll` 内边距 | 每侧 32px | 8px |
-| `_composerSeat` | 有侧边留白 | 贴边 0.25rem |
-| `_body` 消息块间距 | 16px | 10px |
-
-**故意不动 `--dsh-chat-content-width`**：官方默认 `var(--dsh-chat-user-width, clamp(680px, …*0.64, 920px))`，最小 680px，
-在 360px 窗口里本就不生效；而且它被消息里宽表格的 `calc((100cqw - content-width)/2)` 用到，改成百分比会让那条 calc 失效、表格跑版。
-
-（历史：orb 的 overlay 紧凑面本身也只有 38 行 CSS，核心就是 `--dsh-composer-side-clearance:0px` + `content-width:100%`；
-360px 下与我们这套几乎等价——它"看起来更好"的真正原因是**外壳自绘**。曾做过一版自绘外壳 `shell` 形态，
-用户看过后回退并另存到 `orb` 分支，不在本分支。）
+设置页「小窗外观」顶部一个开关，默认关；把官方留白变量与滚动区/输入框/消息间距收到小窗尺度
+（360px 下正文宽度约 296 → 344px）。**动哪几个变量、为什么偏偏不能动 `--dsh-chat-content-width`、怎么确认真的生效**：
+[紧凑留白-官方留白变量与不该动的content-width.md](紧凑留白-官方留白变量与不该动的content-width.md)。
 
 ### 「真 GUI」打不开的 403 forbidden：桌面版渲染器准入（2026-10-05 排查）
 
@@ -349,17 +345,9 @@
 
 ### 踩过三次的坑：`compose()` 漏键 → 「改了没区别 + 插件重启就还原」
 
-`settings.mjs` 的 `compose()` 早先只把 `SHOW_KEYS` 写回保存对象，而 `{...DEFAULTS}` 又把没登记的键抹回默认值：
-
-- 第一次：新增的 show* 键没进 `SHOW_KEYS`；
-- 第二次：`customCss`（不在任何列表里 → 用户的自定义 CSS 每次保存都被清空）；
-- 第三次：`compactSpacing`（用户报「紧凑留白看来关了，怎么没区别 + 插件一重启设置又还原」）。
-
-**结构性修法（已落地）**：`compose()` 与 `loadConfig()` 都改成
-`for (const key of Object.keys(DEFAULTS))` + 按默认值类型处理（number → clamp / boolean → Boolean / 其余 → String），
-**新增配置键不必登记任何列表**。护栏：`ui-render.test.mjs` 断言"保存对象必须包含 `DEFAULTS` 的每个键"、
-"打开 `紧凑留白` 后保存对象里必须是 true"、"自定义 CSS 必须原样保存"；`plugin-contract.test.mjs` 静态断言
-必须出现 `for (const key of Object.keys(DEFAULTS))`。
+症状、根因（三次分别漏了 `show*` / `customCss` / `compactSpacing`）、结构性修法与护栏、以及顺带修掉的
+CRLF 解析测试 bug：**见 [设置改了没反应或插件重启还原-compose漏键踩了三次.md](设置改了没反应或插件重启还原-compose漏键踩了三次.md)**。
+一句话：**先查保存对象里有没有这个键**，别先去怀疑 CSS 或反代。
 
 ## 已知边界 / 以后要接的话
 
