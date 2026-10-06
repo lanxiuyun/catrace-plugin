@@ -177,6 +177,32 @@ test('ui.mjs：能加载、setup 出 render，并在空态渲染出小窗骨架'
   assert.match(text, /问问 DSH/, '应有输入框占位文案')
 })
 
+test('ui.mjs：状态通知卡（notice 事件）渲染折叠条，不渲染对话输入框', async () => {
+  installStubs()
+  const mod = await loadSurface('ui.mjs')
+  const component = mod.default
+  const noticeEvent = {
+    event_type: 'dsh-chat.notice',
+    title: '整理三点结论',
+    payload: {
+      notice: true,
+      sessionId: 's1',
+      status: 'running',
+      preview: '最新的输出文本',
+      httpPort: 23457,
+      httpToken: 'x',
+    },
+  }
+  const setupResult = component.setup({ event: noticeEvent, isHovered: false }, { emit: () => {} })
+  assert.equal(typeof setupResult, 'function', '状态卡也要 setup 出 render 函数')
+  const text = flatten(setupResult())
+  assert.match(text, /dsh-chat-notice/, '应渲染 dsh-chat-notice 根节点')
+  assert.match(text, /整理三点结论/, '折叠条要显示会话标题')
+  assert.match(text, /进行中/, '要显示状态标签')
+  assert.match(text, /最新的输出文本/, '要显示最新输出预览')
+  assert.ok(!text.includes('发送'), '状态卡不该有对话输入框')
+})
+
 test('settings.mjs：点开关后保存对象必须带上这些键（防「设置没用」）', async () => {
   installStubs()
   const saved = []

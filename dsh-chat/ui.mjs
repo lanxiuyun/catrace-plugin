@@ -158,6 +158,105 @@ const CARD_CSS = `
   background: var(--ct-surface, #ffffff);
 }
 .dsh-chat-card__actions button { min-width: 1.5rem; }
+
+/* ---------- 状态通知卡（dsh-chat.notice）：折叠条 ⇄ 真 GUI，同一张卡 ---------- */
+.dsh-chat-notice {
+  width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  background: var(--ct-surface, #ffffff);
+  color: var(--ct-text, #2e1065);
+  border: 1px solid var(--ct-border, rgba(0, 0, 0, 0.10));
+  border-radius: 0.75rem;
+  box-shadow:
+    0 0.5rem 1.5rem rgba(0, 0, 0, 0.18),
+    0 0.125rem 0.375rem rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  font-size: 0.8125rem; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.dsh-chat-notice.is-expanded { height: 30rem; }
+.dsh-chat-notice__bar {
+  display: flex; align-items: center; gap: 0.375rem;
+  padding: 0.4375rem 0.5rem 0.4375rem 0.625rem;
+  cursor: pointer; user-select: none; min-width: 0;
+}
+.dsh-chat-notice__bar:hover { background: var(--ct-accent-softer, rgba(127, 127, 127, 0.07)); }
+.dsh-chat-notice__chevron {
+  flex: 0 0 auto; color: var(--ct-text-subtle, #9aa4b2); font-size: 0.6875rem;
+  transition: transform 0.15s;
+}
+.dsh-chat-notice__chevron.is-open { transform: rotate(90deg); }
+.dsh-chat-notice__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 999px; }
+.dsh-chat-notice__dot.is-running { background: var(--ct-accent, #7c3aed); animation: dsh-notice-pulse 1.6s ease-in-out infinite; }
+.dsh-chat-notice__dot.is-done { background: #15803d; }
+.dsh-chat-notice__dot.is-waiting { background: #b45309; }
+@keyframes dsh-notice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dsh-chat-notice__title {
+  flex: 1 1 auto; min-width: 0; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dsh-chat-notice__status { flex: 0 0 auto; font-size: 0.6875rem; color: var(--ct-text-muted, #8a94a6); }
+.dsh-chat-notice__status.is-running { color: var(--ct-accent, #7c3aed); }
+.dsh-chat-notice__status.is-done { color: #15803d; }
+.dsh-chat-notice__status.is-waiting { color: #b45309; font-weight: 600; }
+.dsh-chat-notice__close {
+  flex: 0 0 auto; border: 0; background: transparent;
+  color: var(--ct-text-subtle, #9aa4b2); font-size: 0.875rem; line-height: 1;
+  padding: 0 0.25rem; cursor: pointer; border-radius: 0.25rem;
+}
+.dsh-chat-notice__close:hover { color: var(--ct-text, #2e1065); background: rgba(127, 127, 127, 0.12); }
+.dsh-chat-notice__preview {
+  padding: 0 0.625rem 0.4375rem 1.5rem;
+  color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  cursor: pointer;
+}
+.dsh-chat-notice__body {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--ct-border, rgba(0, 0, 0, 0.08));
+}
+.dsh-chat-notice__frame {
+  flex: 1 1 auto; min-height: 0; width: 100%; border: 0;
+  background: var(--ct-surface, #ffffff);
+}
+.dsh-chat-notice__loading,
+.dsh-chat-notice__error {
+  flex: 1 1 auto; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 0.5rem;
+  color: var(--ct-text-muted, #8a94a6); padding: 1rem; text-align: center;
+  overflow-wrap: anywhere;
+}
+.dsh-chat-notice__error { color: #b42318; }
+.dsh-chat-notice__retry {
+  border: 1px solid var(--ct-border, rgba(0, 0, 0, 0.12)); border-radius: 0.375rem;
+  background: transparent; color: var(--ct-text, #2e1065);
+  font-size: 0.75rem; padding: 0.1875rem 0.625rem; cursor: pointer;
+}
+.dsh-chat-notice__retry:hover { border-color: var(--ct-accent, #7c3aed); color: var(--ct-accent, #7c3aed); }
+.dsh-chat-notice__mirror {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 0.5rem 0.625rem;
+  display: flex; flex-direction: column; gap: 0.375rem;
+  overscroll-behavior: contain;
+}
+.dsh-chat-notice__mrow-user {
+  align-self: flex-end; max-width: 88%; box-sizing: border-box;
+  background: var(--ct-accent-soft, rgba(124, 58, 237, 0.14));
+  border-radius: 0.5rem; padding: 0.25rem 0.5rem;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+}
+.dsh-chat-notice__mrow-assistant {
+  align-self: stretch;
+  background: var(--ct-surface-2, rgba(127, 127, 127, 0.09));
+  border-radius: 0.5rem; padding: 0.25rem 0.5rem;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+}
+.dsh-chat-notice__mrow-tools { color: var(--ct-text-muted, #8a94a6); font-size: 0.6875rem; overflow-wrap: anywhere; }
 `
 
 /**
@@ -227,14 +326,8 @@ function reloadFrame(frameRef) {
   }, 50)
 }
 
-const DshChatWindowCard = {
-  name: 'DshChatWindowCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  setup(props, { emit }) {
+/** 窗口卡（dsh-chat.window 事件）：镜像消息流 / SDK 对话 / 真 GUI iframe 三种形态。 */
+function setupWindowCard(props, { emit }) {
     const items = ref([])
     const session = ref(null)
     const options = ref([])
@@ -676,6 +769,301 @@ const DshChatWindowCard = {
             h('div', { class: 'dsh-chat-card__body', ref: bodyRef, onScroll: onBodyScroll }, renderBody()),
             renderFooter(),
           ])
+}
+
+/** 状态卡的展示元数据：状态点/标签的颜色与文案 */
+const NOTICE_STATUS_META = {
+  running: { label: '进行中', className: 'is-running' },
+  done: { label: '已完成', className: 'is-done' },
+  waiting: { label: '等你审批', className: 'is-waiting' },
+}
+
+/**
+ * 状态通知卡（dsh-chat.notice 事件）：折叠条 ⇄ 真 GUI 小窗，同一张卡。
+ *
+ * 折叠 = 标题 + 状态 + 最新输出预览；点一下整条就地展开成官方界面（或镜像消息流），再点折叠。
+ * 生命周期由 sidecar 巡检驱动（同 dedupeKey 原地刷新，状态/预览跟着 payload 变）；
+ * 展开/收起要上报 /notice/view：用户正在看期间 sidecar 用 sticky 持有，完成也不自动收。
+ */
+function setupNoticeCard(props, { emit }) {
+  const payload = computed(() => (props.event && props.event.payload) || {})
+  const sessionId = computed(() => String(payload.value.sessionId || ''))
+  const status = computed(() => (NOTICE_STATUS_META[payload.value.status] ? payload.value.status : 'running'))
+  const statusMeta = computed(() => NOTICE_STATUS_META[status.value])
+  const title = computed(() => props.event?.title || sessionId.value || 'DSH 任务')
+  const preview = computed(() => String(payload.value.preview || ''))
+  const expandMode = computed(() => (payload.value.expandMode === 'mirror' ? 'mirror' : 'gui'))
+
+  const expanded = ref(false)
+  const guiUrl = ref('')
+  const guiError = ref('')
+  const guiLoading = ref(false)
+  const mirrorItems = ref([])
+  const mirrorError = ref('')
+  const mirrorBodyRef = ref(null)
+  let mirrorTimer = null
+  let disposed = false
+
+  async function call(method, params = {}) {
+    const port = Number(payload.value.httpPort) || 23457
+    const token = String(payload.value.httpToken || '')
+    const base = `http://127.0.0.1:${port}`
+    const headers = token ? { 'X-Dsh-Chat-Token': token } : {}
+    let url = base
+    let init = { headers }
+    if (method === 'gui') {
+      url = `${base}/gui`
+      init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: params.sessionId ?? '' }) }
+    } else if (method === 'view') {
+      url = `${base}/notice/view`
+      init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: params.sessionId ?? '', expanded: params.expanded !== false }) }
+    } else if (method === 'readSession') {
+      url = `${base}/session?id=${encodeURIComponent(String(params.id ?? ''))}&limit=${encodeURIComponent(String(params.limit ?? 20))}`
+    } else {
+      throw new Error(`状态卡不支持的方法：${method}`)
+    }
+    let response
+    try {
+      response = await fetch(url, init)
+    } catch (cause) {
+      throw new Error(`本机 HTTP 桥连不上（127.0.0.1:${port}）：${cause?.message || cause}`)
+    }
+    let data = null
+    try {
+      data = await response.json()
+    } catch {
+      throw new Error(`HTTP ${response.status}：返回不是 JSON`)
+    }
+    if (!response.ok || data?.ok === false) throw new Error(data?.error || `HTTP ${response.status}`)
+    return data.result
+  }
+
+  /** 展开/收起上报：尽力而为（sidecar 重启后旧卡上报失败就算了） */
+  function notifyView(value) {
+    if (!sessionId.value) return Promise.resolve()
+    return call('view', { sessionId: sessionId.value, expanded: value }).catch(() => {})
+  }
+
+  async function ensureGui() {
+    if (guiUrl.value) return
+    guiLoading.value = true
+    guiError.value = ''
+    try {
+      const res = await call('gui', { sessionId: sessionId.value })
+      guiUrl.value = res?.guiUrl || ''
+      if (!guiUrl.value) throw new Error('sidecar 没有返回 GUI 地址')
+    } catch (cause) {
+      guiError.value = cause?.message || String(cause)
+    } finally {
+      guiLoading.value = false
+    }
+  }
+
+  async function loadMirror() {
+    mirrorError.value = ''
+    try {
+      const res = await call('readSession', { id: sessionId.value, limit: 20 })
+      mirrorItems.value = Array.isArray(res?.session?.items) ? res.session.items : []
+      if (!res?.session) {
+        mirrorError.value = res?.reason === 'unreadable' ? '会话日志暂时读不出来（可能正在写入）' : '找不到这个会话'
+      }
+    } catch (cause) {
+      mirrorError.value = cause?.message || String(cause)
+    }
+    window.setTimeout(() => {
+      const el = mirrorBodyRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    }, 0)
+  }
+
+  function stopMirrorTimer() {
+    if (mirrorTimer !== null) {
+      window.clearInterval(mirrorTimer)
+      mirrorTimer = null
+    }
+  }
+
+  function armMirrorTimer() {
+    stopMirrorTimer()
+    mirrorTimer = window.setInterval(() => {
+      if (!disposed && expanded.value) void loadMirror()
+    }, 2000)
+  }
+
+  async function expand() {
+    if (expanded.value || disposed) return
+    expanded.value = true
+    void notifyView(true)
+    if (expandMode.value === 'gui') await ensureGui()
+    else {
+      await loadMirror()
+      armMirrorTimer()
+    }
+  }
+
+  function collapse() {
+    if (!expanded.value) return
+    expanded.value = false
+    stopMirrorTimer()
+    void notifyView(false)
+  }
+
+  function toggle() {
+    if (expanded.value) collapse()
+    else void expand()
+  }
+
+  // 审批自动展开：sidecar 发出 waiting + autoExpand → 就地展开真 GUI
+  const stopAutoExpandWatch = watch
+    ? watch(
+        () => payload.value.autoExpand === true,
+        (wanted) => {
+          if (wanted && !expanded.value && !disposed) void expand()
+        },
+      )
+    : null
+
+  onMounted(() => {
+    if (payload.value.autoExpand === true) void expand()
+  })
+
+  onBeforeUnmount(() => {
+    disposed = true
+    if (typeof stopAutoExpandWatch === 'function') stopAutoExpandWatch()
+    stopMirrorTimer()
+    if (expanded.value && sessionId.value) {
+      // 收尾上报带 keepalive：Toast 窗被关时也尽量把「已收起」带给 sidecar
+      try {
+        const port = Number(payload.value.httpPort) || 23457
+        const token = String(payload.value.httpToken || '')
+        void fetch(`http://127.0.0.1:${port}/notice/view`, {
+          method: 'POST',
+          keepalive: true,
+          headers: { ...(token ? { 'X-Dsh-Chat-Token': token } : {}), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionId.value, expanded: false }),
+        }).catch(() => {})
+      } catch {
+        /* 尽力而为 */
+      }
+    }
+  })
+
+  function renderBar() {
+    const meta = statusMeta.value
+    return h(
+      'div',
+      { class: 'dsh-chat-notice__bar', onClick: toggle, title: expanded.value ? '点击折叠' : '点击展开' },
+      [
+        h('span', { class: `dsh-chat-notice__chevron${expanded.value ? ' is-open' : ''}` }, '▸'),
+        h('span', { class: `dsh-chat-notice__dot ${meta.className}` }),
+        h('span', { class: 'dsh-chat-notice__title', title: title.value }, title.value),
+        h('span', { class: `dsh-chat-notice__status ${meta.className}` }, meta.label),
+        h('button', {
+          class: 'dsh-chat-notice__close',
+          title: '关闭这张卡',
+          type: 'button',
+          onClick: (e) => {
+            e.stopPropagation()
+            emit('close')
+          },
+        }, '×'),
+      ],
+    )
+  }
+
+  function renderPreviewRow() {
+    if (expanded.value || !preview.value) return null
+    return h('div', { class: 'dsh-chat-notice__preview', title: preview.value, onClick: toggle }, preview.value)
+  }
+
+  function renderMirrorItems() {
+    const grouped = groupItems(mirrorItems.value)
+    const nodes = []
+    for (const item of grouped) {
+      if (item.kind === 'user') {
+        if (item.context) continue
+        nodes.push(h('div', { class: 'dsh-chat-notice__mrow-user', key: `u${item.id}` }, item.text || ''))
+      } else if (item.kind === 'assistant') {
+        if (!item.text) continue
+        nodes.push(h('div', { class: 'dsh-chat-notice__mrow-assistant', key: `a${item.id}` }, item.text))
+      } else if (item.kind === 'toolGroup') {
+        const failed = item.tools.filter((tool) => tool.ok === false).length
+        nodes.push(
+          h('div', { class: 'dsh-chat-notice__mrow-tools', key: item.id ?? `g${nodes.length}` },
+            `${item.tools.length} 个工具调用${failed > 0 ? `（${failed} 个失败）` : ''}`),
+        )
+      }
+    }
+    if (nodes.length === 0) {
+      nodes.push(h('div', { class: 'dsh-chat-notice__mrow-tools' }, '这个会话还没有可显示的消息'))
+    }
+    return nodes
+  }
+
+  function renderBody() {
+    if (expandMode.value === 'mirror') {
+      return [
+        h('div', { class: 'dsh-chat-notice__mirror', ref: mirrorBodyRef }, [
+          mirrorError.value
+            ? h('div', { class: 'dsh-chat-notice__mrow-tools' }, mirrorError.value)
+            : renderMirrorItems(),
+        ]),
+      ]
+    }
+    if (guiError.value) {
+      return [
+        h('div', { class: 'dsh-chat-notice__error' }, [
+          h('div', null, `连不上 DSH 官方界面：${guiError.value}`),
+          h('button', {
+            class: 'dsh-chat-notice__retry',
+            type: 'button',
+            onClick: (e) => {
+              e.stopPropagation()
+              void ensureGui()
+            },
+          }, '重试'),
+        ]),
+      ]
+    }
+    if (!guiUrl.value) {
+      return [h('div', { class: 'dsh-chat-notice__loading' }, guiLoading.value ? '正在连接 DSH 官方界面…' : '准备中…')]
+    }
+    return [
+      h('iframe', {
+        class: 'dsh-chat-notice__frame',
+        src: guiUrl.value,
+        // 不加 sandbox：sandbox 会让页面变成 opaque origin，DSH 的信任栅栏直接 403
+        allow: 'clipboard-read; clipboard-write',
+      }),
+    ]
+  }
+
+  return () =>
+    h('div', { class: `dsh-chat-notice${expanded.value ? ' is-expanded' : ''}` }, [
+      renderBar(),
+      renderPreviewRow(),
+      expanded.value ? h('div', { class: 'dsh-chat-notice__body' }, renderBody()) : null,
+    ])
+}
+
+/**
+ * 卡片入口：按事件类型分流（宿主按 kind 找插件、加载这一个组件）。
+ *  - dsh-chat.notice → 状态通知卡（折叠条 ⇄ 真 GUI）
+ *  - dsh-chat.window → 常驻对话小窗（镜像 / 对话 / 真 GUI）
+ */
+const DshChatWindowCard = {
+  name: 'DshChatWindowCard',
+  props: {
+    event: { type: Object, required: true },
+    isHovered: { type: Boolean, default: false },
+  },
+  emits: ['close', 'action'],
+  setup(props, ctx) {
+    // 两类卡片共用一份 CARD_CSS：谁先挂载谁负责注入/更新（状态卡独立挂载时也必须有样式）
+    ensureStyle()
+    const isNotice =
+      props.event?.event_type === 'dsh-chat.notice' || props.event?.payload?.notice === true
+    return isNotice ? setupNoticeCard(props, ctx) : setupWindowCard(props, ctx)
   },
 }
 

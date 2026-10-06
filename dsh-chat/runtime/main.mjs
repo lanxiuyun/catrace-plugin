@@ -21,16 +21,26 @@ import { createInterface } from 'node:readline'
 import { cropFlagsFor, DEFAULT_CONFIG, forceLabelsFor, guiSignature, normalizeConfig } from './lib/config.mjs'
 import { GUI_CLASS_GROUPS, listGuiClasses } from './lib/gui-classes.mjs'
 import { callApi, describeDiscoveryFailure, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
+import { NoticeTracker } from './lib/inspector.mjs'
 import { buildCropCss, startGuiProxy } from './lib/gui-proxy.mjs'
 import { DshSdkClient } from './lib/sdk-client.mjs'
 import { buildSpawnPlan, resolveDshCommand } from './lib/spawn-plan.mjs'
-import { latestSession, listSessions, readSession, resolveDshHome } from './lib/session-store.mjs'
+import {
+  latestSession,
+  listSessions,
+  readParsedSessionLog,
+  readSession,
+  resolveDshHome,
+  scanSessionLogs,
+} from './lib/session-store.mjs'
 
 const WINDOW_DEDUPE_KEY = 'dsh-chat.window'
+const NOTICE_DEDUPE_PREFIX = 'dsh-chat.notice:'
+const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你审批' }
 const MAX_PROMPT_CHARS = 20000
 const VERSION_TIMEOUT_MS = 15000
 const DEFAULT_HTTP_PORT = 23457
-const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/mirror', '/prompt', '/stop', '/window']
+const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/mirror', '/prompt', '/stop', '/window', '/gui', '/notice/view']
 
 /** @type {ReturnType<typeof normalizeConfig>} */
 let config = { ...DEFAULT_CONFIG }
@@ -46,6 +56,9 @@ let httpServer = null
 let httpPort = null
 /** 卡片访问本机 HTTP 的一次性口令：只有拿到已发布 payload 的卡片知道。 */
 const httpToken = randomBytes(16).toString('hex')
+
+// ---- 状态通知巡检（NoticeTracker 是纯逻辑，IO 与定时器都在这里）----
+const noticeLoop = { timer: null, tracker: null, polling: false, lastPollAt: 0 }
 
 function send(payload) {
   process.stdout.write(`${JSON.stringify({ v: 1, ...payload })}\n`)
@@ -67,7 +80,7 @@ function respond(requestId, ok, result, error) {
  * 设置页会拿 sidecar 报回的版本跟自己对，不一致就提示"插件在跑旧代码，关掉再打开"——
  * 这类"改了代码但侧车还是老的"的困惑已经出现过好几次了。
  */
-const CONTRACT_VERSION = 2
+const CONTRACT_VERSION = 3
 
 /** 把一次可能失败的读取收敛成兜底值，避免整个 RPC 因单个坏文件失败。 */
 function safe(fn, fallback) {
@@ -352,10 +365,12 @@ async function methodGuiStatus() {
 }
 
 /**
- * A2：把某条会话的**真 GUI** 打开到小窗（iframe 指向我们的同源反代）。
+ * A2：把某条会话的**真 GUI** 准备好（发现 host → 自签 cookie → 同源反代），
+ * 返回 iframe 用的 URL 与会话标题。设置页「小窗打开」和状态卡「展开」共用这一步。
  */
-async function methodOpenGui(params = {}) {
+async function methodGuiUrl(params = {}) {
   const sessionId = String(params.sessionId ?? '') || chatSessionId || mirrorTarget()
+  if (!sessionId) throw new Error('没有可打开的 DSH 会话')
   let state
   try {
     state = await ensureGui()
@@ -365,11 +380,14 @@ async function methodOpenGui(params = {}) {
   }
   const url = `${state.proxy.url}?dshw-session=${encodeURIComponent(sessionId)}`
   gui.lastSessionId = sessionId
-  const session = sessionId
-    ? safe(() => readSession({ dshHome: dshHome(), id: sessionId, limit: 1, maxText: 120 }), null)
-    : null
   // 卡片顶栏要显示"会话标题"而不是 id（官方顶栏被去装饰隐藏后，标题就靠这一行）
-  const title = session?.title || ''
+  const session = safe(() => readSession({ dshHome: dshHome(), id: sessionId, limit: 1, maxText: 120 }), null)
+  return { guiUrl: url, title: session?.title || '', sessionId, target: state.target }
+}
+
+/** A2：把某条会话的**真 GUI** 打开到独立小窗卡（iframe 指向我们的同源反代）。 */
+async function methodOpenGui(params = {}) {
+  const { guiUrl, title, sessionId } = await methodGuiUrl(params)
   send({
     op: 'publish',
     event: {
@@ -383,7 +401,7 @@ async function methodOpenGui(params = {}) {
       payload: {
         open: true,
         toastStyle: 'standalone',
-        guiUrl: url,
+        guiUrl,
         guiSessionId: sessionId,
         guiTitle: title,
         httpPort,
@@ -392,8 +410,145 @@ async function methodOpenGui(params = {}) {
       },
     },
   })
-  return { opened: true, guiUrl: url, sessionId, target: state.target }
+  return { opened: true, guiUrl, sessionId, target: gui.target }
 }
+
+// ---------------------------------------------------------------- 状态通知巡检
+
+function noticeTracker() {
+  if (!noticeLoop.tracker) noticeLoop.tracker = new NoticeTracker({ doneHoldMs: config.noticeDoneHoldMs })
+  return noticeLoop.tracker
+}
+
+/** 把巡检产出的动作转成 publish op（dedupeKey 按会话，宿主原地刷新同一张卡）。 */
+function publishNotice(sessionId, action) {
+  const statusLabel = NOTICE_STATUS_LABELS[action.status] ?? action.status
+  const preview = action.preview || ''
+  send({
+    op: 'publish',
+    event: {
+      eventType: 'dsh-chat.notice',
+      kind: 'dsh-chat',
+      title: action.title || config.cardTitle || 'DSH 任务',
+      body: preview || statusLabel,
+      level: action.status === 'waiting' ? 'warning' : 'info',
+      sticky: !!action.sticky,
+      dedupeKey: `${NOTICE_DEDUPE_PREFIX}${sessionId}`,
+      payload: {
+        notice: true,
+        sessionId,
+        status: action.status,
+        statusLabel,
+        preview,
+        // 独立外壳：状态卡自己画完整的卡面（折叠条也要自己的边框圆角阴影）
+        toastStyle: 'standalone',
+        autoExpand: action.autoExpand === true,
+        expandMode: config.noticeExpandMode,
+        doneHoldMs: config.noticeDoneHoldMs,
+        // 宿主的 auto-hide 钳制 3s..10min；running/waiting 是 sticky，用不到这个值
+        auto_hide_ms: action.status === 'done' && !action.sticky ? config.noticeDoneHoldMs : undefined,
+        httpPort,
+        httpToken,
+        at: Date.now(),
+      },
+    },
+  })
+}
+
+/** 扫一遍会话目录：只重新解析 mtime/size 变化的日志，把状态迁移转成发布动作。 */
+async function pollNotices() {
+  if (noticeLoop.polling || !config.noticeEnabled) return
+  noticeLoop.polling = true
+  const startedAt = Date.now()
+  try {
+    const home = dshHome()
+    const entries = safe(() => scanSessionLogs(home), [])
+    const tracker = noticeTracker()
+    tracker.doneHoldMs = config.noticeDoneHoldMs
+    for (const entry of entries) {
+      const state = tracker.stateOf(entry.id)
+      if (state.initialized && state.mtimeMs === entry.mtimeMs && state.sizeBytes === entry.sizeBytes) continue
+      const logEntry = safe(() => readParsedSessionLog(entry.logPath), null)
+      if (!logEntry) continue
+      const actions = tracker.ingest(entry.id, logEntry.parsed.events, {
+        now: startedAt,
+        // 30s 内还在写的日志才算"确实在跑"（首见快进时防止给陈旧会话补卡）
+        fresh: startedAt - entry.mtimeMs < 30000,
+        mtimeMs: entry.mtimeMs,
+        sizeBytes: entry.sizeBytes,
+      })
+      for (const action of actions) publishNotice(entry.id, action)
+    }
+    noticeLoop.lastPollAt = startedAt
+  } catch (error) {
+    log('warn', '状态通知巡检失败', { error: error instanceof Error ? error.message : String(error) })
+  } finally {
+    noticeLoop.polling = false
+  }
+}
+
+function startNoticeLoop() {
+  stopNoticeLoop()
+  if (!config.noticeEnabled) {
+    log('info', '状态通知已关闭，巡检不启动')
+    return
+  }
+  const interval = Math.min(30000, Math.max(500, Number(config.noticePollMs) || 2000))
+  noticeLoop.timer = setInterval(() => void pollNotices(), interval)
+  log('info', '状态通知巡检已启动', { interval, doneHoldMs: config.noticeDoneHoldMs, expandMode: config.noticeExpandMode })
+  void pollNotices()
+}
+
+function stopNoticeLoop() {
+  if (noticeLoop.timer) {
+    clearInterval(noticeLoop.timer)
+    noticeLoop.timer = null
+  }
+}
+
+/** 卡片展开/收起上报：展开期间 sticky 持有（完成也不自动收），收起时按状态重新计时。 */
+async function methodNoticeView(params = {}) {
+  const sessionId = String(params.sessionId ?? '')
+  if (!sessionId) throw new Error('需要 sessionId')
+  const action = noticeTracker().setExpanded(sessionId, params.expanded !== false)
+  if (action) publishNotice(sessionId, action)
+  return { ok: true, republished: Boolean(action) }
+}
+
+/** 巡检状态（设置页展示 + 排查）。 */
+async function methodNoticeStatus() {
+  const tracker = noticeLoop.tracker
+  return {
+    enabled: Boolean(config.noticeEnabled),
+    loopRunning: Boolean(noticeLoop.timer),
+    pollMs: config.noticePollMs,
+    doneHoldMs: config.noticeDoneHoldMs,
+    expandMode: config.noticeExpandMode,
+    lastPollAt: noticeLoop.lastPollAt || null,
+    sessions: tracker ? tracker.summary(8) : [],
+  }
+}
+
+/** 设置页的「发一张测试卡」：不走巡检，直接按指定状态发布（sessionId 固定 notice-demo）。 */
+async function methodNoticeDemo(params = {}) {
+  const status = params.status === 'done' ? 'done' : params.status === 'waiting' ? 'waiting' : 'running'
+  // 注意：动作对象里不要用 kind 字段——plugin-contract 测试会把 main.mjs 里的 kind 字面量当事件 kind 扫描
+  publishNotice('notice-demo', {
+    status,
+    sticky: status !== 'done',
+    autoHideMs: status === 'done' ? config.noticeDoneHoldMs : null,
+    autoExpand: status === 'waiting',
+    title: 'DSH 状态卡预览',
+    preview:
+      status === 'done'
+        ? '测试卡：这一轮已完成，停留一段时间后会自动收掉。'
+        : status === 'waiting'
+          ? '测试卡：DSH 在等你审批，卡片会自动展开官方界面。'
+          : '测试卡：DSH 正在处理任务，这一行会跟着最新输出刷新。',
+  })
+  return { ok: true, status }
+}
+
 
 async function methodTestDsh() {
   const command = resolveDshCommand(config.dshCommand)
@@ -447,6 +602,8 @@ const METHODS = {
   guiClasses: methodGuiClasses,
   applyConfig: methodApplyConfig,
   testDsh: methodTestDsh,
+  noticeStatus: methodNoticeStatus,
+  noticeDemo: methodNoticeDemo,
 }
 
 /** 官方 class 速查表：给「自定义样式（CSS）」当索引，用户照着改就知道动哪个选择器 */
@@ -516,6 +673,8 @@ const HTTP_ROUTES_TABLE = {
   '/prompt': { method: 'POST', call: (params) => methodSendPrompt(params) },
   '/stop': { method: 'POST', call: () => methodStopChat() },
   '/window': { method: 'POST', call: (params) => methodOpenWindow(params) },
+  '/gui': { method: 'POST', call: (params) => methodGuiUrl(params) },
+  '/notice/view': { method: 'POST', call: (params) => methodNoticeView(params) },
 }
 
 /** 端口约定：未配置/非法 → 默认 23457；显式 0 → 交给系统分配（测试用）。 */
@@ -613,6 +772,8 @@ function stopHttp() {
 
 function applyConfig(raw) {
   const previousPort = Number(config.httpPort)
+  const previousNoticePoll = Number(config.noticePollMs)
+  const previousNoticeEnabled = Boolean(config.noticeEnabled)
   // 用 config 模块给的签名：任一个 show* 或 guiPort 变了都要重建反代（清单漏一个就会"设置没用"）
   const previousGui = guiSignature(config)
   config = normalizeConfig(raw ?? {})
@@ -633,12 +794,22 @@ function applyConfig(raw) {
     mirrorLimit: config.mirrorLimit,
     pollMs: config.pollMs,
     httpPort: config.httpPort,
+    noticeEnabled: config.noticeEnabled,
+    noticePollMs: config.noticePollMs,
   })
   if (Number(config.httpPort) !== previousPort) {
     stopHttp()
     startHttp()
   } else {
     startHttp()
+  }
+  // 状态通知巡检：首次配置/开关切换/轮询间隔变化都要重启；其余只同步停留时长
+  if (!config.noticeEnabled) {
+    stopNoticeLoop()
+  } else if (!previousNoticeEnabled || !noticeLoop.timer || Number(config.noticePollMs) !== previousNoticePoll) {
+    startNoticeLoop()
+  } else if (noticeLoop.tracker) {
+    noticeLoop.tracker.doneHoldMs = config.noticeDoneHoldMs
   }
   if (config.autoOpenWindow && !autoOpened) {
     autoOpened = true
@@ -648,6 +819,14 @@ function applyConfig(raw) {
 
 function handleResolved(msg) {
   const kind = msg.resolutionKind ?? msg.resolution ?? 'unknown'
+  const payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {}
+  // 状态卡被 ×（dismissed）：本轮静默，直到下一个 turn/start；expired（完成卡到时自动收）无需处理
+  if (payload.notice === true || msg.eventType === 'dsh-chat.notice') {
+    const sessionId = String(payload.sessionId ?? '')
+    if (sessionId && kind === 'dismissed' && noticeLoop.tracker) {
+      noticeLoop.tracker.markDismissed(sessionId)
+    }
+  }
   log('info', '小窗卡片已被处理', { actionId: msg.actionId ?? null, kind })
 }
 
@@ -696,6 +875,7 @@ let shuttingDown = false
 async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
+  stopNoticeLoop()
   stopHttp()
   try {
     if (gui.proxy) await gui.proxy.close()

@@ -260,6 +260,11 @@ function parseLogEntry(logPath) {
   }
 }
 
+/** 读取并解析日志（带 mtime+size 缓存）；供状态巡检等外部调用者复用同一份缓存 */
+export function readParsedSessionLog(logPath) {
+  return parseLogEntry(logPath)
+}
+
 /** 标题回退：首条非 context 用户文本前 N 字 */
 function titleFromEvents(events) {
   for (const event of events ?? []) {

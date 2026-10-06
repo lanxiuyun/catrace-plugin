@@ -1,7 +1,7 @@
 {
   "id": "dsh-chat",
   "name": "DSH 对话小窗",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在 Catrace 小窗里看 DeepSeek Harness（DSH）的对话，并直接向 DSH 提问。",
   "main": "ui.mjs",
   "settings": "settings.mjs",

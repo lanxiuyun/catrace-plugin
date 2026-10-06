@@ -18,7 +18,7 @@ if (typeof h !== 'function') throw new Error('Catrace plugin Vue runtime missing
 const STYLE_ID = 'dsh-chat-settings-style'
 
 /** RPC 契约版本：与 runtime/main.mjs 的 CONTRACT_VERSION 必须一致（改动 RPC 就两边一起 +1） */
-const CONTRACT_VERSION = 2
+const CONTRACT_VERSION = 3
 
 /**
  * 默认值（必须与 runtime/lib/config.mjs 的 DEFAULT_CONFIG 一致；
@@ -40,6 +40,11 @@ const DEFAULTS = {
   followLatest: true,
   cardTitle: 'DSH 对话',
   autoOpenWindow: false,
+  // 状态通知（与 runtime/lib/config.mjs 的 DEFAULT_CONFIG 逐键一致）
+  noticeEnabled: true,
+  noticePollMs: 2000,
+  noticeDoneHoldMs: 30000,
+  noticeExpandMode: 'gui',
   httpPort: 23457,
   guiPort: 23458,
   compactSpacing: false,
@@ -61,6 +66,8 @@ const DEFAULTS = {
 const LIMITS = {
   mirrorLimit: { min: 6, max: 200 },
   pollMs: { min: 500, max: 30000 },
+  noticePollMs: { min: 500, max: 30000 },
+  noticeDoneHoldMs: { min: 3000, max: 600000 },
   httpPort: { min: 0, max: 65535 },
   guiPort: { min: 0, max: 65535 },
   maxTokens: { min: 0, max: 200000 },
@@ -247,6 +254,8 @@ const DshChatSettings = {
     const nums = ref({
       mirrorLimit: String(DEFAULTS.mirrorLimit),
       pollMs: String(DEFAULTS.pollMs),
+      noticePollMs: String(DEFAULTS.noticePollMs),
+      noticeDoneHoldMs: String(DEFAULTS.noticeDoneHoldMs),
       httpPort: String(DEFAULTS.httpPort),
       guiPort: String(DEFAULTS.guiPort),
       maxTokens: String(DEFAULTS.maxTokens),
@@ -264,7 +273,7 @@ const DshChatSettings = {
     const transcriptGroups = computed(() => groupItems(transcript.value?.items || []))
 
     const TEXT_KEYS = ['dshHome', 'dshCommand', 'profile', 'provider', 'model', 'cwd', 'patchFile', 'cardTitle', 'reasoningEffort']
-    const NUM_KEYS = ['mirrorLimit', 'pollMs', 'httpPort', 'guiPort', 'maxTokens']
+    const NUM_KEYS = ['mirrorLimit', 'pollMs', 'noticePollMs', 'noticeDoneHoldMs', 'httpPort', 'guiPort', 'maxTokens']
     /** 布尔开关（小窗显示项 + 行为开关）：保存与加载都必须带上，漏一个就等于「设置没用」 */
     const SHOW_KEYS = [
       'showRail',
@@ -528,6 +537,7 @@ const DshChatSettings = {
       ensureStyle()
       await loadConfig()
       await loadStatus()
+      await loadNoticeStatus()
       await loadGuiClasses()
       await loadSessions()
       await preview(selected.value)
@@ -684,6 +694,92 @@ const DshChatSettings = {
             : null,
         ),
       ])
+    }
+
+    /** 状态通知：DSH 干活时右下角的可折叠状态卡（通知巡检） */
+    const noticeInfo = ref(null)
+    async function loadNoticeStatus() {
+      try {
+        noticeInfo.value = await call('noticeStatus')
+      } catch (error) {
+        noticeInfo.value = { error: error?.message || String(error) }
+      }
+    }
+
+    async function sendNoticeDemo(status) {
+      try {
+        await call('noticeDemo', { status })
+        message?.success?.(`已发送「${status === 'done' ? '已完成' : status === 'waiting' ? '等你审批' : '进行中'}」测试卡到右下角`)
+      } catch (error) {
+        message?.error?.(`发送测试卡失败：${error?.message || error}`)
+      }
+    }
+
+    function renderNotices() {
+      const info = noticeInfo.value || {}
+      const tracked = Array.isArray(info.sessions) ? info.sessions : []
+      const expandOptions = [
+        { label: '官方界面（真 GUI）', value: 'gui' },
+        { label: '镜像消息流', value: 'mirror' },
+      ]
+      const summary = info.error
+        ? `读取巡检状态失败：${info.error}`
+        : info.loopRunning
+          ? `巡检运行中（每 ${info.pollMs ?? '—'}ms 扫一次，正在跟踪 ${tracked.length} 个会话）`
+          : info.enabled === false
+            ? '状态通知已关闭'
+            : '巡检未启动（插件启用后自动开始）'
+      const button = (label, onClick, options = {}) =>
+        NButton ? h(NButton, { size: 'small', onClick, ...options }, { default: () => label }) : null
+      return card(
+        '状态通知',
+        'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点一下展开成官方界面，再点折叠；等你审批时会自动展开。',
+        [
+          row(
+            '启用状态通知',
+            NSwitch
+              ? h(NSwitch, {
+                  size: 'small',
+                  value: Boolean(text.value.noticeEnabled),
+                  'onUpdate:value': (value) => {
+                    text.value.noticeEnabled = value
+                    scheduleSave()
+                  },
+                })
+              : null,
+            '关闭后不再弹状态卡（对话小窗不受影响）',
+          ),
+          row('巡检间隔(ms)', numberInput('noticePollMs'), `扫描 DSH 会话日志的间隔；500–30000，当前 ${nums.value.noticePollMs}`),
+          row('完成后停留(ms)', numberInput('noticeDoneHoldMs'), `「已完成」卡的停留时长；3000–600000，当前 ${nums.value.noticeDoneHoldMs}`),
+          row(
+            '展开默认',
+            NSelect
+              ? h(NSelect, {
+                  style: { width: '12rem' },
+                  size: 'small',
+                  value: text.value.noticeExpandMode,
+                  options: expandOptions,
+                  'onUpdate:value': (value) => {
+                    text.value.noticeExpandMode = value
+                    scheduleSave()
+                  },
+                })
+              : null,
+            '点开状态卡时默认展开成什么；等你审批时固定展开成官方界面',
+          ),
+          row(
+            '测试卡',
+            [
+              button('进行中', () => void sendNoticeDemo('running')),
+              button('已完成', () => void sendNoticeDemo('done')),
+              button('等你审批', () => void sendNoticeDemo('waiting')),
+              button('刷新状态', () => void loadNoticeStatus(), { quaternary: true }),
+            ],
+            '发一张测试卡到右下角，看看折叠/展开的手感',
+          ),
+          h('div', { class: 'dsh-chat-settings__muted' }, summary),
+        ],
+      )
     }
 
     /**
@@ -1086,6 +1182,7 @@ const DshChatSettings = {
           : null,
         renderStatus(),
         renderWindow(),
+        renderNotices(),
         renderDeclutter(),
         NDivider ? h(NDivider, null) : null,
         renderSessions(),

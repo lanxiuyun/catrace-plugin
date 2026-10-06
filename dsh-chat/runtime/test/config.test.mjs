@@ -24,6 +24,10 @@ test('默认值符合契约', () => {
     followLatest: true,
     cardTitle: 'DSH 对话',
     autoOpenWindow: false,
+    noticeEnabled: true,
+    noticePollMs: 2000,
+    noticeDoneHoldMs: 30000,
+    noticeExpandMode: 'gui',
     httpPort: 23457,
     guiPort: 23458,
     compactSpacing: false,
@@ -188,6 +192,25 @@ test('maxTokens：0 或 1..200000，非法归 0', () => {
   assert.equal(normalizeConfig({ maxTokens: -5 }).maxTokens, 0)
   assert.equal(normalizeConfig({ maxTokens: '8000' }).maxTokens, 0)
   assert.equal(normalizeConfig({ maxTokens: Infinity }).maxTokens, 0)
+})
+
+test('状态通知配置：轮询/停留钳制，展开模式枚举回退', () => {
+  assert.equal(normalizeConfig({ noticePollMs: 1 }).noticePollMs, 500)
+  assert.equal(normalizeConfig({ noticePollMs: 500 }).noticePollMs, 500)
+  assert.equal(normalizeConfig({ noticePollMs: 1e9 }).noticePollMs, 30000)
+  assert.equal(normalizeConfig({ noticePollMs: null }).noticePollMs, 2000)
+  // 下限对齐宿主 auto-hide 的 MIN_AUTO_HIDE_MS：小于 3s 的停留没有意义
+  assert.equal(normalizeConfig({ noticeDoneHoldMs: 1 }).noticeDoneHoldMs, 3000)
+  assert.equal(normalizeConfig({ noticeDoneHoldMs: 600000 }).noticeDoneHoldMs, 600000)
+  assert.equal(normalizeConfig({ noticeDoneHoldMs: 600001 }).noticeDoneHoldMs, 600000)
+  assert.equal(normalizeConfig({ noticeDoneHoldMs: 'abc' }).noticeDoneHoldMs, 30000)
+  assert.equal(normalizeConfig({ noticeExpandMode: 'mirror' }).noticeExpandMode, 'mirror')
+  assert.equal(normalizeConfig({ noticeExpandMode: 'gui' }).noticeExpandMode, 'gui')
+  assert.equal(normalizeConfig({ noticeExpandMode: 'popup' }).noticeExpandMode, 'gui')
+  assert.equal(normalizeConfig({}).noticeExpandMode, 'gui')
+  // 总开关只认真布尔
+  assert.equal(normalizeConfig({ noticeEnabled: false }).noticeEnabled, false)
+  assert.equal(normalizeConfig({ noticeEnabled: 'off' }).noticeEnabled, true)
 })
 
 test('reasoningEffort：只接受空串/枚举，其他回退默认', () => {

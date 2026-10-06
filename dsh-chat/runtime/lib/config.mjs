@@ -24,6 +24,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   followLatest: true, // 未固定会话时是否自动跟随最新会话
   cardTitle: 'DSH 对话',
   autoOpenWindow: false, // 插件启用后自动弹一次小窗
+  // 状态通知（通知巡检）：DSH 干活时右下角出可折叠状态卡
+  noticeEnabled: true, // 右下角状态卡总开关
+  noticePollMs: 2000, // 巡检轮询会话日志的间隔
+  noticeDoneHoldMs: 30000, // 「已完成」卡的停留时长
+  noticeExpandMode: 'gui', // 点开状态卡默认展开成什么：gui=官方界面 / mirror=镜像消息流
   httpPort: 23457, // 卡片访问 sidecar 的本机 HTTP 端口；0 = 交给系统分配
   guiPort: 23458, // 「真 GUI」同源反代的端口；固定端口是为了让 iframe 的 origin 稳定（localStorage 状态可复用）
   /**
@@ -124,6 +129,7 @@ const OPTIONAL_STRINGS = ['dshHome', 'cwd', 'patchFile', 'mirrorSessionId', 'car
 const BOOLEANS = [
   'followLatest',
   'autoOpenWindow',
+  'noticeEnabled',
   'showRail',
   'showHeader',
   'showTabs',
@@ -185,6 +191,14 @@ export function normalizeConfig(raw) {
 
   config.mirrorLimit = clampNumber(source, 'mirrorLimit', 6, 200, DEFAULT_CONFIG.mirrorLimit)
   config.pollMs = clampNumber(source, 'pollMs', 500, 30000, DEFAULT_CONFIG.pollMs)
+  // 状态通知：轮询间隔 / 完成卡停留时长（宿主 auto_hide 钳制是 3s..10min，这里对齐下限）
+  config.noticePollMs = clampNumber(source, 'noticePollMs', 500, 30000, DEFAULT_CONFIG.noticePollMs)
+  config.noticeDoneHoldMs = clampNumber(source, 'noticeDoneHoldMs', 3000, 600000, DEFAULT_CONFIG.noticeDoneHoldMs)
+  // 展开默认模式：gui（官方界面）/ mirror（镜像消息流），非法值回退默认
+  const noticeExpandMode = readString(source, 'noticeExpandMode')
+  config.noticeExpandMode = ['gui', 'mirror'].includes(noticeExpandMode)
+    ? noticeExpandMode
+    : DEFAULT_CONFIG.noticeExpandMode
   // httpPort：0 合法（系统分配），越界/非法回退默认端口
   config.httpPort = clampNumber(source, 'httpPort', 0, 65535, DEFAULT_CONFIG.httpPort)
   config.guiPort = clampNumber(source, 'guiPort', 0, 65535, DEFAULT_CONFIG.guiPort)

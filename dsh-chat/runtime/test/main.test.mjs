@@ -5,7 +5,7 @@
  * 不依赖本机真实 ~/.dsh，也不会真的拉起 dsh。
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +56,12 @@ function withSessionId(text, id) {
   const lines = text.split('\n')
   lines[0] = lines[0].replace(/"id"\s*:\s*"[^"]*"/, `"id":"${id}"`)
   return lines.join('\n')
+}
+
+/** 往会话日志追加一帧（模拟 DSH 继续写日志；mtime/size 随之变化触发巡检重解析）。 */
+function appendFrame(logPath, events) {
+  const text = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`
+  appendFileSync(logPath, zlib.zstdCompressSync(Buffer.from(text, 'utf8')))
 }
 
 function makeHome() {
@@ -154,6 +160,8 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
       mirrorLimit: 12,
       pollMs: 1000,
       showTabs: true,
+      // 本测试断言"第一条 publish 是 openWindow 的小窗事件"，状态通知的巡检发布会抢在前面 → 关掉
+      noticeEnabled: false,
     },
   })
   await sidecar.waitFor((op) => op.op === 'log' && op.message === '配置已更新')
@@ -196,7 +204,7 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
   // 设置页推配置走的是 RPC（宿主的 set_plugin_config 不会推给 sidecar）：
   // 走这条路必须真的改到生效配置与裁剪项，否则就得 disable/enable 插件才生效。
   const pushed = await sidecar.call('applyConfig', {
-    config: { dshHome: home, dshCommand: 'dsh-command-that-does-not-exist', showRail: true, showHeader: true },
+    config: { dshHome: home, dshCommand: 'dsh-command-that-does-not-exist', showRail: true, showHeader: true, noticeEnabled: false },
   })
   assert.equal(pushed.ok, true, JSON.stringify(pushed))
   assert.equal(pushed.result.config.showRail, true, 'applyConfig 后生效配置应立即变化')
@@ -265,7 +273,7 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t
   })
 
   await sidecar.waitFor((op) => op.op === 'ready', 20000)
-  sidecar.send({ op: 'config', config: { dshHome: home, httpPort: 0 } })
+  sidecar.send({ op: 'config', config: { dshHome: home, httpPort: 0, noticeEnabled: false } })
   const listening = await sidecar.waitFor(
     (op) => op.op === 'log' && op.message === '本机 HTTP 已就绪',
     20000,
@@ -325,6 +333,116 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t
 
   const wrongMethod = await fetch(`http://127.0.0.1:${port}/prompt?token=${token}`)
   assert.equal(wrongMethod.status, 405)
+})
+
+test('状态通知巡检：回合流转出卡 / 完成自动收 / ×静默 / 审批自动展开 / 测试卡', async (t) => {
+  const home = makeHome()
+  const sidecar = startSidecar()
+  t.after(() => {
+    sidecar.child.kill()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  await sidecar.waitFor((op) => op.op === 'ready', 20000)
+  sidecar.send({
+    op: 'config',
+    config: { dshHome: home, noticeEnabled: true, noticePollMs: 500, noticeDoneHoldMs: 3000 },
+  })
+  await sidecar.waitFor((op) => op.op === 'log' && op.message === '状态通知巡检已启动')
+
+  // 夹具现状：session-aaa 已完结（首见不补卡）；session-bbb 停在 turn2 进行中且日志新鲜 → 补一张「进行中」
+  const running = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb',
+  )
+  assert.equal(running.event.eventType, 'dsh-chat.notice')
+  assert.equal(running.event.payload.notice, true)
+  assert.equal(running.event.payload.status, 'running')
+  assert.equal(running.event.sticky, true)
+  assert.equal(running.event.payload.preview, '三点整理完。')
+  assert.equal(running.event.title, '整理三点结论')
+  assert.equal(running.event.payload.auto_hide_ms, undefined, '进行中卡是 sticky，不带 auto_hide')
+  assert.equal(typeof running.event.payload.httpToken, 'string', '状态卡要带 HTTP 桥口令（展开用）')
+
+  // 完结且不新鲜的会话首见不出卡
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  assert.ok(
+    !sidecar.ops.some((op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-aaa'),
+    '已完结且不新鲜的会话不应出卡',
+  )
+
+  // 追加 turn/end → 「已完成」+ auto_hide_ms（宿主倒计时自动收）
+  const logB = join(home, 'sessions', '--D-workspace-Beta--', 'session-bbb', 'session.v4.jsonl.zstd')
+  appendFrame(logB, [{ type: 'turn/end', seq: 30, time: Date.now(), data: { turn: 2, reason: { kind: 'completed' } } }])
+  const done = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'done',
+  )
+  assert.equal(done.event.sticky, false)
+  assert.equal(done.event.payload.auto_hide_ms, 3000)
+
+  // × 关卡（宿主 resolved dismissed）→ 本轮静默，不再发布
+  sidecar.send({
+    op: 'resolved',
+    eventId: done.event.id,
+    resolutionKind: 'dismissed',
+    payload: { notice: true, sessionId: 'session-bbb' },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  const publishesForB = sidecar.ops.filter(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb',
+  )
+  assert.equal(publishesForB.length, 2, '× 之后没有新事件就不该再发布')
+
+  // 新回合开始 → 静默解除，重新出「进行中」
+  appendFrame(logB, [
+    { type: 'turn/start', seq: 31, time: Date.now(), data: { turn: 3 } },
+    {
+      type: 'user/message',
+      seq: 32,
+      time: Date.now(),
+      data: { content: [{ type: 'text', text: '继续，把测试补完。' }], source: { kind: 'user' }, role: 'user', id: 'user-bbb-9' },
+      surfaceOp: 'append',
+    },
+  ])
+  const rerun = await sidecar.waitFor(
+    (op) =>
+      op.op === 'publish' &&
+      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
+      op.event?.payload?.status === 'running' &&
+      op.event?.payload?.at > done.event.payload.at,
+  )
+  assert.equal(rerun.event.sticky, true)
+
+  // 审批：asked → waiting + autoExpand；decided → 回到 running
+  appendFrame(logB, [{ type: 'approval/asked', seq: 33, time: Date.now(), data: { id: 'apm-1' } }])
+  const waiting = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'waiting',
+  )
+  assert.equal(waiting.event.payload.autoExpand, true, '等你审批要自动展开真 GUI')
+  assert.equal(waiting.event.level, 'warning')
+
+  appendFrame(logB, [{ type: 'approval/decided', seq: 34, time: Date.now(), data: { id: 'apm-1', outcome: 'allowed-once' } }])
+  const resumed = await sidecar.waitFor(
+    (op) =>
+      op.op === 'publish' &&
+      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
+      op.event?.payload?.status === 'running' &&
+      op.event?.payload?.at > waiting.event.payload.at,
+  )
+  assert.equal(resumed.event.sticky, true)
+
+  // 设置页的测试卡与巡检状态
+  const demo = await sidecar.call('noticeDemo', { status: 'done' })
+  assert.equal(demo.ok, true, JSON.stringify(demo))
+  const demoPublish = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:notice-demo',
+  )
+  assert.equal(demoPublish.event.payload.status, 'done')
+  assert.equal(demoPublish.event.payload.auto_hide_ms, 3000)
+
+  const noticeStatus = await sidecar.call('noticeStatus')
+  assert.equal(noticeStatus.ok, true, JSON.stringify(noticeStatus))
+  assert.equal(noticeStatus.result.loopRunning, true)
+  assert.ok(noticeStatus.result.sessions.some((s) => s.id === 'session-bbb'), '巡检状态要列出跟踪中的会话')
 })
 
 test('sidecar 协议：shutdown 会退出进程', async (t) => {
