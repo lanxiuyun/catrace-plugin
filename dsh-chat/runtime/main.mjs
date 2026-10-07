@@ -6,25 +6,22 @@
  *  2. 本机 HTTP（127.0.0.1:<httpPort>，带一次性 token）：
  *     **Toast 小窗卡片不能调 sidecar.request**（宿主只放行 `main` 窗），所以卡片用 fetch 走这里。
  *
- * 职责：读 DSH 会话日志（$DSH_HOME/sessions/.../session.v4.jsonl.zstd）成转录；
- *       需要「向 DSH 提问」时拉起 `dsh --profile sdk`（官方 stdio JSON-RPC SDK）。
+ * 职责：读 DSH 会话日志（$DSH_HOME/sessions/.../session.v4.jsonl.zstd）驱动右下角状态卡；
+ *       小窗 = 官方 GUI 的同源反代（发现正在运行的 DSH Desktop → 自签 cookie → 反代）。
+ *       0.2.x 的镜像卡 / SDK 提问链路已移除（下一个大版本再以更好的形态回来）。
  *
  * 协议：stdout 只写 JSON Lines（宿主逐行解析），诊断走 log op 或 stderr。
  */
-import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import http from 'node:http'
-import os from 'node:os'
 import process from 'node:process'
 import { createInterface } from 'node:readline'
 
 import { cropFlagsFor, DEFAULT_CONFIG, forceLabelsFor, guiSignature, normalizeConfig } from './lib/config.mjs'
 import { GUI_CLASS_GROUPS, listGuiClasses } from './lib/gui-classes.mjs'
-import { callApi, describeDiscoveryFailure, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
+import { describeDiscoveryFailure, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
 import { NoticeTracker } from './lib/inspector.mjs'
 import { buildCropCss, startGuiProxy } from './lib/gui-proxy.mjs'
-import { DshSdkClient } from './lib/sdk-client.mjs'
-import { buildSpawnPlan, resolveDshCommand } from './lib/spawn-plan.mjs'
 import {
   latestSession,
   listSessions,
@@ -37,19 +34,11 @@ import {
 const WINDOW_DEDUPE_KEY = 'dsh-chat.window'
 const NOTICE_DEDUPE_PREFIX = 'dsh-chat.notice:'
 const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你审批' }
-const MAX_PROMPT_CHARS = 20000
-const VERSION_TIMEOUT_MS = 15000
 const DEFAULT_HTTP_PORT = 23457
-const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/mirror', '/prompt', '/stop', '/window', '/gui', '/notice/view']
+const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/window', '/gui', '/notice/view']
 
 /** @type {ReturnType<typeof normalizeConfig>} */
 let config = { ...DEFAULT_CONFIG }
-/** @type {DshSdkClient|null} */
-let sdk = null
-/** 小窗是否已经按 autoOpenWindow 弹过（一次启用只弹一次） */
-let autoOpened = false
-let chatSessionId = null
-let chatRunning = false
 let lastError = null
 /** @type {http.Server|null} */
 let httpServer = null
@@ -59,6 +48,8 @@ const httpToken = randomBytes(16).toString('hex')
 
 // ---- 状态通知巡检（NoticeTracker 是纯逻辑，IO 与定时器都在这里）----
 const noticeLoop = { timer: null, tracker: null, polling: false, lastPollAt: 0 }
+/** 正开着小窗卡的会话：状态卡让位（暂停发布），小窗关掉后再按当前状态弹回 */
+const openWindows = new Set()
 
 function send(payload) {
   process.stdout.write(`${JSON.stringify({ v: 1, ...payload })}\n`)
@@ -80,7 +71,7 @@ function respond(requestId, ok, result, error) {
  * 设置页会拿 sidecar 报回的版本跟自己对，不一致就提示"插件在跑旧代码，关掉再打开"——
  * 这类"改了代码但侧车还是老的"的困惑已经出现过好几次了。
  */
-const CONTRACT_VERSION = 3
+const CONTRACT_VERSION = 7
 
 /** 把一次可能失败的读取收敛成兜底值，避免整个 RPC 因单个坏文件失败。 */
 function safe(fn, fallback) {
@@ -103,52 +94,33 @@ function dshHome() {
   return resolveDshHome({ configured: config.dshHome })
 }
 
-/** 当前小窗要显示的会话：固定会话优先，否则跟随最近活跃会话。 */
-function mirrorTarget() {
-  if (config.mirrorSessionId) return config.mirrorSessionId
-  if (!config.followLatest) return ''
+/** 小窗默认打开的会话：最近活跃的那条（固定会话的能力随镜像卡一起移除了）。 */
+function defaultSessionId() {
   const latest = safe(() => latestSession({ dshHome: dshHome() }), null)
   return latest?.id ?? ''
-}
-
-function dshArgs() {
-  const args = ['--profile', config.profile || 'sdk']
-  if (config.patchFile) args.push('--patch', config.patchFile)
-  return args
-}
-
-function resolvedCwd() {
-  if (config.cwd) return config.cwd
-  const target = mirrorTarget()
-  if (target) {
-    const session = safe(() => readSession({ dshHome: dshHome(), id: target, limit: 1, maxText: 120 }), null)
-    if (session?.cwd) return session.cwd
-  }
-  return os.homedir()
 }
 
 // ---------------------------------------------------------------- 方法实现
 
 async function methodStatus() {
   const home = dshHome()
-  const command = resolveDshCommand(config.dshCommand)
-  const sessions = safe(() => listSessions({ dshHome: home, limit: 500, readTitles: false }), [])
-  const target = mirrorTarget()
+  // 设置页的「GUI 复用状态」行直接读这里（以前 settings 只认 status.gui，但 status 不带 gui → 永远显示"未启动"）
+  let gui = null
+  try {
+    const info = await methodGuiStatus()
+    gui = {
+      ready: info.ready,
+      proxyUrl: info.proxyUrl,
+      target: info.target,
+      lastError: info.lastError,
+      lastSessionId: info.guiSessionId,
+      credentialsFound: info.credentialsFound,
+    }
+  } catch {
+    gui = null
+  }
   return {
     dshHome: home,
-    dshCommand: config.dshCommand,
-    dshCommandResolved: command,
-    profile: config.profile,
-    provider: config.provider,
-    model: config.model,
-    reasoningEffort: config.reasoningEffort,
-    sessionCount: Array.isArray(sessions) ? sessions.length : 0,
-    mirrorSessionId: target,
-    mirrorPinned: Boolean(config.mirrorSessionId),
-    chatSessionId,
-    chatRunning,
-    chatAlive: Boolean(sdk?.alive),
-    cwd: resolvedCwd(),
     node: process.version,
     zstd: typeof (await import('node:zlib')).zstdDecompressSync === 'function',
     httpPort,
@@ -158,6 +130,7 @@ async function methodStatus() {
     contract: CONTRACT_VERSION,
     // 生效配置（normalizeConfig 之后）：设置界面以它为准，避免"存盘缺键 → 开关显示成关"
     config: { ...config },
+    gui,
   }
 }
 
@@ -178,126 +151,15 @@ async function methodListSessions(params = {}) {
 }
 
 async function methodReadSession(params = {}) {
-  const id = String(params.id ?? '') || mirrorTarget()
+  const id = String(params.id ?? '') || defaultSessionId()
   if (!id) return { session: null, reason: 'no-session' }
-  const limit = clampInt(params.limit, 1, 200, config.mirrorLimit)
+  const limit = clampInt(params.limit, 1, 200, 40)
   const session = safe(
     () => readSession({ dshHome: dshHome(), id, limit, maxText: params.maxText ?? 4000 }),
     null,
   )
   if (!session) return { session: null, reason: 'unreadable', id }
-  return { session, source: id === config.mirrorSessionId ? 'pinned' : 'latest' }
-}
-
-async function methodSetMirror(params = {}) {
-  const id = String(params.sessionId ?? '').trim()
-  if (id) {
-    const known = safe(() => listSessions({ dshHome: dshHome(), limit: 500, readTitles: false }), [])
-    if (Array.isArray(known) && known.length > 0 && !known.some((s) => s.id === id)) {
-      throw new Error(`找不到会话：${id}`)
-    }
-  }
-  config = normalizeConfig({ ...config, mirrorSessionId: id, followLatest: id ? false : true })
-  log('info', '镜像会话已切换', { mirrorSessionId: id || '(跟随最新)' })
-  return { mirrorSessionId: mirrorTarget(), pinned: Boolean(config.mirrorSessionId) }
-}
-
-async function ensureSdk() {
-  if (sdk && sdk.alive) return sdk
-  const command = resolveDshCommand(config.dshCommand)
-  const client = new DshSdkClient({
-    command,
-    args: dshArgs(),
-    cwd: resolvedCwd(),
-    onLog: (entry) =>
-      log(
-        entry.level === 'error' ? 'error' : entry.level === 'warn' ? 'warn' : 'info',
-        `[dsh] ${entry.message}`,
-        entry.data,
-      ),
-    onSessionEvent: (event, meta) => {
-      const type = event?.type
-      if (type === 'turn/start') chatRunning = true
-      if (type === 'turn/end') {
-        chatRunning = false
-        log('info', 'DSH 回合结束', {
-          sessionId: meta?.sessionId ?? chatSessionId,
-          reason: event?.data?.reason?.kind ?? null,
-        })
-      }
-    },
-    onStatus: ({ status }) => {
-      chatRunning = status === 'running'
-    },
-  })
-  sdk = client
-  await client.start({
-    provider: config.provider,
-    model: config.model,
-    reasoningEffort: config.reasoningEffort || undefined,
-    maxTokens: config.maxTokens > 0 ? config.maxTokens : undefined,
-    cwd: resolvedCwd(),
-  })
-  log('info', 'DSH SDK 会话已就绪', { provider: config.provider, model: config.model, cwd: resolvedCwd() })
-  return client
-}
-
-async function methodSendPrompt(params = {}) {
-  const text = String(params.text ?? '').trim()
-  if (!text) throw new Error('消息不能为空')
-  if (text.length > MAX_PROMPT_CHARS) throw new Error(`消息过长（上限 ${MAX_PROMPT_CHARS} 字符）`)
-  const client = await ensureSdk()
-  const target = params.sessionId ? { sessionId: String(params.sessionId) } : undefined
-  const result = await client.prompt(text, target)
-  chatSessionId = result.sessionId
-  chatRunning = true
-  return { sessionId: result.sessionId, messageId: result.messageId }
-}
-
-async function methodStopChat() {
-  if (!sdk || !sdk.alive) {
-    chatRunning = false
-    return { stopped: false, reason: 'not-running' }
-  }
-  sdk.kill()
-  sdk = null
-  chatRunning = false
-  log('info', '已停止 DSH 会话进程')
-  return { stopped: true }
-}
-
-async function methodOpenWindow(params = {}) {
-  const target = mirrorTarget()
-  const session = target
-    ? safe(() => readSession({ dshHome: dshHome(), id: target, limit: 1, maxText: 160 }), null)
-    : null
-  const last = session?.items?.length ? session.items[session.items.length - 1] : null
-  send({
-    op: 'publish',
-    event: {
-      eventType: 'dsh-chat.window',
-      kind: 'dsh-chat',
-      title: config.cardTitle || 'DSH 对话',
-      body: session?.title || last?.text || '还没有可显示的 DSH 会话',
-      level: 'info',
-      sticky: true,
-      dedupeKey: WINDOW_DEDUPE_KEY,
-      payload: {
-        open: true,
-        // 独立外壳：宿主放弃自己的白底/padding/圆角/阴影，由 ui.mjs 画完整卡片。
-        // 不传的话卡片会被套在宿主 22.5rem 卡槽里，宽高都会被裁。
-        toastStyle: 'standalone',
-        limit: clampInt(params.limit, 6, 200, config.mirrorLimit),
-        pollMs: clampInt(config.pollMs, 500, 30000, 2000),
-        mirrorSessionId: target,
-        chatSessionId,
-        httpPort,
-        httpToken,
-        at: Date.now(),
-      },
-    },
-  })
-  return { opened: true, mirrorSessionId: target, httpPort }
+  return { session }
 }
 
 /** GUI 复用状态（A2：把真 DSH GUI 代理进小窗） */
@@ -305,7 +167,7 @@ const gui = { proxy: null, target: null, lastError: null, startedAt: 0, lastSess
 
 /**
  * 确保「真 GUI」可用：发现正在运行的 DSH host → 自签 cookie → 起同源反代。
- * 找不到 host / 拿不到凭据都只抛错，不影响其它功能（小窗可回退到镜像模式）。
+ * 找不到 host / 拿不到凭据都只抛错，不影响其它功能（状态卡照常巡检发布）。
  */
 async function ensureGui() {
   if (gui.proxy && gui.target) {
@@ -317,7 +179,15 @@ async function ensureGui() {
   const secret = readBrowserSessionSecret({ dshHome: config.dshHome || undefined })
   if (!secret) throw new Error('读不到 ~/.dsh/.credentials.yaml 里的 client-connection/browser-session 密钥')
   gui.diag = []
-  const found = await discoverHost({ secret, diag: gui.diag })
+  // 测试缝：e2e 用临时端口起假 host，生产不设这两个环境变量时走桌面默认探测区间
+  const probeFrom = Number(process.env.DSH_GUI_PROBE_FROM)
+  const probeDrift = Number(process.env.DSH_GUI_PROBE_DRIFT)
+  const found = await discoverHost({
+    secret,
+    diag: gui.diag,
+    ...(Number.isFinite(probeFrom) ? { from: probeFrom } : {}),
+    ...(Number.isFinite(probeDrift) ? { drift: probeDrift } : {}),
+  })
   if (!found) {
     gui.lastError = describeDiscoveryFailure(gui.diag)
     throw new Error(gui.lastError)
@@ -366,10 +236,11 @@ async function methodGuiStatus() {
 
 /**
  * A2：把某条会话的**真 GUI** 准备好（发现 host → 自签 cookie → 同源反代），
- * 返回 iframe 用的 URL 与会话标题。设置页「小窗打开」和状态卡「展开」共用这一步。
+ * 返回 iframe 用的 URL 与会话标题。状态卡「正文点击」与 /window 路由共用这一步；
+ * 不点名 sessionId 时打开最近活跃的会话。
  */
 async function methodGuiUrl(params = {}) {
-  const sessionId = String(params.sessionId ?? '') || chatSessionId || mirrorTarget()
+  const sessionId = String(params.sessionId ?? '') || defaultSessionId()
   if (!sessionId) throw new Error('没有可打开的 DSH 会话')
   let state
   try {
@@ -388,18 +259,21 @@ async function methodGuiUrl(params = {}) {
 /** A2：把某条会话的**真 GUI** 打开到独立小窗卡（iframe 指向我们的同源反代）。 */
 async function methodOpenGui(params = {}) {
   const { guiUrl, title, sessionId } = await methodGuiUrl(params)
+  // 小窗卡开了：该会话的状态卡让位（暂停发布），小窗关闭后再按当前状态弹回
+  openWindows.add(sessionId)
   send({
     op: 'publish',
     event: {
       eventType: 'dsh-chat.window',
       kind: 'dsh-chat',
-      title: title || config.cardTitle || 'DSH 对话',
+      title: title || 'DSH 对话',
       body: title || sessionId || 'DSH GUI',
       level: 'info',
       sticky: true,
       dedupeKey: WINDOW_DEDUPE_KEY,
       payload: {
         open: true,
+        sessionId,
         toastStyle: 'standalone',
         guiUrl,
         guiSessionId: sessionId,
@@ -429,7 +303,7 @@ function publishNotice(sessionId, action) {
     event: {
       eventType: 'dsh-chat.notice',
       kind: 'dsh-chat',
-      title: action.title || config.cardTitle || 'DSH 任务',
+      title: action.title || 'DSH 任务',
       body: preview || statusLabel,
       level: action.status === 'waiting' ? 'warning' : 'info',
       sticky: !!action.sticky,
@@ -442,8 +316,8 @@ function publishNotice(sessionId, action) {
         preview,
         // 独立外壳：状态卡自己画完整的卡面（折叠条也要自己的边框圆角阴影）
         toastStyle: 'standalone',
+        cwd: action.cwd || '',
         autoExpand: action.autoExpand === true,
-        expandMode: config.noticeExpandMode,
         doneHoldMs: config.noticeDoneHoldMs,
         // 宿主的 auto-hide 钳制 3s..10min；running/waiting 是 sticky，用不到这个值
         auto_hide_ms: action.status === 'done' && !action.sticky ? config.noticeDoneHoldMs : undefined,
@@ -477,7 +351,12 @@ async function pollNotices() {
         mtimeMs: entry.mtimeMs,
         sizeBytes: entry.sizeBytes,
       })
-      for (const action of actions) publishNotice(entry.id, action)
+      for (const action of actions) {
+        // 设置页手动开的小窗卡还开着：状态卡让位，什么都不发（小窗关闭时按当前状态补发）
+        if (openWindows.has(entry.id)) break
+        // 等你审批：waiting 卡带 autoExpand，状态卡自己会原地展开对话交互区
+        publishNotice(entry.id, action)
+      }
     }
     noticeLoop.lastPollAt = startedAt
   } catch (error) {
@@ -495,7 +374,7 @@ function startNoticeLoop() {
   }
   const interval = Math.min(30000, Math.max(500, Number(config.noticePollMs) || 2000))
   noticeLoop.timer = setInterval(() => void pollNotices(), interval)
-  log('info', '状态通知巡检已启动', { interval, doneHoldMs: config.noticeDoneHoldMs, expandMode: config.noticeExpandMode })
+  log('info', '状态通知巡检已启动', { interval, doneHoldMs: config.noticeDoneHoldMs })
   void pollNotices()
 }
 
@@ -523,7 +402,6 @@ async function methodNoticeStatus() {
     loopRunning: Boolean(noticeLoop.timer),
     pollMs: config.noticePollMs,
     doneHoldMs: config.noticeDoneHoldMs,
-    expandMode: config.noticeExpandMode,
     lastPollAt: noticeLoop.lastPollAt || null,
     sessions: tracker ? tracker.summary(8) : [],
   }
@@ -550,58 +428,15 @@ async function methodNoticeDemo(params = {}) {
 }
 
 
-async function methodTestDsh() {
-  const command = resolveDshCommand(config.dshCommand)
-  const plan = buildSpawnPlan(command, ['--version'])
-  const started = Date.now()
-  const output = await new Promise((resolve, reject) => {
-    let child
-    try {
-      child = spawn(plan.command, plan.args, { ...plan.options, windowsHide: true })
-    } catch (error) {
-      reject(error)
-      return
-    }
-    let text = ''
-    const timer = setTimeout(() => {
-      try {
-        child.kill()
-      } catch {
-        /* 已经退出 */
-      }
-      reject(new Error(`执行 ${command} --version 超时`))
-    }, VERSION_TIMEOUT_MS)
-    child.stdout?.on('data', (chunk) => {
-      text += chunk.toString('utf8')
-    })
-    child.stderr?.on('data', (chunk) => {
-      text += chunk.toString('utf8')
-    })
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
-    child.on('exit', (code) => {
-      clearTimeout(timer)
-      resolve({ code, text: text.trim().slice(0, 2000) })
-    })
-  })
-  return { ok: output.code === 0, command, code: output.code, output: output.text, elapsedMs: Date.now() - started }
-}
-
 const METHODS = {
   status: methodStatus,
   listSessions: methodListSessions,
   readSession: methodReadSession,
-  setMirror: methodSetMirror,
-  sendPrompt: methodSendPrompt,
-  stopChat: methodStopChat,
-  openWindow: methodOpenWindow,
+  openWindow: methodOpenGui,
   openGui: methodOpenGui,
   guiStatus: methodGuiStatus,
   guiClasses: methodGuiClasses,
   applyConfig: methodApplyConfig,
-  testDsh: methodTestDsh,
   noticeStatus: methodNoticeStatus,
   noticeDemo: methodNoticeDemo,
 }
@@ -669,10 +504,9 @@ const HTTP_ROUTES_TABLE = {
   '/status': { method: 'GET', call: () => methodStatus() },
   '/sessions': { method: 'GET', call: (params) => methodListSessions(params) },
   '/session': { method: 'GET', call: (params) => methodReadSession(params) },
-  '/mirror': { method: 'POST', call: (params) => methodSetMirror(params) },
-  '/prompt': { method: 'POST', call: (params) => methodSendPrompt(params) },
-  '/stop': { method: 'POST', call: () => methodStopChat() },
-  '/window': { method: 'POST', call: (params) => methodOpenWindow(params) },
+  // /window 一律开官方 GUI 小窗（0.2.x 的 mode 镜像/对话分支随镜像卡移除；旧调用方带的 mode 参数直接忽略）
+  '/window': { method: 'POST', call: (params) => methodOpenGui(params) },
+  // 状态卡原地展开用：只准备反代并返回 iframe 地址，不发小窗卡
   '/gui': { method: 'POST', call: (params) => methodGuiUrl(params) },
   '/notice/view': { method: 'POST', call: (params) => methodNoticeView(params) },
 }
@@ -788,12 +622,8 @@ function applyConfig(raw) {
   }
   log('info', '配置已更新', {
     dshHome: config.dshHome || '(默认 ~/.dsh)',
-    dshCommand: config.dshCommand,
-    provider: config.provider,
-    model: config.model,
-    mirrorLimit: config.mirrorLimit,
-    pollMs: config.pollMs,
     httpPort: config.httpPort,
+    guiPort: config.guiPort,
     noticeEnabled: config.noticeEnabled,
     noticePollMs: config.noticePollMs,
   })
@@ -811,21 +641,26 @@ function applyConfig(raw) {
   } else if (noticeLoop.tracker) {
     noticeLoop.tracker.doneHoldMs = config.noticeDoneHoldMs
   }
-  if (config.autoOpenWindow && !autoOpened) {
-    autoOpened = true
-    void methodOpenWindow({}).catch((error) => log('warn', '自动打开小窗失败', { error: String(error) }))
-  }
 }
 
 function handleResolved(msg) {
   const kind = msg.resolutionKind ?? msg.resolution ?? 'unknown'
   const payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {}
-  // 状态卡被 ×（dismissed）：本轮静默，直到下一个 turn/start；expired（完成卡到时自动收）无需处理
-  if (payload.notice === true || msg.eventType === 'dsh-chat.notice') {
+  if (payload.open === true) {
+    // 小窗卡被关掉/被另一会话的小窗替换：让位结束，按当前状态把状态卡请回来
+    const sessionId = String(payload.sessionId ?? payload.guiSessionId ?? '')
+    if (sessionId && (kind === 'dismissed' || kind === 'superseded') && openWindows.delete(sessionId)) {
+      const action = noticeTracker().currentAction(sessionId)
+      if (action) publishNotice(sessionId, action)
+    }
+  } else if (payload.notice === true || msg.eventType === 'dsh-chat.notice') {
     const sessionId = String(payload.sessionId ?? '')
     if (sessionId && kind === 'dismissed' && noticeLoop.tracker) {
-      noticeLoop.tracker.markDismissed(sessionId)
+      // 状态卡上的 ×：本轮静默（下一个 turn/start 解除）。
+      // 但如果该会话刚打开了小窗（正文点击 → 让位），这次关闭不是嫌吵，不能记 ×。
+      if (!openWindows.has(sessionId)) noticeLoop.tracker.markDismissed(sessionId)
     }
+    // expired（完成卡到时自动收）无需处理
   }
   log('info', '小窗卡片已被处理', { actionId: msg.actionId ?? null, kind })
 }
@@ -883,15 +718,7 @@ async function shutdown() {
     log('warn', '关闭 GUI 代理失败', { error: String(error) })
   }
   gui.proxy = null
-  try {
-    if (sdk) await sdk.shutdown()
-  } catch (error) {
-    log('warn', '关闭 DSH SDK 进程失败', { error: String(error) })
-  } finally {
-    sdk?.kill?.()
-    sdk = null
-    process.exit(0)
-  }
+  process.exit(0)
 }
 
 process.on('SIGTERM', () => void shutdown())

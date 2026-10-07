@@ -1,11 +1,12 @@
 /**
  * sidecar 端到端测试：用真实的 runtime/main.mjs 子进程跑一遍 JSON Lines v1 协议。
  *
- * 夹具：临时 DSH_HOME（sessions/<slug>/<id>/session.v4.jsonl.zstd + projcache），
- * 不依赖本机真实 ~/.dsh，也不会真的拉起 dsh。
+ * 夹具：临时 DSH_HOME（sessions/<slug>/<id>/session.v4.jsonl.zstd + projcache + .credentials.yaml），
+ * 不依赖本机真实 ~/.dsh，也不会真的拉起 dsh。「真 GUI」用假 host（临时端口 + DSH_GUI_PROBE_* 测试缝）。
  */
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +17,9 @@ import zlib from 'node:zlib'
 const here = dirname(fileURLToPath(import.meta.url))
 const MAIN = join(here, '..', 'main.mjs')
 const FIXTURES = join(here, 'fixtures')
+
+/** 与 dsh-gui 的 cookie 算法对齐：32 字节密钥（base64url） */
+const SECRET = Buffer.from('0123456789abcdef0123456789abcdef', 'utf8').toString('base64url')
 
 /** 把一段文本切成若干帧分别压缩再拼接，模拟 DSH 的追加写日志。 */
 function multiFrameZstd(text, chunkCount = 3) {
@@ -64,7 +68,21 @@ function appendFrame(logPath, events) {
   appendFileSync(logPath, zlib.zstdCompressSync(Buffer.from(text, 'utf8')))
 }
 
-function makeHome() {
+function writeCredentials(home) {
+  const yaml = [
+    'version: 1',
+    'records:',
+    '  client-connection/browser-session:',
+    '    kind: grant',
+    '    payload:',
+    '      version: 1',
+    `      secret: ${SECRET}`,
+    '',
+  ].join('\n')
+  writeFileSync(join(home, '.credentials.yaml'), yaml, 'utf8')
+}
+
+function makeHome({ credentials = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'dsh-chat-home-'))
   const fixtureA = withSessionId(readFileSync(join(FIXTURES, 'session-a.jsonl'), 'utf8'), 'session-aaa')
   const fixtureB = withSessionId(readFileSync(join(FIXTURES, 'session-b.jsonl'), 'utf8'), 'session-bbb')
@@ -78,12 +96,51 @@ function makeHome() {
   const now = Date.now()
   utimesSync(join(home, 'sessions', '--D-workspace-Alpha--', 'session-aaa', 'session.v4.jsonl.zstd'), new Date(now - 60000), new Date(now - 60000))
   utimesSync(join(home, 'sessions', '--D-workspace-Beta--', 'session-bbb', 'session.v4.jsonl.zstd'), new Date(now), new Date(now))
+  if (credentials) writeCredentials(home)
   return home
 }
 
-/** 最小 sidecar 协议客户端。 */
-function startSidecar() {
-  const child = spawn(process.execPath, [MAIN], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+/** 假 DSH host：探活（POST /api/session/list 需自签 cookie）+ 一个 HTML 首页。 */
+async function startFakeHost() {
+  const seen = []
+  const server = http.createServer((req, res) => {
+    seen.push({ path: req.url, host: req.headers.host, cookie: req.headers.cookie })
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<html><head><base href="./"><title>fake</title></head><body>app</body></html>')
+      return
+    }
+    if (req.url?.startsWith('/api/')) {
+      if (!req.headers.cookie?.startsWith('dsh-auth-')) {
+        res.writeHead(401)
+        res.end('dsh web authentication required')
+        return
+      }
+      let text = ''
+      req.on('data', (c) => {
+        text += c
+      })
+      req.on('end', () => {
+        const body = JSON.parse(text || '{}')
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value: { items: [] } } }))
+      })
+      return
+    }
+    res.writeHead(404)
+    res.end('nope')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return { server, port: server.address().port, seen }
+}
+
+/** 最小 sidecar 协议客户端。env 用于注入 DSH_GUI_PROBE_* 测试缝。 */
+function startSidecar({ env = {} } = {}) {
+  const child = spawn(process.execPath, [MAIN], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    env: { ...process.env, ...env },
+  })
   const ops = []
   const waiters = []
   let buffer = ''
@@ -142,7 +199,7 @@ function startSidecar() {
   }
 }
 
-test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 错误路径', async (t) => {
+test('sidecar 协议：状态 / 生效配置 / 裁剪项 / 速查表 / 会话读取 / 移除的方法', async (t) => {
   const home = makeHome()
   const sidecar = startSidecar()
   t.after(() => {
@@ -156,11 +213,16 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
     op: 'config',
     config: {
       dshHome: home,
+      // 0.2.x 的遗留键：必须被 normalizeConfig 当未知字段丢弃
       dshCommand: 'dsh-command-that-does-not-exist',
       mirrorLimit: 12,
       pollMs: 1000,
+      showHeader: true,
+      showRail: true,
       showTabs: true,
-      // 本测试断言"第一条 publish 是 openWindow 的小窗事件"，状态通知的巡检发布会抢在前面 → 关掉
+      compactSpacing: true,
+      customCss: '/* marker */',
+      // 本测试断言状态通知不抢发布 → 关掉
       noticeEnabled: false,
     },
   })
@@ -169,13 +231,11 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
   const status = await sidecar.call('status')
   assert.equal(status.ok, true, JSON.stringify(status))
   assert.equal(status.result.dshHome, home)
-  assert.equal(status.result.sessionCount, 2, JSON.stringify(status.result))
   assert.equal(status.result.zstd, true)
-  assert.equal(status.result.mirrorSessionId, 'session-bbb', '默认镜像最近活跃会话')
-
+  assert.equal(status.result.contract, 7, '契约版本要报出来（设置页拿它识别旧 sidecar）')
+  assert.equal(status.result.config.dshCommand, undefined, '0.2.x 遗留键必须被丢弃')
   // 生效配置必须带全部"显示项"键：设置界面以 status.config 为准（存盘缺键时不会显示成 false）
   const effective = status.result.config
-  assert.ok(effective && typeof effective === 'object', 'status 必须返回生效配置')
   for (const key of [
     'showRail',
     'showHeader',
@@ -188,29 +248,42 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
     'showComposerStatus',
     'showMessageMeta',
     'showHeaderLabels',
+    'compactSpacing',
   ]) {
     assert.equal(typeof effective[key], 'boolean', `生效配置缺少布尔键 ${key}`)
   }
-  assert.equal(typeof effective.customCss, 'string', '生效配置要带自定义 CSS')
-  assert.equal(effective.showTabs, true, '传入的 showTabs=true 必须被保留')
-  assert.equal(effective.showRail, false, '未传的显示项应回落到默认（左栏默认隐藏）')
-  assert.equal(effective.showHeaderChips, true, 'chips 默认显示')
+  assert.equal(effective.showHeader, true, '传入的 showHeader=true 必须被保留')
+  assert.equal(effective.showRail, true)
+  assert.equal(effective.showTabs, true, '顶栏细粒度项也要能传进来')
+  assert.equal(effective.showComposerStatus, false, '未传的显示项应回落到默认')
+  assert.equal(effective.compactSpacing, true, '紧凑留白开关要能传进来')
+  assert.equal(effective.customCss, '/* marker */')
+
+  // status.gui：设置页的「GUI 复用状态」行从这里读（以前 settings 只认 status.gui，但 status 不带 → 永远"未启动"）
+  assert.ok(status.result.gui && typeof status.result.gui === 'object', 'status 必须带 gui 摘要')
+  assert.equal(status.result.gui.ready, false, '还没打开过小窗 ⇒ 未就绪')
+  assert.equal(status.result.gui.credentialsFound, false, '没写凭据 ⇒ 读不到')
+
   // 反代裁剪项与 show* 取反（true = 隐藏）
   const crop = await sidecar.call('guiStatus')
   assert.equal(crop.ok, true, JSON.stringify(crop))
+  assert.equal(crop.result.crop.rail, false, 'showRail=true ⇒ 不裁剪左栏')
+  assert.equal(crop.result.crop.header, false, 'showHeader=true ⇒ 不整条隐藏顶栏')
   assert.equal(crop.result.crop.tabs, false, 'showTabs=true ⇒ 不裁剪标签页')
-  assert.equal(crop.result.crop.rail, true, 'showRail=false ⇒ 裁剪左栏')
+  assert.equal(crop.result.crop.composerStatus, true, '默认隐藏输入区状态条')
+  assert.equal(crop.result.crop.messageMeta, true, '默认隐藏消息操作行')
+  assert.equal(crop.result.compactSpacing, true, '紧凑留白要能在 guiStatus 里查到（排查"设置没生效"用）')
 
   // 设置页推配置走的是 RPC（宿主的 set_plugin_config 不会推给 sidecar）：
   // 走这条路必须真的改到生效配置与裁剪项，否则就得 disable/enable 插件才生效。
   const pushed = await sidecar.call('applyConfig', {
-    config: { dshHome: home, dshCommand: 'dsh-command-that-does-not-exist', showRail: true, showHeader: true, noticeEnabled: false },
+    config: { dshHome: home, showRail: false, showHeader: false, noticeEnabled: false },
   })
   assert.equal(pushed.ok, true, JSON.stringify(pushed))
-  assert.equal(pushed.result.config.showRail, true, 'applyConfig 后生效配置应立即变化')
+  assert.equal(pushed.result.config.showRail, false, 'applyConfig 后生效配置应立即变化')
   const cropAfter = await sidecar.call('guiStatus')
-  assert.equal(cropAfter.result.crop.rail, false, 'showRail=true ⇒ 不再裁剪左栏')
-  assert.equal(cropAfter.result.crop.header, false, 'showHeader=true ⇒ 不再整条隐藏顶栏')
+  assert.equal(cropAfter.result.crop.rail, true, 'showRail=false ⇒ 裁剪左栏')
+  assert.equal(cropAfter.result.crop.header, true, 'showHeader=false ⇒ 整条隐藏顶栏')
   const badPush = await sidecar.call('applyConfig', {})
   assert.equal(badPush.ok, false, 'applyConfig 缺 config 时应报错')
 
@@ -230,50 +303,88 @@ test('sidecar 协议：状态 / 会话列表 / 转录 / 镜像 / 小窗发布 / 
 
   const transcript = await sidecar.call('readSession', {})
   assert.equal(transcript.ok, true, JSON.stringify(transcript))
-  assert.equal(transcript.result.session.id, 'session-bbb')
+  assert.equal(transcript.result.session.id, 'session-bbb', '不点名时读最近活跃会话')
   assert.ok(transcript.result.session.items.length >= 2, JSON.stringify(transcript.result.session.items))
 
-  const pinned = await sidecar.call('setMirror', { sessionId: 'session-aaa' })
-  assert.equal(pinned.ok, true)
-  assert.equal(pinned.result.pinned, true)
-  const pinnedRead = await sidecar.call('readSession', {})
-  assert.equal(pinnedRead.result.session.id, 'session-aaa')
+  // 没写凭据：openGui 报"读不到凭据"，而不是挂住或崩溃
+  const noCreds = await sidecar.call('openGui', {})
+  assert.equal(noCreds.ok, false)
+  assert.match(noCreds.error, /credentials\.yaml/)
 
-  const missing = await sidecar.call('setMirror', { sessionId: 'session-nope' })
-  assert.equal(missing.ok, false)
-  assert.match(missing.error, /找不到会话/)
-
-  const opened = await sidecar.call('openWindow', {})
-  assert.equal(opened.ok, true)
-  const published = await sidecar.waitFor((op) => op.op === 'publish')
-  assert.equal(published.event.eventType, 'dsh-chat.window')
-  assert.equal(published.event.kind, 'dsh-chat')
-  assert.equal(published.event.sticky, true)
-  assert.equal(published.event.dedupeKey, 'dsh-chat.window')
-  assert.equal(published.event.payload.mirrorSessionId, 'session-aaa')
-
-  const empty = await sidecar.call('sendPrompt', { text: '   ' })
-  assert.equal(empty.ok, false)
-  assert.match(empty.error, /不能为空/)
+  // 0.2.x 的镜像/SDK 方法全部退场
+  for (const gone of ['setMirror', 'sendPrompt', 'stopChat', 'testDsh']) {
+    const removed = await sidecar.call(gone, {})
+    assert.equal(removed.ok, false, `${gone} 应已移除`)
+    assert.match(removed.error, /未知方法/)
+  }
 
   const unknown = await sidecar.call('nopeMethod', {})
   assert.equal(unknown.ok, false)
   assert.match(unknown.error, /未知方法/)
-
-  const prompt = await sidecar.call('sendPrompt', { text: '你好' })
-  assert.equal(prompt.ok, false, 'dsh 命令不存在时必须失败而不是挂住')
 })
 
-test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t) => {
-  const home = makeHome()
-  const sidecar = startSidecar()
-  t.after(() => {
+test('真 GUI 小窗：openGui 发布 iframe 卡（默认最近活跃会话），guiUrl 经反代拿到注入后的官方页面', async (t) => {
+  const host = await startFakeHost()
+  const home = makeHome({ credentials: true })
+  const sidecar = startSidecar({ env: { DSH_GUI_PROBE_FROM: String(host.port), DSH_GUI_PROBE_DRIFT: '0' } })
+  t.after(async () => {
     sidecar.child.kill()
     rmSync(home, { recursive: true, force: true })
+    host.server.close()
   })
 
   await sidecar.waitFor((op) => op.op === 'ready', 20000)
-  sidecar.send({ op: 'config', config: { dshHome: home, httpPort: 0, noticeEnabled: false } })
+  sidecar.send({ op: 'config', config: { dshHome: home, guiPort: 0, noticeEnabled: false } })
+  await sidecar.waitFor((op) => op.op === 'log' && op.message === '配置已更新')
+
+  const ready = await sidecar.call('status')
+  assert.equal(ready.result.gui.credentialsFound, true, '凭据要被读到')
+  assert.equal(ready.result.gui.ready, false, '还没开过小窗')
+
+  const opened = await sidecar.call('openGui', {})
+  assert.equal(opened.ok, true, JSON.stringify(opened))
+  assert.equal(opened.result.sessionId, 'session-bbb', '不点名 sessionId 时打开最近活跃会话')
+
+  const published = await sidecar.waitFor((op) => op.op === 'publish' && op.event?.eventType === 'dsh-chat.window')
+  assert.equal(published.event.kind, 'dsh-chat')
+  assert.equal(published.event.sticky, true)
+  assert.equal(published.event.dedupeKey, 'dsh-chat.window')
+  assert.equal(published.event.payload.sessionId, 'session-bbb')
+  assert.equal(published.event.payload.guiSessionId, 'session-bbb')
+  // guiTitle 来自会话日志（readSession），不是 projcache 的列表标题
+  assert.equal(published.event.payload.guiTitle, '整理三点结论', '卡片顶栏要显示会话标题')
+  assert.equal(published.event.payload.toastStyle, 'standalone')
+  assert.match(published.event.payload.guiUrl, /^http:\/\/127\.0\.0\.1:\d+\/\?dshw-session=session-bbb$/)
+  assert.ok(Number.isInteger(published.event.payload.httpPort) && published.event.payload.httpPort > 0)
+  assert.ok(typeof published.event.payload.httpToken === 'string')
+
+  // guiUrl 经反代取回官方首页：会话预选 + 去装饰 CSS 都注入了
+  const page = await fetch(published.event.payload.guiUrl)
+  const html = await page.text()
+  assert.equal(page.status, 200)
+  assert.match(html, /localStorage\.setItem\("dsh\.sessions\.current"/)
+  assert.match(html, /"session-bbb"/)
+  assert.match(html, /catrace-dsh-gui-crop/, '去装饰 CSS 要注入')
+  assert.match(html, /grid-template-columns: 0 minmax\(0, 1fr\) 0/, '左栏轨道归零要在注入的 CSS 里')
+
+  // 状态卡让位记账：openGui 后该会话进入 openWindows（巡检发布静默），由巡检测试覆盖
+  const after = await sidecar.call('status')
+  assert.equal(after.result.gui.ready, true, '开过一次后 GUI 应就绪')
+  assert.equal(after.result.gui.lastSessionId, 'session-bbb')
+})
+
+test('本机 HTTP 桥：鉴权 / health / 会话 / window / 移除的路由 / 错误码', async (t) => {
+  const host = await startFakeHost()
+  const home = makeHome({ credentials: true })
+  const sidecar = startSidecar({ env: { DSH_GUI_PROBE_FROM: String(host.port), DSH_GUI_PROBE_DRIFT: '0' } })
+  t.after(async () => {
+    sidecar.child.kill()
+    rmSync(home, { recursive: true, force: true })
+    host.server.close()
+  })
+
+  await sidecar.waitFor((op) => op.op === 'ready', 20000)
+  sidecar.send({ op: 'config', config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: false } })
   const listening = await sidecar.waitFor(
     (op) => op.op === 'log' && op.message === '本机 HTTP 已就绪',
     20000,
@@ -281,14 +392,12 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t
   const port = listening.data.port
   assert.ok(Number.isInteger(port) && port > 0, `端口应已分配：${JSON.stringify(listening)}`)
 
-  // 没有 token：403
+  // 没有 token：403；token 随小窗事件 payload 下发
   const denied = await fetch(`http://127.0.0.1:${port}/health`)
   assert.equal(denied.status, 403)
-
-  // token 随小窗事件 payload 下发（卡片就是这么拿到的）
-  const opened = await sidecar.call('openWindow', {})
-  assert.equal(opened.ok, true)
-  const published = await sidecar.waitFor((op) => op.op === 'publish')
+  const opened = await sidecar.call('openGui', {})
+  assert.equal(opened.ok, true, JSON.stringify(opened))
+  const published = await sidecar.waitFor((op) => op.op === 'publish' && op.event?.eventType === 'dsh-chat.window')
   const token = published.event.payload.httpToken
   assert.ok(typeof token === 'string' && token.length >= 16)
   assert.equal(published.event.payload.httpPort, port)
@@ -297,7 +406,8 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t
   assert.equal(health.status, 200)
   const healthBody = await health.json()
   assert.equal(healthBody.ok, true)
-  assert.ok(healthBody.result.routes.includes('/prompt'))
+  assert.ok(!healthBody.result.routes.includes('/prompt'), '/prompt 已随 SDK 链路移除')
+  assert.ok(!healthBody.result.routes.includes('/mirror'), '/mirror 已随镜像卡移除')
 
   const sessionsRes = await fetch(`http://127.0.0.1:${port}/sessions?limit=5`, {
     headers: { 'X-Dsh-Chat-Token': token },
@@ -312,41 +422,51 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / 镜像 / 错误码', async (t
   assert.equal(sessionBody.result.session.id, 'session-aaa')
   assert.ok(sessionBody.result.session.items.length >= 2)
 
-  const mirrorRes = await fetch(`http://127.0.0.1:${port}/mirror`, {
+  // /window 一律开官方 GUI（旧调用方带的 mode 参数直接忽略）
+  const windowRes = await fetch(`http://127.0.0.1:${port}/window`, {
     method: 'POST',
     headers: { 'X-Dsh-Chat-Token': token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId: 'session-aaa' }),
+    body: JSON.stringify({ sessionId: 'session-aaa', mode: 'gui' }),
   })
-  const mirrorBody = await mirrorRes.json()
-  assert.equal(mirrorBody.result.pinned, true)
+  const windowBody = await windowRes.json()
+  assert.equal(windowRes.status, 200)
+  assert.equal(windowBody.result.sessionId, 'session-aaa')
+  const secondWindow = sidecar.ops.filter((op) => op.op === 'publish' && op.event?.eventType === 'dsh-chat.window').at(-1)
+  assert.equal(secondWindow.event.payload.guiSessionId, 'session-aaa')
 
-  const emptyPrompt = await fetch(`http://127.0.0.1:${port}/prompt`, {
+  const viewRes = await fetch(`http://127.0.0.1:${port}/notice/view`, {
     method: 'POST',
     headers: { 'X-Dsh-Chat-Token': token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: '' }),
+    body: JSON.stringify({ sessionId: 'session-aaa', expanded: false }),
   })
-  assert.equal(emptyPrompt.status, 400)
-  assert.match((await emptyPrompt.json()).error, /不能为空/)
+  assert.equal(viewRes.status, 200)
 
   const notFound = await fetch(`http://127.0.0.1:${port}/nope?token=${token}`)
   assert.equal(notFound.status, 404)
-
-  const wrongMethod = await fetch(`http://127.0.0.1:${port}/prompt?token=${token}`)
+  const removed = await fetch(`http://127.0.0.1:${port}/prompt?token=${token}`, {
+    method: 'POST',
+    headers: { 'X-Dsh-Chat-Token': token, 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(removed.status, 404, '/prompt 路由应已移除')
+  const wrongMethod = await fetch(`http://127.0.0.1:${port}/status?token=${token}`, { method: 'POST' })
   assert.equal(wrongMethod.status, 405)
 })
 
-test('状态通知巡检：回合流转出卡 / 完成自动收 / ×静默 / 审批自动展开 / 测试卡', async (t) => {
-  const home = makeHome()
-  const sidecar = startSidecar()
-  t.after(() => {
+test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小窗 / 小窗让位与弹回 / 测试卡', async (t) => {
+  const host = await startFakeHost()
+  const home = makeHome({ credentials: true })
+  const sidecar = startSidecar({ env: { DSH_GUI_PROBE_FROM: String(host.port), DSH_GUI_PROBE_DRIFT: '0' } })
+  t.after(async () => {
     sidecar.child.kill()
     rmSync(home, { recursive: true, force: true })
+    host.server.close()
   })
 
   await sidecar.waitFor((op) => op.op === 'ready', 20000)
   sidecar.send({
     op: 'config',
-    config: { dshHome: home, noticeEnabled: true, noticePollMs: 500, noticeDoneHoldMs: 3000 },
+    config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: true, noticePollMs: 500, noticeDoneHoldMs: 3000 },
   })
   await sidecar.waitFor((op) => op.op === 'log' && op.message === '状态通知巡检已启动')
 
@@ -360,6 +480,7 @@ test('状态通知巡检：回合流转出卡 / 完成自动收 / ×静默 / 审
   assert.equal(running.event.sticky, true)
   assert.equal(running.event.payload.preview, '三点整理完。')
   assert.equal(running.event.title, '整理三点结论')
+  assert.equal(running.event.payload.cwd, 'D:\\Users\\che\\Documents\\deepseek-harness-default-workspace', 'cwd 要进 payload（卡片的项目路径行）')
   assert.equal(running.event.payload.auto_hide_ms, undefined, '进行中卡是 sticky，不带 auto_hide')
   assert.equal(typeof running.event.payload.httpToken, 'string', '状态卡要带 HTTP 桥口令（展开用）')
 
@@ -370,34 +491,82 @@ test('状态通知巡检：回合流转出卡 / 完成自动收 / ×静默 / 审
     '已完结且不新鲜的会话不应出卡',
   )
 
-  // 追加 turn/end → 「已完成」+ auto_hide_ms（宿主倒计时自动收）
   const logB = join(home, 'sessions', '--D-workspace-Beta--', 'session-bbb', 'session.v4.jsonl.zstd')
-  appendFrame(logB, [{ type: 'turn/end', seq: 30, time: Date.now(), data: { turn: 2, reason: { kind: 'completed' } } }])
-  const done = await sidecar.waitFor(
+
+  // 审批：asked → 「等你审批」卡（autoExpand 标记 → 卡片自己原地展开官方界面，不再另开一张窗）
+  appendFrame(logB, [{ type: 'approval/asked', seq: 33, time: Date.now(), data: { id: 'apm-1' } }])
+  const waiting = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'waiting',
+  )
+  assert.equal(waiting.event.payload.autoExpand, true, '等你审批要带 autoExpand（卡片原地展开）')
+  assert.equal(waiting.event.level, 'warning')
+
+  // 卡片展开上报 /notice/view：sidecar 原地补发同键卡；此后完成卡转 sticky（用户正在看，不自动收）
+  const bridgePort = waiting.event.payload.httpPort
+  const bridgeToken = waiting.event.payload.httpToken
+  assert.ok(Number.isInteger(bridgePort) && bridgePort > 0, 'waiting 卡要带 HTTP 桥端口（展开用）')
+  const view = (expanded) =>
+    fetch(`http://127.0.0.1:${bridgePort}/notice/view`, {
+      method: 'POST',
+      headers: { 'X-Dsh-Chat-Token': bridgeToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-bbb', expanded }),
+    })
+
+  const expandRes = await view(true)
+  assert.equal(expandRes.status, 200)
+  await sidecar.waitFor(
+    (op) =>
+      op.op === 'publish' &&
+      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
+      op.event?.payload?.status === 'waiting' &&
+      op.event?.payload?.at > waiting.event.payload.at,
+  )
+
+  appendFrame(logB, [{ type: 'approval/decided', seq: 34, time: Date.now(), data: { id: 'apm-1', outcome: 'allowed-once' } }])
+  appendFrame(logB, [{ type: 'turn/end', seq: 40, time: Date.now(), data: { turn: 2, reason: { kind: 'completed' } } }])
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  const doneWhileExpanded = sidecar.ops.filter(
     (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'done',
   )
-  assert.equal(done.event.sticky, false)
-  assert.equal(done.event.payload.auto_hide_ms, 3000)
+  assert.equal(doneWhileExpanded.length, 1, '展开期间完成照常刷新（同键原地更新）')
+  assert.equal(doneWhileExpanded[0].event.sticky, true, '展开中完成卡是 sticky（用户正在看）')
+  assert.equal(doneWhileExpanded[0].event.payload.auto_hide_ms, undefined, '展开中完成不自动收')
 
-  // × 关卡（宿主 resolved dismissed）→ 本轮静默，不再发布
+  // 收起 → 按当前状态补发，恢复 auto_hide 计时
+  const collapseRes = await view(false)
+  assert.equal(collapseRes.status, 200)
+  const backDone = await sidecar.waitFor(
+    (op) =>
+      op.op === 'publish' &&
+      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
+      op.event?.payload?.status === 'done' &&
+      op.event?.payload?.at > doneWhileExpanded[0].event.payload.at,
+  )
+  assert.equal(backDone.event.sticky, false)
+  assert.equal(backDone.event.payload.auto_hide_ms, 3000, '收起后恢复自动收计时')
+
+  // × 关卡 → 本轮静默，不再发布
+  const countBeforeX = sidecar.ops.filter(
+    (op) => op.op === 'publish' && String(op.event?.dedupeKey ?? '').startsWith('dsh-chat.notice:session-bbb'),
+  ).length
   sidecar.send({
     op: 'resolved',
-    eventId: done.event.id,
+    eventId: backDone.event.id,
     resolutionKind: 'dismissed',
     payload: { notice: true, sessionId: 'session-bbb' },
   })
   await new Promise((resolve) => setTimeout(resolve, 1200))
-  const publishesForB = sidecar.ops.filter(
-    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb',
-  )
-  assert.equal(publishesForB.length, 2, '× 之后没有新事件就不该再发布')
+  const countAfterX = sidecar.ops.filter(
+    (op) => op.op === 'publish' && String(op.event?.dedupeKey ?? '').startsWith('dsh-chat.notice:session-bbb'),
+  ).length
+  assert.equal(countAfterX, countBeforeX, '× 之后没有新事件就不该再发布')
 
   // 新回合开始 → 静默解除，重新出「进行中」
   appendFrame(logB, [
-    { type: 'turn/start', seq: 31, time: Date.now(), data: { turn: 3 } },
+    { type: 'turn/start', seq: 41, time: Date.now(), data: { turn: 3 } },
     {
       type: 'user/message',
-      seq: 32,
+      seq: 42,
       time: Date.now(),
       data: { content: [{ type: 'text', text: '继续，把测试补完。' }], source: { kind: 'user' }, role: 'user', id: 'user-bbb-9' },
       surfaceOp: 'append',
@@ -408,27 +577,9 @@ test('状态通知巡检：回合流转出卡 / 完成自动收 / ×静默 / 审
       op.op === 'publish' &&
       op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
       op.event?.payload?.status === 'running' &&
-      op.event?.payload?.at > done.event.payload.at,
+      op.event?.payload?.at > backDone.event.payload.at,
   )
   assert.equal(rerun.event.sticky, true)
-
-  // 审批：asked → waiting + autoExpand；decided → 回到 running
-  appendFrame(logB, [{ type: 'approval/asked', seq: 33, time: Date.now(), data: { id: 'apm-1' } }])
-  const waiting = await sidecar.waitFor(
-    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'waiting',
-  )
-  assert.equal(waiting.event.payload.autoExpand, true, '等你审批要自动展开真 GUI')
-  assert.equal(waiting.event.level, 'warning')
-
-  appendFrame(logB, [{ type: 'approval/decided', seq: 34, time: Date.now(), data: { id: 'apm-1', outcome: 'allowed-once' } }])
-  const resumed = await sidecar.waitFor(
-    (op) =>
-      op.op === 'publish' &&
-      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
-      op.event?.payload?.status === 'running' &&
-      op.event?.payload?.at > waiting.event.payload.at,
-  )
-  assert.equal(resumed.event.sticky, true)
 
   // 设置页的测试卡与巡检状态
   const demo = await sidecar.call('noticeDemo', { status: 'done' })

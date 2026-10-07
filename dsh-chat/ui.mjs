@@ -1,12 +1,13 @@
 /**
  * dsh-chat 小窗卡片（Catrace Toast 自定义卡）。
  *
- * 小窗 = 一个常驻（sticky）的小窗口：上面是 DSH 会话的消息流，下面是输入框。
- *  - 镜像：跟随/固定某个 DSH 会话，按 pollMs 轮询日志，实现「在 DSH 里聊，小窗里看」；
- *  - 对话：输入框里的消息通过官方 SDK 起一个新会话（回复同样落进 DSH 会话库）。
+ * 两种卡片：
+ *  - dsh-chat.window：常驻小窗 = 官方 GUI 的 iframe（sidecar 同源反代）。0.2.x 的
+ *    镜像消息流 / SDK 对话已移除；旧版发布的无 guiUrl 卡片会渲染一段"请重开"的提示。
+ *  - dsh-chat.notice：右下角可折叠状态卡，正文点击 → 同一张卡原地长高，正文区换成官方界面。
  *
  * 数据通路：**Toast 窗不能调 plugin.sidecar.request**（宿主只放行 main 窗），
- * 因此卡片用 fetch 访问 sidecar 的本机 HTTP 桥，端口与口令来自事件 payload。
+ * 状态卡用 fetch 访问 sidecar 的本机 HTTP 桥（端口与口令来自事件 payload）拿 GUI 地址、上报展开状态。
  *
  * 尺寸约束（见插件 .agent/features/dsh-chat/README.md）：
  *  宿主 .toast-card 卡槽固定 22.5rem（360px），.toast-stack 是 overflow-x: hidden。
@@ -15,11 +16,11 @@
  *
  * 约束（Catrace 外部插件合同）：只用注入的 Vue/Naive 白名单、尺寸用 rem、样式带 dsh-chat 前缀。
  */
-const { h, ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.__CATRACE_VUE__ || {}
+const { h, ref, computed, watch, onBeforeUnmount } = globalThis.__CATRACE_VUE__ || {}
 
 if (typeof h !== 'function') throw new Error('Catrace plugin Vue runtime missing')
 
-const { NButton, NInput, NSelect, NTag, NTooltip } = globalThis.__CATRACE_NAIVE__ || {}
+const { NButton, NTooltip } = globalThis.__CATRACE_NAIVE__ || {}
 
 const STYLE_ID = 'dsh-chat-card-style'
 
@@ -42,130 +43,46 @@ const CARD_CSS = `
   overflow-wrap: anywhere;
 }
 
-/* ---------- 顶栏 ---------- */
+/* ---------- 顶栏（小窗自己的那行，不是官方顶栏） ---------- */
 .dsh-chat-card__header {
   display: flex; flex-direction: column; gap: 0.125rem;
   padding: 0.5rem 0.5rem 0.4375rem 0.75rem;
   border-bottom: 1px solid var(--ct-border, rgba(0,0,0,0.08));
   flex: 0 0 auto;
 }
-.dsh-chat-card__header-top { display: flex; align-items: center; gap: 0.375rem; min-width: 0; }
 .dsh-chat-card__title {
   font-weight: 600; flex: 1 1 auto; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .dsh-chat-card__actions { display: flex; align-items: center; gap: 0.0625rem; flex: 0 0 auto; }
-.dsh-chat-card__header-sub {
-  display: flex; align-items: center; gap: 0.375rem;
-  color: var(--ct-text-subtle, #9aa4b2); font-size: 0.6875rem;
-  min-width: 0;
-}
-.dsh-chat-card__header-sub > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---------- 消息区 ---------- */
-.dsh-chat-card__body {
-  flex: 1 1 auto; min-height: 0;
-  overflow-y: auto; overflow-x: hidden;
-  padding: 0.625rem 0.75rem;
-  display: flex; flex-direction: column; gap: 0.5rem;
-  overscroll-behavior: contain;
-}
-.dsh-chat-card__row { display: flex; flex-direction: column; gap: 0.125rem; max-width: 100%; min-width: 0; }
-.dsh-chat-card__row.is-user { align-items: flex-end; }
-.dsh-chat-card__row.is-assistant { align-items: stretch; }
-.dsh-chat-card__bubble {
-  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
-  padding: 0.375rem 0.5rem; border-radius: 0.5rem;
-  max-width: 92%; box-sizing: border-box;
-}
-.dsh-chat-card__row.is-user .dsh-chat-card__bubble {
-  align-self: flex-end;
-  background: var(--ct-accent-soft, rgba(124, 58, 237, 0.14));
-}
-.dsh-chat-card__row.is-assistant .dsh-chat-card__bubble {
-  background: var(--ct-surface-2, rgba(127, 127, 127, 0.09));
-}
-.dsh-chat-card__meta { color: var(--ct-text-subtle, #9aa4b2); font-size: 0.625rem; }
-
-/* 折叠块（思考 / 工具调用）：summary 单行，内容可长但必须换行 */
-.dsh-chat-card__fold { min-width: 0; }
-.dsh-chat-card__fold > summary {
-  cursor: pointer; list-style: none;
-  color: var(--ct-text-muted, #8a94a6); font-size: 0.6875rem;
-  display: flex; align-items: center; gap: 0.25rem;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.dsh-chat-card__fold > summary::-webkit-details-marker { display: none; }
-.dsh-chat-card__fold > summary::before { content: '▸'; flex: 0 0 auto; }
-.dsh-chat-card__fold[open] > summary::before { content: '▾'; }
-.dsh-chat-card__fold-body {
-  margin: 0.1875rem 0 0.1875rem 0.5rem;
-  padding-left: 0.4375rem;
-  border-left: 2px solid var(--ct-border, rgba(0,0,0,0.12));
-  display: flex; flex-direction: column; gap: 0.25rem;
-  min-width: 0;
-}
-.dsh-chat-card__reasoning {
-  color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem;
-  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
-  max-height: 8rem; overflow-y: auto; overflow-x: hidden;
-}
-.dsh-chat-card__tool {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.6875rem; color: var(--ct-text-muted, #6b7280);
-  display: flex; align-items: baseline; gap: 0.25rem;
-  min-width: 0;
-}
-.dsh-chat-card__tool-name { flex: 0 0 auto; color: var(--ct-accent, #7c3aed); }
-.dsh-chat-card__tool-target {
-  flex: 1 1 auto; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  direction: rtl; text-align: left;   /* 长路径优先保留尾部文件名 */
-}
-.dsh-chat-card__tool-state { flex: 0 0 auto; }
-.dsh-chat-card__tool.is-error .dsh-chat-card__tool-name,
-.dsh-chat-card__tool.is-error .dsh-chat-card__tool-state { color: #b42318; }
-.dsh-chat-card__empty { color: var(--ct-text-muted, #8a94a6); padding: 1.25rem 0.25rem; text-align: center; }
-.dsh-chat-card__notice {
-  margin: 0 0.75rem; padding: 0.3125rem 0.5rem; border-radius: 0.375rem;
-  background: rgba(180, 35, 24, 0.08); color: #b42318;
-  font-size: 0.6875rem; overflow-wrap: anywhere;
-}
-.dsh-chat-card__notice.is-info { background: var(--ct-accent-softer, rgba(127,127,127,0.10)); color: var(--ct-text-muted, #6b7280); }
-
-/* ---------- 输入区 ---------- */
-.dsh-chat-card__footer {
-  flex: 0 0 auto; border-top: 1px solid var(--ct-border, rgba(0,0,0,0.08));
-  padding: 0.5rem 0.5rem 0.4375rem 0.75rem;
-  display: flex; flex-direction: column; gap: 0.3125rem;
-}
-.dsh-chat-card__composer { display: flex; align-items: flex-end; gap: 0.375rem; min-width: 0; }
-.dsh-chat-card__composer-main { flex: 1 1 auto; min-width: 0; }
-.dsh-chat-card__hint {
-  display: flex; align-items: center; gap: 0.375rem;
-  color: var(--ct-text-subtle, #9aa4b2); font-size: 0.625rem; min-width: 0;
-}
-.dsh-chat-card__hint-text {
-  flex: 1 1 auto; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.dsh-chat-card__picker { width: 8.5rem; flex: 0 0 auto; }
-
-/* ---------- A2：真 GUI 模式（iframe 指向 sidecar 的同源反代） ---------- */
+/* ---------- 真 GUI 模式（iframe 指向 sidecar 的同源反代） ---------- */
 .dsh-chat-card__header.is-compact { flex-direction: row; align-items: center; gap: 0.375rem; padding: 0.3125rem 0.375rem 0.3125rem 0.625rem; }
 .dsh-chat-card__frame {
   flex: 1 1 auto; min-height: 0; width: 100%; border: 0;
   background: var(--ct-surface, #ffffff);
 }
 .dsh-chat-card__actions button { min-width: 1.5rem; }
+/* 旧版镜像卡事件的兜底提示（镜像模式已移除） */
+.dsh-chat-card__legacy {
+  flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+  padding: 1rem 1.25rem; text-align: center;
+  color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem; line-height: 1.6;
+}
 
-/* ---------- 状态通知卡（dsh-chat.notice）：折叠条 ⇄ 真 GUI，同一张卡 ---------- */
+/* ---------- 状态通知卡（dsh-chat.notice）：agent-notify 风格状态卡 ----------
+   徽标 + 标题 + 状态 chip + 项目路径 + 最新输出正文；没有 footer，正文点击原地展开官方界面。
+   视觉借鉴 agent-notify：左侧 0.25rem 状态色边框条（--accent，随状态琥珀/绿/紫）+
+   彩色状态 chip + 正文悬停下划线；主题变量内联到根节点。 */
 .dsh-chat-notice {
   width: 100%; box-sizing: border-box;
   display: flex; flex-direction: column;
   background: var(--ct-surface, #ffffff);
   color: var(--ct-text, #2e1065);
   border: 1px solid var(--ct-border, rgba(0, 0, 0, 0.10));
+  /* 状态色条 = 左边框本体（--accent 随状态琥珀/绿/紫）：border 天然跟随圆角、
+     全高贯通，不会被 iframe/正文盖住，也没有 inset 阴影在圆角处的楔形缺损 */
+  border-left: 0.25rem solid var(--accent, #64748b);
   border-radius: 0.75rem;
   box-shadow:
     0 0.5rem 1.5rem rgba(0, 0, 0, 0.18),
@@ -174,46 +91,49 @@ const CARD_CSS = `
   font-size: 0.8125rem; line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.dsh-chat-notice.is-expanded { height: 30rem; }
 .dsh-chat-notice__bar {
   display: flex; align-items: center; gap: 0.375rem;
-  padding: 0.4375rem 0.5rem 0.4375rem 0.625rem;
-  cursor: pointer; user-select: none; min-width: 0;
+  padding: 0.375rem 0.5rem 0.125rem 0.875rem;
+  min-width: 0;
 }
-.dsh-chat-notice__bar:hover { background: var(--ct-accent-softer, rgba(127, 127, 127, 0.07)); }
-.dsh-chat-notice__chevron {
-  flex: 0 0 auto; color: var(--ct-text-subtle, #9aa4b2); font-size: 0.6875rem;
-  transition: transform 0.15s;
-}
-.dsh-chat-notice__chevron.is-open { transform: rotate(90deg); }
-.dsh-chat-notice__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 999px; }
-.dsh-chat-notice__dot.is-running { background: var(--ct-accent, #7c3aed); animation: dsh-notice-pulse 1.6s ease-in-out infinite; }
-.dsh-chat-notice__dot.is-done { background: #15803d; }
-.dsh-chat-notice__dot.is-waiting { background: #b45309; }
-@keyframes dsh-notice-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.dsh-chat-notice__badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 2rem; height: 2rem; border-radius: 0.625rem;
+  background: #ffffff; overflow: hidden;
 }
 .dsh-chat-notice__title {
   flex: 1 1 auto; min-width: 0; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.dsh-chat-notice__status { flex: 0 0 auto; font-size: 0.6875rem; color: var(--ct-text-muted, #8a94a6); }
-.dsh-chat-notice__status.is-running { color: var(--ct-accent, #7c3aed); }
-.dsh-chat-notice__status.is-done { color: #15803d; }
-.dsh-chat-notice__status.is-waiting { color: #b45309; font-weight: 600; }
+.dsh-chat-notice__chip {
+  flex: 0 0 auto; display: inline-flex; align-items: center;
+  height: 1.125rem; padding: 0 0.4375rem; border-radius: 0.25rem;
+  font-size: 0.6875rem; font-weight: 600; line-height: 1; white-space: nowrap;
+  background: var(--badge-bg, #f3f4f6); color: var(--badge-fg, #4b5563);
+  border: 0.0625rem solid var(--border, rgba(15, 23, 42, 0.08));
+}
 .dsh-chat-notice__close {
-  flex: 0 0 auto; border: 0; background: transparent;
-  color: var(--ct-text-subtle, #9aa4b2); font-size: 0.875rem; line-height: 1;
-  padding: 0 0.25rem; cursor: pointer; border-radius: 0.25rem;
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; margin: 0; padding: 0;
+  border: none; border-radius: 0.375rem; background: transparent;
+  color: var(--ct-text-subtle, #94a3b8); font-size: 1rem; line-height: 1; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.dsh-chat-notice__close:hover { color: var(--ct-text, #2e1065); background: rgba(127, 127, 127, 0.12); }
+.dsh-chat-notice__close:hover { background: #fff1f2; color: #e11d48; }
 .dsh-chat-notice__preview {
-  padding: 0 0.625rem 0.4375rem 1.5rem;
+  margin: 0; /* <p> 的 UA 默认上下外边距不归零，标题和正文之间会凭空多出一条空带 */
+  padding: 0 0.625rem 0.4375rem 0.875rem;
   color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  cursor: pointer;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+/* 正文就是入口：点击原地展开官方界面（agent-notify 的可点文本观感） */
+.dsh-chat-notice__preview.is-interactive { cursor: pointer; }
+.dsh-chat-notice__preview.is-interactive:hover {
+  text-decoration: underline; text-decoration-color: rgba(15, 23, 42, 0.35); text-underline-offset: 3px;
+}
+.dsh-chat-notice__preview.is-error { color: #b42318; }
+/* 展开态：状态卡原地长高，正文区换成 DSH 的对话交互区（官方 GUI iframe） */
+.dsh-chat-notice.is-expanded { height: 30rem; }
 .dsh-chat-notice__body {
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column;
@@ -237,26 +157,14 @@ const CARD_CSS = `
   font-size: 0.75rem; padding: 0.1875rem 0.625rem; cursor: pointer;
 }
 .dsh-chat-notice__retry:hover { border-color: var(--ct-accent, #7c3aed); color: var(--ct-accent, #7c3aed); }
-.dsh-chat-notice__mirror {
-  flex: 1 1 auto; min-height: 0;
-  overflow-y: auto; overflow-x: hidden;
-  padding: 0.5rem 0.625rem;
-  display: flex; flex-direction: column; gap: 0.375rem;
-  overscroll-behavior: contain;
+.dsh-chat-notice__collapse {
+  flex: 0 0 auto; display: inline-flex; align-items: center;
+  height: 1.25rem; padding: 0 0.4375rem; border-radius: 0.25rem;
+  border: 1px solid var(--ct-border, rgba(0, 0, 0, 0.10)); background: transparent;
+  color: var(--ct-text-muted, #8a94a6); font-size: 0.6875rem; font-weight: 600; line-height: 1;
+  cursor: pointer; transition: border-color 0.15s ease, color 0.15s ease;
 }
-.dsh-chat-notice__mrow-user {
-  align-self: flex-end; max-width: 88%; box-sizing: border-box;
-  background: var(--ct-accent-soft, rgba(124, 58, 237, 0.14));
-  border-radius: 0.5rem; padding: 0.25rem 0.5rem;
-  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
-}
-.dsh-chat-notice__mrow-assistant {
-  align-self: stretch;
-  background: var(--ct-surface-2, rgba(127, 127, 127, 0.09));
-  border-radius: 0.5rem; padding: 0.25rem 0.5rem;
-  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
-}
-.dsh-chat-notice__mrow-tools { color: var(--ct-text-muted, #8a94a6); font-size: 0.6875rem; overflow-wrap: anywhere; }
+.dsh-chat-notice__collapse:hover { border-color: var(--ct-accent, #7c3aed); color: var(--ct-accent, #7c3aed); }
 `
 
 /**
@@ -277,44 +185,6 @@ function ensureStyle() {
   document.head.appendChild(style)
 }
 
-function clockOf(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-/** 工具参数太长，只留「像路径的那一段」的最后两节，例如 dsh-chat/ui.mjs */
-function toolTarget(argsSummary, max = 40) {
-  if (!argsSummary) return ''
-  const quoted = String(argsSummary).match(/"([^"]{3,240})"/)
-  const candidate = (quoted ? quoted[1] : String(argsSummary)).replace(/\s+/g, ' ').trim()
-  const looksLikePath = /[\\/]/.test(candidate)
-  const cleaned = looksLikePath
-    ? candidate.replace(/^[A-Za-z]:[\\/]/, '').split(/[\\/]/).filter(Boolean).slice(-2).join('/')
-    : candidate
-  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned
-}
-
-/** 把连续的 tool item 合成一个「N 个工具调用」折叠组，别把消息流冲成工具墙 */
-function groupItems(items) {
-  const out = []
-  for (const item of items) {
-    if (!item) continue
-    const last = out[out.length - 1]
-    if (item.kind === 'tool') {
-      if (last && last.kind === 'toolGroup') {
-        last.tools.push(item)
-      } else {
-        out.push({ kind: 'toolGroup', id: `g:${item.id}`, time: item.time, tools: [item] })
-      }
-      continue
-    }
-    out.push(item)
-  }
-  return out
-}
-
 /** 重新加载 iframe：改 src 会重挂，用 about:blank 中转一次 */
 function reloadFrame(frameRef) {
   const frame = frameRef?.value?.$el ?? frameRef?.value
@@ -326,464 +196,98 @@ function reloadFrame(frameRef) {
   }, 50)
 }
 
-/** 窗口卡（dsh-chat.window 事件）：镜像消息流 / SDK 对话 / 真 GUI iframe 三种形态。 */
+/** 窗口卡（dsh-chat.window 事件）：官方 GUI iframe；旧版镜像卡的事件渲染"请重开"提示。 */
 function setupWindowCard(props, { emit }) {
-    const items = ref([])
-    const session = ref(null)
-    const options = ref([])
-    const targetId = ref('')
-    const draft = ref('')
-    const busy = ref(false)
-    const error = ref('')
-    const notice = ref('')
-    const mode = ref('mirror')
-    const pinned = ref(false)
-    const statusLine = ref('')
-    /** sidecar 报回的生效配置（改设置后不必重开小窗） */
-    const liveConfigRef = ref(null)
-    const bodyRef = ref(null)
-    const inputRef = ref(null)
-    const stickToBottom = ref(true)
-    /** callId -> 参数摘要，用来给 tool item 补上「操作对象」 */
-    const toolArgs = new Map()
-    let timer = null
-    let disposed = false
+  const payload = computed(() => (props.event && props.event.payload) || {})
+  const guiUrl = computed(() => String(payload.value.guiUrl || ''))
 
-    const payload = computed(() => (props.event && props.event.payload) || {})
-    const guiUrl = computed(() => String(payload.value.guiUrl || ''))
-    const isGui = computed(() => guiUrl.value.length > 0)
-    // 优先用 sidecar 报回的"生效配置"：这样在设置页改「显示条数 / 轮询间隔」后，
-    // 卡片下一轮就自动跟着变，不用重新打开小窗（payload 里的值只是打开那一刻的快照）。
-    const liveConfig = computed(() => liveConfigRef.value || {})
-    const pollMs = computed(() => {
-      const n = Number(liveConfig.value.pollMs ?? payload.value.pollMs)
-      return Number.isFinite(n) ? Math.min(30000, Math.max(500, n)) : 2000
-    })
-    const limit = computed(() => {
-      const n = Number(liveConfig.value.mirrorLimit ?? payload.value.limit)
-      return Number.isFinite(n) ? Math.min(200, Math.max(6, n)) : 40
-    })
-    const isChat = computed(() => mode.value === 'chat')
-    const canSend = computed(() => draft.value.trim().length > 0 && !busy.value)
-    const viewItems = computed(() => groupItems(items.value))
-    const subline = computed(() => {
-      const s = session.value
-      const parts = []
-      if (s?.cwd) parts.push(s.cwd)
-      if (s?.updatedAt) parts.push(`更新于 ${clockOf(s.updatedAt)}`)
-      if (!parts.length && targetId.value) parts.push(targetId.value)
-      return parts.join(' · ')
-    })
+  /** 0.2.x 镜像卡发布的旧事件（无 guiUrl）：镜像模式已删，提示重开一次即可 */
+  function renderLegacy() {
+    return h('div', { class: 'dsh-chat-card' }, [
+      h('div', { class: 'dsh-chat-card__header is-compact' }, [
+        h('div', { class: 'dsh-chat-card__title' }, props.event?.title || 'DSH 对话'),
+        h('div', { class: 'dsh-chat-card__actions' }, [
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => emit('close') }, { default: () => '×' }),
+        ]),
+      ]),
+      h(
+        'div',
+        { class: 'dsh-chat-card__legacy' },
+        '这张小窗是旧版本的镜像卡，镜像模式已经移除。关掉它，点状态卡的正文即可展开官方界面。',
+      ),
+    ])
+  }
 
-    async function call(method, params = {}) {
-      // 注意：Toast 卡片跑在 reminder-toast 窗，宿主只放行 main 窗调 `plugin.sidecar.request`，
-      // 所以卡片一律走 sidecar 的本机 HTTP 桥（端口与口令来自事件 payload）。
-      const port = Number(payload.value.httpPort) || 23457
-      const token = String(payload.value.httpToken || '')
-      const base = `http://127.0.0.1:${port}`
-      const headers = token ? { 'X-Dsh-Chat-Token': token } : {}
-      let url = base
-      let init = { headers }
-      if (method === 'sendPrompt') {
-        url = `${base}/prompt`
-        init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: params.text }) }
-      } else if (method === 'stopChat') {
-        url = `${base}/stop`
-        init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' }
-      } else if (method === 'setMirror') {
-        url = `${base}/mirror`
-        init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: params.sessionId ?? '' }) }
-      } else if (method === 'readSession') {
-        const query = new URLSearchParams()
-        if (params.id) query.set('id', params.id)
-        query.set('limit', String(params.limit ?? limit.value))
-        url = `${base}/session?${query.toString()}`
-      } else if (method === 'listSessions') {
-        url = `${base}/sessions?limit=${encodeURIComponent(String(params.limit ?? 12))}`
-      } else if (method === 'status') {
-        url = `${base}/status`
-      } else {
-        throw new Error(`卡片不支持的方法：${method}`)
-      }
-
-      let response
-      try {
-        response = await fetch(url, init)
-      } catch (cause) {
-        throw new Error(
-          `本机 HTTP 桥连不上（127.0.0.1:${port}）：${cause?.message || cause}。` +
-            '若插件或 sidecar 刚重启过，端口/口令会变，请到插件详情页重新点「打开小窗」。',
-        )
-      }
-      let data = null
-      try {
-        data = await response.json()
-      } catch {
-        throw new Error(`HTTP ${response.status}：返回不是 JSON`)
-      }
-      if (!response.ok || data?.ok === false) throw new Error(data?.error || `HTTP ${response.status}`)
-      return data.result
-    }
-
-    async function loadStatus() {
-      try {
-        const info = await call('status')
-        statusLine.value = [info.model, info.reasoningEffort].filter(Boolean).join(' · ')
-        // 生效配置存下来：显示条数 / 轮询间隔跟着设置页实时变，不用重开小窗
-        if (info && typeof info === 'object' && info.config) liveConfigRef.value = info.config
-        if (!targetId.value && info.mirrorSessionId) targetId.value = info.mirrorSessionId
-        pinned.value = Boolean(info.mirrorPinned)
-      } catch (cause) {
-        error.value = cause?.message || String(cause)
-      }
-    }
-
-    async function loadOptions() {
-      try {
-        const res = await call('listSessions', { limit: 12 })
-        const list = Array.isArray(res?.sessions) ? res.sessions : []
-        options.value = list.map((s) => ({ label: s.title || s.id, value: s.id }))
-        if (!targetId.value && list.length > 0) targetId.value = list[0].id
-      } catch {
-        /* 列表失败不阻塞正文 */
-      }
-    }
-
-    async function refresh() {
-      if (disposed) return
-      try {
-        const res = await call('readSession', { id: targetId.value || undefined, limit: limit.value })
-        if (disposed) return
-        if (!res?.session) {
-          items.value = []
-          session.value = null
-          error.value = res?.reason === 'unreadable' ? '这个会话的日志暂时读不出来（可能正在写入）' : ''
-          return
-        }
-        session.value = res.session
-        items.value = Array.isArray(res.session.items) ? res.session.items : []
-        toolArgs.clear()
-        for (const item of items.value) {
-          if (item.kind === 'assistant' && Array.isArray(item.tools)) {
-            for (const tool of item.tools) if (tool?.id) toolArgs.set(tool.id, tool.argsSummary || '')
-          }
-        }
-        notice.value = res.session.tailTruncated ? '日志正在写入，显示的是已落盘部分' : ''
-        error.value = ''
-        if (!targetId.value) targetId.value = res.session.id
-      } catch (cause) {
-        error.value = cause?.message || String(cause)
-      }
-    }
-
-    function scrollToBottom() {
-      const el = bodyRef.value
-      if (el && stickToBottom.value) el.scrollTop = el.scrollHeight
-    }
-
-    function onBodyScroll() {
-      const el = bodyRef.value
-      if (!el) return
-      stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    }
-
-    async function send() {
-      const text = draft.value.trim()
-      if (!text || busy.value) return
-      busy.value = true
-      error.value = ''
-      try {
-        const res = await call('sendPrompt', { text })
-        draft.value = ''
-        if (res?.sessionId) {
-          targetId.value = res.sessionId
-          mode.value = 'chat'
-        }
-        stickToBottom.value = true
-        window.setTimeout(() => void refresh(), 600)
-      } catch (cause) {
-        error.value = cause?.message || String(cause)
-      } finally {
-        busy.value = false
-        // 注入的 Vue 运行时没有 nextTick，用宏任务等一次渲染
-        window.setTimeout(() => inputRef.value?.focus?.(), 0)
-      }
-    }
-
-    async function stop() {
-      try {
-        await call('stopChat')
-        notice.value = '已停止正在跑的 DSH 会话进程'
-      } catch (cause) {
-        error.value = cause?.message || String(cause)
-      }
-      busy.value = false
-    }
-
-    async function pickSession(id) {
-      if (!id) return
-      try {
-        await call('setMirror', { sessionId: id })
-        targetId.value = id
-        mode.value = 'mirror'
-        pinned.value = true
-        await refresh()
-      } catch (cause) {
-        error.value = cause?.message || String(cause)
-      }
-    }
-
-    function onKeydown(event) {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault()
-        void send()
-      }
-    }
-
-    /** Toast 窗默认 noactivate：第一次点击才激活窗口，输入框需要手动补焦点。 */
-    function onCardPointerDown() {
-      window.setTimeout(() => inputRef.value?.focus?.(), 0)
-    }
-
-    onMounted(async () => {
-      ensureStyle()
-      // 真 GUI 模式：iframe 里就是官方界面，什么都不用我们拉
-      if (isGui.value) return
-      await Promise.all([loadStatus(), loadOptions()])
-      await refresh()
-      window.setTimeout(() => scrollToBottom(), 0)
-      arm()
-    })
-
-    function arm() {
-      if (timer !== null) window.clearInterval(timer)
-      timer = window.setInterval(() => void refresh(), pollMs.value)
-    }
-
-    // 轮询间隔跟着生效配置走：设置页改了间隔，这里重挂定时器即可，不必重开小窗
-    const stopWatch = watch ? watch(pollMs, () => arm()) : null
-
-    onBeforeUnmount(() => {
-      disposed = true
-      if (typeof stopWatch === 'function') stopWatch()
-      if (timer !== null) window.clearInterval(timer)
-      timer = null
-    })
-
-    function renderFold(summaryText, children, key) {
-      return h('details', { class: 'dsh-chat-card__fold', key }, [
-        h('summary', null, summaryText),
-        h('div', { class: 'dsh-chat-card__fold-body' }, children),
-      ])
-    }
-
-    function renderItem(item, index) {
-      if (!item) return null
-      if (item.kind === 'user') {
-        if (item.context) return null
-        return h('div', { class: 'dsh-chat-card__row is-user', key: `u${index}` }, [
-          h('div', { class: 'dsh-chat-card__bubble' }, item.text || ''),
-        ])
-      }
-      if (item.kind === 'assistant') {
-        const children = []
-        if (item.reasoning) {
-          children.push(
-            renderFold('思考', [h('div', { class: 'dsh-chat-card__reasoning' }, item.reasoning)], 'r'),
-          )
-        }
-        if (item.text) children.push(h('div', { class: 'dsh-chat-card__bubble', key: 't' }, item.text))
-        if (children.length === 0) return null
-        return h('div', { class: 'dsh-chat-card__row is-assistant', key: `a${index}` }, children)
-      }
-      if (item.kind === 'toolGroup') {
-        const failed = item.tools.filter((tool) => tool.ok === false).length
-        const label = `${item.tools.length} 个工具调用${failed > 0 ? `（${failed} 个失败）` : ''}`
-        return h(
+  function renderGui() {
+    const frameRef = ref(null)
+    // 官方顶栏被去装饰隐藏了，所以标题显示"会话标题"（拿不到才退回 id）
+    const label = payload.value.guiTitle || payload.value.guiSessionId || 'DSH'
+    return h('div', { class: 'dsh-chat-card is-gui' }, [
+      h('div', { class: 'dsh-chat-card__header is-compact' }, [
+        h(
           'div',
-          { class: 'dsh-chat-card__row is-assistant', key: item.id ?? `g${index}` },
-          [
-            renderFold(
-              label,
-              item.tools.map((tool, i) =>
-                h(
-                  'div',
-                  { class: `dsh-chat-card__tool${tool.ok === false ? ' is-error' : ''}`, key: `t${i}` },
-                  [
-                    h('span', { class: 'dsh-chat-card__tool-name' }, tool.name || 'tool'),
-                    h('span', { class: 'dsh-chat-card__tool-target', title: toolArgs.get(tool.id) || '' }, toolTarget(toolArgs.get(tool.id))),
-                    h('span', { class: 'dsh-chat-card__tool-state' }, tool.ok === false ? '失败' : '完成'),
-                  ],
-                ),
-              ),
-              'tools',
-            ),
-          ],
-        )
-      }
-      if (item.kind === 'tool') {
-        return h(
-          'div',
-          { class: 'dsh-chat-card__row is-assistant', key: `k${index}` },
-          [
-            h('div', { class: `dsh-chat-card__tool${item.ok === false ? ' is-error' : ''}` }, [
-              h('span', { class: 'dsh-chat-card__tool-name' }, item.name || 'tool'),
-              h('span', { class: 'dsh-chat-card__tool-target' }, toolTarget(toolArgs.get(item.id))),
-              h('span', { class: 'dsh-chat-card__tool-state' }, item.ok === false ? '失败' : '完成'),
-            ]),
-          ],
-        )
-      }
-      return null
-    }
-
-    function renderBody() {
-      if (items.value.length > 0) return viewItems.value.map((item, i) => renderItem(item, i))
-      const message = error.value
-        ? error.value
-        : targetId.value
-          ? '这个会话还没有可显示的消息'
-          : '还没有找到 DSH 会话。先在 DSH 里说句话，或改用下面的输入框直接提问。'
-      return [h('div', { class: 'dsh-chat-card__empty' }, message)]
-    }
-
-    function renderHeader() {
-      return h('div', { class: 'dsh-chat-card__header' }, [
-        h('div', { class: 'dsh-chat-card__header-top' }, [
-          h('div', { class: 'dsh-chat-card__title', title: session.value?.title || props.event?.title || 'DSH 对话' },
-            session.value?.title || props.event?.title || 'DSH 对话'),
-          h('div', { class: 'dsh-chat-card__actions' }, [
-            NTag
-              ? h(NTag, { size: 'tiny', bordered: false, type: isChat.value ? 'info' : 'default' }, { default: () => (isChat.value ? '对话' : '镜像') })
-              : null,
-            NTooltip
-              ? h(NTooltip, null, {
-                  trigger: () => h(NButton, { size: 'tiny', quaternary: true, onClick: () => void refresh() }, { default: () => '⟳' }),
-                  default: () => '重新读取会话日志',
-                })
-              : null,
-            isChat.value
-              ? h(NButton, { size: 'tiny', quaternary: true, onClick: () => void stop() }, { default: () => '■' })
-              : null,
-            h(NButton, { size: 'tiny', quaternary: true, onClick: () => emit('close') }, { default: () => '×' }),
-          ]),
-        ]),
-        h('div', { class: 'dsh-chat-card__header-sub' }, [
-          h('span', null, isChat.value ? `对话 ${targetId.value || ''}` : subline.value || '未选择会话'),
-        ]),
-      ])
-    }
-
-    function renderFooter() {
-      const meta = []
-      if (busy.value) meta.push('DSH 正在回复…')
-      if (statusLine.value) meta.push(statusLine.value)
-      if (pinned.value) meta.push('已固定')
-      return h('div', { class: 'dsh-chat-card__footer' }, [
-        h('div', { class: 'dsh-chat-card__composer' }, [
-          h('div', { class: 'dsh-chat-card__composer-main' }, [
-            NInput
-              ? h(NInput, {
-                  ref: inputRef,
-                  type: 'textarea',
-                  size: 'small',
-                  autosize: { minRows: 1, maxRows: 3 },
-                  value: draft.value,
-                  placeholder: '问问 DSH…',
-                  'onUpdate:value': (value) => {
-                    draft.value = value
-                  },
-                  onKeydown,
-                })
-              : h('textarea', {
-                  ref: inputRef,
-                  value: draft.value,
-                  onInput: (e) => {
-                    draft.value = e.target.value
-                  },
-                  onKeydown,
-                }),
-          ]),
-          h(
-            NButton,
-            { size: 'small', type: 'primary', disabled: !canSend.value, loading: busy.value, onClick: () => void send() },
-            { default: () => '发送' },
-          ),
-        ]),
-        h('div', { class: 'dsh-chat-card__hint' }, [
-          h('span', { class: 'dsh-chat-card__hint-text', title: meta.join(' · ') }, meta.join(' · ') || 'Enter 发送，Shift+Enter 换行'),
-          options.value.length > 1 && NSelect
-            ? h(NSelect, {
-                class: 'dsh-chat-card__picker',
-                size: 'tiny',
-                value: targetId.value || null,
-                options: options.value,
-                consistentMenuWidth: false,
-                'onUpdate:value': (value) => void pickSession(value),
+          { class: 'dsh-chat-card__title', title: `${label}\n${payload.value.guiSessionId || ''}` },
+          label,
+        ),
+        h('div', { class: 'dsh-chat-card__actions' }, [
+          NTooltip
+            ? h(NTooltip, null, {
+                trigger: () =>
+                  h(NButton, { size: 'tiny', quaternary: true, onClick: () => reloadFrame(frameRef) }, { default: () => '⟳' }),
+                default: () => '重新加载官方界面',
               })
             : null,
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => emit('close') }, { default: () => '×' }),
         ]),
-      ])
-    }
+      ]),
+      h('iframe', {
+        class: 'dsh-chat-card__frame',
+        src: guiUrl.value,
+        ref: frameRef,
+        // 不加 sandbox：sandbox 会让页面变成 opaque origin，DSH 的信任栅栏直接 403
+        allow: 'clipboard-read; clipboard-write',
+        onLoad: () => window.setTimeout(() => frameRef.value?.focus?.(), 0),
+      }),
+    ])
+  }
 
-    function renderGui() {
-      const frameRef = ref(null)
-      // 官方顶栏被去装饰隐藏了，所以标题显示"会话标题"（拿不到才退回 id）
-      const label = payload.value.guiTitle || session.value?.title || payload.value.guiSessionId || 'DSH'
-      return h('div', { class: 'dsh-chat-card is-gui', onPointerdown: onCardPointerDown }, [
-        h('div', { class: 'dsh-chat-card__header is-compact' }, [
-          h(
-            'div',
-            { class: 'dsh-chat-card__title', title: `${label}\n${payload.value.guiSessionId || ''}` },
-            label,
-          ),
-          h('div', { class: 'dsh-chat-card__actions' }, [
-            NTooltip
-              ? h(NTooltip, null, {
-                  trigger: () =>
-                    h(NButton, { size: 'tiny', quaternary: true, onClick: () => reloadFrame(frameRef) }, { default: () => '⟳' }),
-                  default: () => '重新加载官方界面',
-                })
-              : null,
-            h(NButton, { size: 'tiny', quaternary: true, onClick: () => emit('close') }, { default: () => '×' }),
-          ]),
-        ]),
-        h('iframe', {
-          class: 'dsh-chat-card__frame',
-          src: guiUrl.value,
-          ref: frameRef,
-          // 不加 sandbox：sandbox 会让页面变成 opaque origin，DSH 的信任栅栏直接 403
-          allow: 'clipboard-read; clipboard-write',
-          onLoad: () => window.setTimeout(() => frameRef.value?.focus?.(), 0),
-        }),
-      ])
-    }
-
-    return () =>
-      isGui.value
-        ? renderGui()
-        : h('div', { class: 'dsh-chat-card', onPointerdown: onCardPointerDown }, [
-            renderHeader(),
-            error.value ? h('div', { class: 'dsh-chat-card__notice', title: error.value }, error.value) : null,
-            notice.value ? h('div', { class: 'dsh-chat-card__notice is-info', title: notice.value }, notice.value) : null,
-            h('div', { class: 'dsh-chat-card__body', ref: bodyRef, onScroll: onBodyScroll }, renderBody()),
-            renderFooter(),
-          ])
+  return () => (guiUrl.value ? renderGui() : renderLegacy())
 }
 
-/** 状态卡的展示元数据：状态点/标签的颜色与文案 */
+/** 状态卡的徽标：官方托盘鲸鱼（DSH Desktop resources/app/build/tray-icon.svg，viewBox 0 0 50 50），蓝底白鲸 */
+const DSH_WHALE_PATH = 'M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z'
+
+/** 状态 → chip 文案与主题（配色对齐 agent-notify 的 EVENT_THEMES） */
 const NOTICE_STATUS_META = {
-  running: { label: '进行中', className: 'is-running' },
-  done: { label: '已完成', className: 'is-done' },
-  waiting: { label: '等你审批', className: 'is-waiting' },
+  running: { label: '进行中' },
+  done: { label: '已完成' },
+  waiting: { label: '等你审批' },
+}
+
+/** running 对齐 PreToolUse（琥珀=干活）、done 对齐 Stop（绿=完成）、waiting 对齐 Notification（紫=需要你回来） */
+const NOTICE_THEMES = {
+  running: { accent: '#F59E0B', badgeBg: '#FEF3C7', badgeFg: '#B45309', border: '#FDE68A' },
+  done: { accent: '#10B981', badgeBg: '#D1FAE5', badgeFg: '#047857', border: '#6EE7B7' },
+  waiting: { accent: '#8B5CF6', badgeBg: '#EDE9FE', badgeFg: '#6D28D9', border: '#DDD6FE' },
+}
+
+function noticeThemeStyle(theme) {
+  return {
+    '--accent': theme.accent,
+    '--badge-bg': theme.badgeBg,
+    '--badge-fg': theme.badgeFg,
+    '--border': theme.border,
+  }
 }
 
 /**
- * 状态通知卡（dsh-chat.notice 事件）：折叠条 ⇄ 真 GUI 小窗，同一张卡。
+ * 状态通知卡（dsh-chat.notice 事件）：agent-notify 风格 + 卡内原地展开。
  *
- * 折叠 = 标题 + 状态 + 最新输出预览；点一下整条就地展开成官方界面（或镜像消息流），再点折叠。
- * 生命周期由 sidecar 巡检驱动（同 dedupeKey 原地刷新，状态/预览跟着 payload 变）；
- * 展开/收起要上报 /notice/view：用户正在看期间 sidecar 用 sticky 持有，完成也不自动收。
+ * 折叠态：徽标 + 标题 + 状态 chip + 项目路径 + 最新输出正文（3 行渐隐）；没有 footer，
+ * header 纯展示（无 hover 无点击）。正文就是入口：点击后**同一张卡**原地长高，
+ * 正文区换成 DSH 的对话交互区（官方 GUI iframe），header 上出现「收起」按钮。
+ * 展开期间上报 /notice/view，sidecar 用 sticky 持有（完成也不自动收），收起后恢复计时。
+ * 生命周期由 sidecar 巡检驱动（同 dedupeKey 原地刷新），× = 本轮静默。
  */
 function setupNoticeCard(props, { emit }) {
   const payload = computed(() => (props.event && props.event.payload) || {})
@@ -792,16 +296,10 @@ function setupNoticeCard(props, { emit }) {
   const statusMeta = computed(() => NOTICE_STATUS_META[status.value])
   const title = computed(() => props.event?.title || sessionId.value || 'DSH 任务')
   const preview = computed(() => String(payload.value.preview || ''))
-  const expandMode = computed(() => (payload.value.expandMode === 'mirror' ? 'mirror' : 'gui'))
-
   const expanded = ref(false)
   const guiUrl = ref('')
   const guiError = ref('')
   const guiLoading = ref(false)
-  const mirrorItems = ref([])
-  const mirrorError = ref('')
-  const mirrorBodyRef = ref(null)
-  let mirrorTimer = null
   let disposed = false
 
   async function call(method, params = {}) {
@@ -817,8 +315,6 @@ function setupNoticeCard(props, { emit }) {
     } else if (method === 'view') {
       url = `${base}/notice/view`
       init = { ...init, method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: params.sessionId ?? '', expanded: params.expanded !== false }) }
-    } else if (method === 'readSession') {
-      url = `${base}/session?id=${encodeURIComponent(String(params.id ?? ''))}&limit=${encodeURIComponent(String(params.limit ?? 20))}`
     } else {
       throw new Error(`状态卡不支持的方法：${method}`)
     }
@@ -838,7 +334,7 @@ function setupNoticeCard(props, { emit }) {
     return data.result
   }
 
-  /** 展开/收起上报：尽力而为（sidecar 重启后旧卡上报失败就算了） */
+  /** 展开/收起上报：sidecar 把该会话置为 sticky 持有（正在看，完成也不自动收） */
   function notifyView(value) {
     if (!sessionId.value) return Promise.resolve()
     return call('view', { sessionId: sessionId.value, expanded: value }).catch(() => {})
@@ -859,52 +355,20 @@ function setupNoticeCard(props, { emit }) {
     }
   }
 
-  async function loadMirror() {
-    mirrorError.value = ''
-    try {
-      const res = await call('readSession', { id: sessionId.value, limit: 20 })
-      mirrorItems.value = Array.isArray(res?.session?.items) ? res.session.items : []
-      if (!res?.session) {
-        mirrorError.value = res?.reason === 'unreadable' ? '会话日志暂时读不出来（可能正在写入）' : '找不到这个会话'
-      }
-    } catch (cause) {
-      mirrorError.value = cause?.message || String(cause)
-    }
-    window.setTimeout(() => {
-      const el = mirrorBodyRef.value
-      if (el) el.scrollTop = el.scrollHeight
-    }, 0)
-  }
-
-  function stopMirrorTimer() {
-    if (mirrorTimer !== null) {
-      window.clearInterval(mirrorTimer)
-      mirrorTimer = null
-    }
-  }
-
-  function armMirrorTimer() {
-    stopMirrorTimer()
-    mirrorTimer = window.setInterval(() => {
-      if (!disposed && expanded.value) void loadMirror()
-    }, 2000)
-  }
-
   async function expand() {
     if (expanded.value || disposed) return
     expanded.value = true
     void notifyView(true)
-    if (expandMode.value === 'gui') await ensureGui()
-    else {
-      await loadMirror()
-      armMirrorTimer()
-    }
+    void ensureGui()
   }
 
   function collapse() {
     if (!expanded.value) return
     expanded.value = false
-    stopMirrorTimer()
+    // 丢掉 iframe 地址：外观/端口类设置在收起期间可能已改（旧反代被 sidecar 关掉），
+    // 下次展开重新 /gui 取一次，保证拿到的是新配置的界面
+    guiUrl.value = ''
+    guiError.value = ''
     void notifyView(false)
   }
 
@@ -913,7 +377,7 @@ function setupNoticeCard(props, { emit }) {
     else void expand()
   }
 
-  // 审批自动展开：sidecar 发出 waiting + autoExpand → 就地展开真 GUI
+  // 审批自动展开：sidecar 发出 waiting + autoExpand → 卡内原地展开对话交互区
   const stopAutoExpandWatch = watch
     ? watch(
         () => payload.value.autoExpand === true,
@@ -923,14 +387,9 @@ function setupNoticeCard(props, { emit }) {
       )
     : null
 
-  onMounted(() => {
-    if (payload.value.autoExpand === true) void expand()
-  })
-
   onBeforeUnmount(() => {
     disposed = true
     if (typeof stopAutoExpandWatch === 'function') stopAutoExpandWatch()
-    stopMirrorTimer()
     if (expanded.value && sessionId.value) {
       // 收尾上报带 keepalive：Toast 窗被关时也尽量把「已收起」带给 sidecar
       try {
@@ -949,67 +408,31 @@ function setupNoticeCard(props, { emit }) {
   })
 
   function renderBar() {
-    const meta = statusMeta.value
-    return h(
-      'div',
-      { class: 'dsh-chat-notice__bar', onClick: toggle, title: expanded.value ? '点击折叠' : '点击展开' },
-      [
-        h('span', { class: `dsh-chat-notice__chevron${expanded.value ? ' is-open' : ''}` }, '▸'),
-        h('span', { class: `dsh-chat-notice__dot ${meta.className}` }),
-        h('span', { class: 'dsh-chat-notice__title', title: title.value }, title.value),
-        h('span', { class: `dsh-chat-notice__status ${meta.className}` }, meta.label),
-        h('button', {
-          class: 'dsh-chat-notice__close',
-          title: '关闭这张卡',
-          type: 'button',
-          onClick: (e) => {
-            e.stopPropagation()
-            emit('close')
-          },
-        }, '×'),
-      ],
-    )
-  }
-
-  function renderPreviewRow() {
-    if (expanded.value || !preview.value) return null
-    return h('div', { class: 'dsh-chat-notice__preview', title: preview.value, onClick: toggle }, preview.value)
-  }
-
-  function renderMirrorItems() {
-    const grouped = groupItems(mirrorItems.value)
-    const nodes = []
-    for (const item of grouped) {
-      if (item.kind === 'user') {
-        if (item.context) continue
-        nodes.push(h('div', { class: 'dsh-chat-notice__mrow-user', key: `u${item.id}` }, item.text || ''))
-      } else if (item.kind === 'assistant') {
-        if (!item.text) continue
-        nodes.push(h('div', { class: 'dsh-chat-notice__mrow-assistant', key: `a${item.id}` }, item.text))
-      } else if (item.kind === 'toolGroup') {
-        const failed = item.tools.filter((tool) => tool.ok === false).length
-        nodes.push(
-          h('div', { class: 'dsh-chat-notice__mrow-tools', key: item.id ?? `g${nodes.length}` },
-            `${item.tools.length} 个工具调用${failed > 0 ? `（${failed} 个失败）` : ''}`),
-        )
-      }
-    }
-    if (nodes.length === 0) {
-      nodes.push(h('div', { class: 'dsh-chat-notice__mrow-tools' }, '这个会话还没有可显示的消息'))
-    }
-    return nodes
-  }
-
-  function renderBody() {
-    if (expandMode.value === 'mirror') {
-      return [
-        h('div', { class: 'dsh-chat-notice__mirror', ref: mirrorBodyRef }, [
-          mirrorError.value
-            ? h('div', { class: 'dsh-chat-notice__mrow-tools' }, mirrorError.value)
-            : renderMirrorItems(),
+    // 注意别挂 title 属性：原生 tooltip 会弹白框盖在卡上
+    return h('div', { class: 'dsh-chat-notice__bar' }, [
+      h('span', { class: 'dsh-chat-notice__badge', title: 'DSH · DeepSeek Harness' }, [
+        h('svg', { viewBox: '0 0 50 50', width: '1.25rem', height: '1.25rem', 'aria-hidden': 'true' }, [
+          h('path', { d: DSH_WHALE_PATH, fill: '#4D6BFE' }),
         ]),
-      ]
-    }
+      ]),
+      h('span', { class: 'dsh-chat-notice__title' }, title.value),
+      h('span', { class: 'dsh-chat-notice__chip' }, statusMeta.value.label),
+      expanded.value
+        ? h('button', { class: 'dsh-chat-notice__collapse', type: 'button', onClick: collapse }, '收起')
+        : null,
+      h('button', {
+        class: 'dsh-chat-notice__close',
+        type: 'button',
+        onClick: (e) => {
+          e.stopPropagation()
+          emit('close')
+        },
+      }, '×'),
+    ])
+  }
+
+  /** 展开态的主体：对话交互区（官方 GUI iframe）/ 连接失败重试 */
+  function renderBodyArea() {
     if (guiError.value) {
       return [
         h('div', { class: 'dsh-chat-notice__error' }, [
@@ -1038,18 +461,29 @@ function setupNoticeCard(props, { emit }) {
     ]
   }
 
+  function renderBody() {
+    if (expanded.value) {
+      return h('div', { class: 'dsh-chat-notice__body' }, renderBodyArea())
+    }
+    const text = preview.value || '点击查看对话'
+    return h('p', { class: ['dsh-chat-notice__preview', 'is-interactive'], onClick: toggle }, text)
+  }
+
   return () =>
-    h('div', { class: `dsh-chat-notice${expanded.value ? ' is-expanded' : ''}` }, [
-      renderBar(),
-      renderPreviewRow(),
-      expanded.value ? h('div', { class: 'dsh-chat-notice__body' }, renderBody()) : null,
-    ])
+    h(
+      'div',
+      {
+        class: `dsh-chat-notice${expanded.value ? ' is-expanded' : ''}`,
+        style: noticeThemeStyle(NOTICE_THEMES[status.value] ?? NOTICE_THEMES.running),
+      },
+      [renderBar(), renderBody()],
+    )
 }
 
 /**
  * 卡片入口：按事件类型分流（宿主按 kind 找插件、加载这一个组件）。
- *  - dsh-chat.notice → 状态通知卡（折叠条 ⇄ 真 GUI）
- *  - dsh-chat.window → 常驻对话小窗（镜像 / 对话 / 真 GUI）
+ *  - dsh-chat.notice → 状态通知卡（正文点击 ⇄ 原地展开官方界面）
+ *  - dsh-chat.window → 常驻小窗（官方 GUI）
  */
 const DshChatWindowCard = {
   name: 'DshChatWindowCard',

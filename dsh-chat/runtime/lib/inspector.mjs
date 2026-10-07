@@ -78,6 +78,7 @@ function emptySessionState() {
     seen: 0, // 已消费的事件数（增量下标）
     initialized: false, // 是否已完成首见快进
     title: null,
+    cwd: null, // 会话工作目录（session 头事件，卡片的项目行用）
     turnActive: false,
     turnNo: null,
     phase: 'idle', // idle | running | done | waiting
@@ -143,6 +144,7 @@ export class NoticeTracker {
       autoHideMs: state.phase === 'done' && !expanded ? this.doneHoldMs : null,
       autoExpand: isWaiting && !expanded,
       title: state.title,
+      cwd: state.cwd,
       preview: state.preview,
     }
   }
@@ -211,6 +213,11 @@ export class NoticeTracker {
   #applyEvent(state, event, now) {
     const type = event?.type
     const data = dataOf(event)
+    if (type === 'session') {
+      // session 头事件的 cwd 在顶层（parseSessionLog 的 header 也从这里取）
+      if (typeof event?.cwd === 'string' && event.cwd.length > 0) state.cwd = event.cwd
+      return false
+    }
     if (type === 'session/title') {
       const title = typeof data.title === 'string' ? data.title.trim() : ''
       if (title.length > 0) state.title = title
@@ -284,6 +291,16 @@ export class NoticeTracker {
     if (state.expanded === next) return null
     state.expanded = next
     if (state.phase === 'idle') return null
+    return this.#actionFor(state)
+  }
+
+  /**
+   * 当前状态的发布动作（小窗卡关闭后重发状态卡用）。
+   * 与 setExpanded 不同：不改任何状态，只按现状出一次牌；该静默的照样静默。
+   */
+  currentAction(sessionId) {
+    const state = this.sessions.get(sessionId)
+    if (!state || !state.initialized || state.phase === 'idle') return null
     return this.#actionFor(state)
   }
 

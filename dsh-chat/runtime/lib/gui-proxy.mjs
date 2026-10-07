@@ -80,6 +80,13 @@ function compactSurfaceRules() {
   ]
 }
 
+/**
+ * @param {object} flags 每一项 true = 隐藏（由 config 的 cropFlagsFor 取反而来）。
+ *   顶栏内部还有细粒度项（tabs/headerIcons/headerMore/headerPanel/headerTitle/headerChips）；
+ *   更细的微调走 customCss。
+ * @param compactSpacing 紧凑留白（独立开关）：把官方留白收到小窗尺度
+ * @param customCss 追加在最后，用户规则要能覆盖上面这些
+ */
 export function buildCropCss({
   rail = true,
   header = true,

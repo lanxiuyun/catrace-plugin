@@ -226,6 +226,42 @@ test('标题回退：无 title 事件时取首条真人输入；注入上下文�
   assert.equal(actions[0].title, '帮我看看 zstd 多帧怎么拆')
 })
 
+test('cwd：session 头事件的工作目录进卡片 payload（agent-notify 同款项目行）', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+  const events = [
+    { type: 'session', seq: 0, id: 's1', cwd: 'D:\\workspace\\Catrace', createdAt: 1 },
+    TURN_START(1, 1),
+  ]
+  const actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions[0].cwd, 'D:\\workspace\\Catrace')
+})
+
+test('currentAction：按现状出牌（小窗关闭后把状态卡请回来），×静默照样生效', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  // 未跟踪 / 未初始化：null
+  assert.equal(tracker.currentAction('nope'), null)
+
+  const events = [TURN_START(1, 1)]
+  tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  // 状态没变也照样给动作（状态卡要重新出场就必须重发一次）
+  const running = tracker.currentAction('s1')
+  assert.equal(running.status, 'running')
+  assert.equal(running.sticky, true)
+
+  // 跑到 done 后：currentAction 给 done + 停留时长
+  events.push(ASSISTANT('答案。', 2), TURN_END(1, 3))
+  tracker.ingest('s1', events, { now: clock.now() })
+  const done = tracker.currentAction('s1')
+  assert.equal(done.status, 'done')
+  assert.equal(done.autoHideMs, 30000)
+
+  // × 过的会话：currentAction 不出牌（审批例外）
+  tracker.markDismissed('s1')
+  assert.equal(tracker.currentAction('s1'), null)
+})
+
 test('summary：跟踪状态可导出（设置页展示用）', () => {
   const clock = fixedClock()
   const tracker = new NoticeTracker({ now: clock.now })

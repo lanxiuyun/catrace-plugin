@@ -1,33 +1,19 @@
 /**
- * 配置归一化测试：默认值、钳制、枚举回退、trim、丢未知键、稳定性。
+ * 配置归一化测试：默认值、钳制、trim、丢未知键、稳定性。
+ * 0.3.0 起镜像/SDK 字段全部退场（normalizeConfig 把它们当未知字段丢弃）。
  */
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { DEFAULT_CONFIG, normalizeConfig } from '../lib/config.mjs'
+import { CROP_MAPPED_KEYS, DEFAULT_CONFIG, SHOW_KEYS, cropFlagsFor, forceLabelsFor, guiSignature, normalizeConfig } from '../lib/config.mjs'
 
 test('默认值符合契约', () => {
   assert.deepEqual(DEFAULT_CONFIG, {
     dshHome: '',
-    dshCommand: 'dsh',
-    profile: 'sdk',
-    provider: 'deepseek-account',
-    model: 'deepseek-flash',
-    reasoningEffort: 'high',
-    maxTokens: 0,
-    cwd: '',
-    patchFile: '',
-    mirrorLimit: 40,
-    pollMs: 2000,
-    mirrorSessionId: '',
-    followLatest: true,
-    cardTitle: 'DSH 对话',
-    autoOpenWindow: false,
     noticeEnabled: true,
     noticePollMs: 2000,
     noticeDoneHoldMs: 30000,
-    noticeExpandMode: 'gui',
     httpPort: 23457,
     guiPort: 23458,
     compactSpacing: false,
@@ -47,8 +33,32 @@ test('默认值符合契约', () => {
   assert.ok(Object.isFrozen(DEFAULT_CONFIG))
 })
 
-test('紧凑留白：独立开关，进签名（改了要重建反代才生效）', async () => {
-  const { guiSignature, normalizeConfig } = await import('../lib/config.mjs')
+test('0.2.x/0.3.0 退场键按未知字段丢弃', () => {
+  const result = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    dshCommand: 'dsh',
+    profile: 'sdk',
+    provider: 'deepseek-account',
+    model: 'deepseek-flash',
+    reasoningEffort: 'high',
+    maxTokens: 8000,
+    cwd: 'D:\\x',
+    patchFile: 'C:\\p.yml',
+    mirrorLimit: 80,
+    pollMs: 1000,
+    mirrorSessionId: 'session-x',
+    followLatest: false,
+    noticeExpandMode: 'mirror',
+    // 0.3.0 砍掉的「小窗」卡键
+    cardTitle: '我的标题',
+    autoOpenWindow: true,
+    // 0.2.x 的短命键（0.2.0 就没了）
+    noticeExpandModeBogus: 1,
+  })
+  assert.deepEqual(result, { ...DEFAULT_CONFIG }, '所有退场键都必须被丢弃，回默认值')
+})
+
+test('紧凑留白：独立开关，进签名（改了要重建反代才生效）', () => {
   assert.equal(DEFAULT_CONFIG.compactSpacing, false, '默认关')
   assert.equal(normalizeConfig({ compactSpacing: true }).compactSpacing, true, '能开')
   assert.equal(normalizeConfig({ compactSpacing: 'yes' }).compactSpacing, false, '非布尔回退默认')
@@ -59,8 +69,7 @@ test('紧凑留白：独立开关，进签名（改了要重建反代才生效�
   )
 })
 
-test('show* ↔ 反代裁剪项：一对一映射，且任一开关都会改变签名', async () => {
-  const { SHOW_KEYS, CROP_MAPPED_KEYS, cropFlagsFor, forceLabelsFor, guiSignature } = await import('../lib/config.mjs')
+test('show* ↔ 反代裁剪项：一对一映射，且任一开关都会改变签名', () => {
   const flagNames = [
     'rail',
     'header',
@@ -73,9 +82,9 @@ test('show* ↔ 反代裁剪项：一对一映射，且任一开关都会改变�
     'composerStatus',
     'messageMeta',
   ]
+  const base = cropFlagsFor(DEFAULT_CONFIG)
   assert.equal(SHOW_KEYS.length, 11)
   assert.equal(CROP_MAPPED_KEYS.length, 10, 'showHeaderLabels 不是裁剪项（它是"强制显示标签"）')
-  const base = cropFlagsFor(DEFAULT_CONFIG)
   assert.deepEqual(Object.keys(base).sort(), [...flagNames].sort(), '键名必须与 buildCropCss 的参数一一对应')
   for (const key of SHOW_KEYS) {
     assert.equal(typeof DEFAULT_CONFIG[key], 'boolean', `DEFAULT_CONFIG 缺少 ${key}`)
@@ -100,6 +109,11 @@ test('show* ↔ 反代裁剪项：一对一映射，且任一开关都会改变�
   }
   assert.equal(signatures.size, SHOW_KEYS.length, '每个开关的签名都应唯一')
   assert.notEqual(guiSignature({ ...DEFAULT_CONFIG, guiPort: 1 }), guiSignature(DEFAULT_CONFIG), 'guiPort 也要进签名')
+  assert.notEqual(
+    guiSignature({ ...DEFAULT_CONFIG, customCss: 'x{}' }),
+    guiSignature(DEFAULT_CONFIG),
+    'customCss 也要进签名',
+  )
 })
 
 test('httpPort：0 表示系统分配，越界回退默认', () => {
@@ -109,6 +123,13 @@ test('httpPort：0 表示系统分配，越界回退默认', () => {
   assert.equal(normalizeConfig({ httpPort: -5 }).httpPort, 0)
   assert.equal(normalizeConfig({ httpPort: 'abc' }).httpPort, DEFAULT_CONFIG.httpPort)
   assert.equal(normalizeConfig({ httpPort: 1.7 }).httpPort, 1)
+})
+
+test('guiPort：固定端口让 iframe origin 稳定，钳制规则与 httpPort 相同', () => {
+  assert.equal(normalizeConfig({ guiPort: 0 }).guiPort, 0)
+  assert.equal(normalizeConfig({ guiPort: 30000 }).guiPort, 30000)
+  assert.equal(normalizeConfig({ guiPort: 99999 }).guiPort, 65535)
+  assert.equal(normalizeConfig({ guiPort: null }).guiPort, DEFAULT_CONFIG.guiPort)
 })
 
 test('normalizeConfig(DEFAULT_CONFIG) 稳定且不确定为空', () => {
@@ -132,69 +153,26 @@ test('未知字段被丢弃', () => {
   assert.equal(result.windowSize, undefined)
 })
 
-test('字符串 trim，必填字段空串回退默认，可空字段保留空串', () => {
+test('字符串 trim，可空字段保留空串', () => {
   const result = normalizeConfig({
-    dshCommand: '  C:\\Program Files\\dsh\\dsh.cmd  ',
-    profile: '   ',
-    provider: '',
-    model: '  deepseek-reasoner ',
     dshHome: '  D:\\dsh home  ',
-    cwd: '   D:\\workspace\\Catrace ',
-    patchFile: ' C:\\tmp\\p.json ',
-    mirrorSessionId: ' session-x ',
-    cardTitle: '  我的对话  ',
+    customCss: '  [class*="_x"] {}  ',
   })
-  assert.equal(result.dshCommand, 'C:\\Program Files\\dsh\\dsh.cmd')
-  assert.equal(result.profile, 'sdk') // 空 -> 默认
-  assert.equal(result.provider, 'deepseek-account') // 空 -> 默认
-  assert.equal(result.model, 'deepseek-reasoner')
   assert.equal(result.dshHome, 'D:\\dsh home')
-  assert.equal(result.cwd, 'D:\\workspace\\Catrace')
-  assert.equal(result.patchFile, 'C:\\tmp\\p.json')
-  assert.equal(result.mirrorSessionId, 'session-x')
-  assert.equal(result.cardTitle, '我的对话')
+  assert.equal(result.customCss, '[class*="_x"] {}')
 
   // 可空字段允许空串
-  const empty = normalizeConfig({ dshHome: '', cwd: '', patchFile: '' })
+  const empty = normalizeConfig({ dshHome: '', customCss: '' })
   assert.equal(empty.dshHome, '')
-  assert.equal(empty.cwd, '')
-  assert.equal(empty.patchFile, '')
+  assert.equal(empty.customCss, '')
 
   // 非字符串一律回退
-  const wrongType = normalizeConfig({ dshCommand: 42, model: null, cardTitle: false })
-  assert.equal(wrongType.dshCommand, 'dsh')
-  assert.equal(wrongType.model, 'deepseek-flash')
-  assert.equal(wrongType.cardTitle, 'DSH 对话')
+  const wrongType = normalizeConfig({ dshHome: 42, customCss: null })
+  assert.equal(wrongType.dshHome, '')
+  assert.equal(wrongType.customCss, '')
 })
 
-test('数字字段钳制在合法区间', () => {
-  assert.equal(normalizeConfig({ mirrorLimit: 1 }).mirrorLimit, 6)
-  assert.equal(normalizeConfig({ mirrorLimit: 5 }).mirrorLimit, 6)
-  assert.equal(normalizeConfig({ mirrorLimit: 6 }).mirrorLimit, 6)
-  assert.equal(normalizeConfig({ mirrorLimit: 200 }).mirrorLimit, 200)
-  assert.equal(normalizeConfig({ mirrorLimit: 9999 }).mirrorLimit, 200)
-  assert.equal(normalizeConfig({ mirrorLimit: 'abc' }).mirrorLimit, 40)
-  assert.equal(normalizeConfig({ mirrorLimit: NaN }).mirrorLimit, 40)
-  assert.equal(normalizeConfig({ mirrorLimit: 12.9 }).mirrorLimit, 12)
-
-  assert.equal(normalizeConfig({ pollMs: 1 }).pollMs, 500)
-  assert.equal(normalizeConfig({ pollMs: 500 }).pollMs, 500)
-  assert.equal(normalizeConfig({ pollMs: 30000 }).pollMs, 30000)
-  assert.equal(normalizeConfig({ pollMs: 1e9 }).pollMs, 30000)
-  assert.equal(normalizeConfig({ pollMs: null }).pollMs, 2000)
-})
-
-test('maxTokens：0 或 1..200000，非法归 0', () => {
-  assert.equal(normalizeConfig({ maxTokens: 0 }).maxTokens, 0)
-  assert.equal(normalizeConfig({ maxTokens: 1 }).maxTokens, 1)
-  assert.equal(normalizeConfig({ maxTokens: 200000 }).maxTokens, 200000)
-  assert.equal(normalizeConfig({ maxTokens: 200001 }).maxTokens, 200000)
-  assert.equal(normalizeConfig({ maxTokens: -5 }).maxTokens, 0)
-  assert.equal(normalizeConfig({ maxTokens: '8000' }).maxTokens, 0)
-  assert.equal(normalizeConfig({ maxTokens: Infinity }).maxTokens, 0)
-})
-
-test('状态通知配置：轮询/停留钳制，展开模式枚举回退', () => {
+test('状态通知配置：轮询/停留钳制，总开关只认真布尔', () => {
   assert.equal(normalizeConfig({ noticePollMs: 1 }).noticePollMs, 500)
   assert.equal(normalizeConfig({ noticePollMs: 500 }).noticePollMs, 500)
   assert.equal(normalizeConfig({ noticePollMs: 1e9 }).noticePollMs, 30000)
@@ -204,39 +182,27 @@ test('状态通知配置：轮询/停留钳制，展开模式枚举回退', () =
   assert.equal(normalizeConfig({ noticeDoneHoldMs: 600000 }).noticeDoneHoldMs, 600000)
   assert.equal(normalizeConfig({ noticeDoneHoldMs: 600001 }).noticeDoneHoldMs, 600000)
   assert.equal(normalizeConfig({ noticeDoneHoldMs: 'abc' }).noticeDoneHoldMs, 30000)
-  assert.equal(normalizeConfig({ noticeExpandMode: 'mirror' }).noticeExpandMode, 'mirror')
-  assert.equal(normalizeConfig({ noticeExpandMode: 'gui' }).noticeExpandMode, 'gui')
-  assert.equal(normalizeConfig({ noticeExpandMode: 'popup' }).noticeExpandMode, 'gui')
-  assert.equal(normalizeConfig({}).noticeExpandMode, 'gui')
-  // 总开关只认真布尔
   assert.equal(normalizeConfig({ noticeEnabled: false }).noticeEnabled, false)
   assert.equal(normalizeConfig({ noticeEnabled: 'off' }).noticeEnabled, true)
 })
 
-test('reasoningEffort：只接受空串/枚举，其他回退默认', () => {
-  assert.equal(normalizeConfig({ reasoningEffort: '' }).reasoningEffort, '')
-  assert.equal(normalizeConfig({ reasoningEffort: 'low' }).reasoningEffort, 'low')
-  assert.equal(normalizeConfig({ reasoningEffort: 'medium' }).reasoningEffort, 'medium')
-  assert.equal(normalizeConfig({ reasoningEffort: ' high ' }).reasoningEffort, 'high')
-  assert.equal(normalizeConfig({ reasoningEffort: 'HIGH' }).reasoningEffort, 'high')
-  assert.equal(normalizeConfig({ reasoningEffort: 'ultra' }).reasoningEffort, 'high')
-  assert.equal(normalizeConfig({ reasoningEffort: 3 }).reasoningEffort, 'high')
-})
-
 test('布尔字段只接受真布尔值', () => {
-  assert.equal(normalizeConfig({ followLatest: false }).followLatest, false)
-  assert.equal(normalizeConfig({ followLatest: true }).followLatest, true)
-  assert.equal(normalizeConfig({ autoOpenWindow: true }).autoOpenWindow, true)
-  assert.equal(normalizeConfig({ autoOpenWindow: false }).autoOpenWindow, false)
-  assert.equal(normalizeConfig({ followLatest: 'false' }).followLatest, true)
-  assert.equal(normalizeConfig({ autoOpenWindow: 1 }).autoOpenWindow, false)
+  assert.equal(normalizeConfig({ showRail: true }).showRail, true)
+  assert.equal(normalizeConfig({ showHeader: 'true' }).showHeader, false)
+  assert.equal(normalizeConfig({ showComposerStatus: true }).showComposerStatus, true)
+  assert.equal(normalizeConfig({ showMessageMeta: 0 }).showMessageMeta, false)
+  assert.equal(normalizeConfig({ showTabs: true }).showTabs, true)
+  assert.equal(normalizeConfig({ showHeaderMore: false }).showHeaderMore, false)
+  assert.equal(normalizeConfig({ showHeaderLabels: 1 }).showHeaderLabels, false)
+  assert.equal(normalizeConfig({ compactSpacing: true }).compactSpacing, true)
+  assert.equal(normalizeConfig({ compactSpacing: 'on' }).compactSpacing, false)
 })
 
 test('归一化不改动入参，且返回全新对象', () => {
-  const raw = { ...DEFAULT_CONFIG, mirrorLimit: 999, nope: 1 }
+  const raw = { ...DEFAULT_CONFIG, noticePollMs: 1, nope: 1 }
   const snapshot = JSON.stringify(raw)
   const result = normalizeConfig(raw)
   assert.equal(JSON.stringify(raw), snapshot)
   assert.notEqual(result, raw)
-  assert.equal(DEFAULT_CONFIG.mirrorLimit, 40) // 冻结对象未被污染
+  assert.equal(DEFAULT_CONFIG.noticePollMs, 2000) // 冻结对象未被污染
 })

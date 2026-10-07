@@ -2,33 +2,18 @@
  * 插件配置的默认值与归一化。
  *
  * 归一化原则：
- * - 未知字段直接丢弃（配置里堆了历史字段也不影响运行）
- * - 字符串 trim；枚举非法值回退默认；数字钳制到合法区间
+ * - 未知字段直接丢弃（配置里堆了历史字段也不影响运行——0.2.x 的镜像/SDK 字段就是这样退场的）
+ * - 字符串 trim；数字钳制到合法区间
  * - `normalizeConfig(DEFAULT_CONFIG)` 必须稳定：结果与默认值逐键相等
  */
 
 /** 默认配置（冻结，禁止就地修改） */
 export const DEFAULT_CONFIG = Object.freeze({
-  dshHome: '', // 空 = 自动探测
-  dshCommand: 'dsh', // 可执行名或绝对路径
-  profile: 'sdk', // dsh --profile <name>
-  provider: 'deepseek-account',
-  model: 'deepseek-flash',
-  reasoningEffort: 'high', // '' | 'low' | 'medium' | 'high'
-  maxTokens: 0, // 0 = 不传
-  cwd: '', // 空 = 用镜像会话的 cwd，再空则用 os.homedir()
-  patchFile: '', // 非空时附加 --patch <file>
-  mirrorLimit: 40, // 小窗显示的消息条数
-  pollMs: 2000, // 日志轮询间隔
-  mirrorSessionId: '', // 固定镜像的会话；空 = 跟随最近活跃会话
-  followLatest: true, // 未固定会话时是否自动跟随最新会话
-  cardTitle: 'DSH 对话',
-  autoOpenWindow: false, // 插件启用后自动弹一次小窗
-  // 状态通知（通知巡检）：DSH 干活时右下角出可折叠状态卡
+  dshHome: '', // 空 = 自动探测 ~/.dsh
+  // 状态通知（通知巡检）：DSH 干活时右下角出可折叠状态卡，正文点击原地展开官方界面
   noticeEnabled: true, // 右下角状态卡总开关
   noticePollMs: 2000, // 巡检轮询会话日志的间隔
   noticeDoneHoldMs: 30000, // 「已完成」卡的停留时长
-  noticeExpandMode: 'gui', // 点开状态卡默认展开成什么：gui=官方界面 / mirror=镜像消息流
   httpPort: 23457, // 卡片访问 sidecar 的本机 HTTP 端口；0 = 交给系统分配
   guiPort: 23458, // 「真 GUI」同源反代的端口；固定端口是为了让 iframe 的 origin 稳定（localStorage 状态可复用）
   /**
@@ -53,12 +38,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   customCss: '',
 })
 
-/** reasoningEffort 合法取值 */
-const EFFORT_VALUES = ['', 'low', 'medium', 'high']
-
 /**
  * 「显示哪些元素」的键清单（单一真相）。
- * 设置界面按它渲染标签云、`compose()` 按它保存、`cropFlagsFor()` 按它生成反代裁剪项——
+ * 设置界面按它渲染标签云、`cropFlagsFor()` 按它生成反代裁剪项——
  * 任何一处漏掉某个键都会表现成"设置没用"，所以统一从这里取，并有测试锁住。
  */
 export const SHOW_KEYS = [
@@ -121,28 +103,10 @@ export function guiSignature(cfg) {
   ])
 }
 
-/** 非空字符串字段：空值回退默认 */
-const REQUIRED_STRINGS = ['dshCommand', 'profile', 'provider', 'model']
 /** 可空字符串字段：允许空串 */
-const OPTIONAL_STRINGS = ['dshHome', 'cwd', 'patchFile', 'mirrorSessionId', 'cardTitle', 'customCss']
+const OPTIONAL_STRINGS = ['dshHome', 'customCss']
 /** 布尔字段：只接受真正的布尔值 */
-const BOOLEANS = [
-  'followLatest',
-  'autoOpenWindow',
-  'noticeEnabled',
-  'showRail',
-  'showHeader',
-  'showTabs',
-  'showHeaderIcons',
-  'showHeaderMore',
-  'showHeaderPanel',
-  'showHeaderTitle',
-  'showHeaderChips',
-  'showComposerStatus',
-  'showMessageMeta',
-  'showHeaderLabels',
-  'compactSpacing',
-]
+const BOOLEANS = ['noticeEnabled', 'compactSpacing', ...SHOW_KEYS]
 
 /** 读取并 trim 字符串；非字符串返回 null */
 function readString(raw, key) {
@@ -160,11 +124,8 @@ function clampNumber(raw, key, min, max, fallback) {
   return rounded
 }
 
-/** prompt 缓存 token 上限（0 表示不传 --max-tokens） */
-const MAX_TOKENS_LIMIT = 200000
-
 /**
- * 归一化配置：丢弃未知字段、trim 字符串、钳制数字、枚举回退。
+ * 归一化配置：丢弃未知字段、trim 字符串、钳制数字。
  *
  * @param {any} raw 原始配置（可能缺字段、可能含脏数据）
  * @returns {typeof DEFAULT_CONFIG} 全新对象（不改动 raw）
@@ -173,41 +134,21 @@ export function normalizeConfig(raw) {
   const source = raw && typeof raw === 'object' ? raw : {}
   const config = {}
 
-  for (const key of REQUIRED_STRINGS) {
-    const value = readString(source, key)
-    config[key] = value && value.length > 0 ? value : DEFAULT_CONFIG[key]
-  }
   for (const key of OPTIONAL_STRINGS) {
     const value = readString(source, key)
     config[key] = value ?? DEFAULT_CONFIG[key]
   }
 
-  const effort = readString(source, 'reasoningEffort')
-  config.reasoningEffort = EFFORT_VALUES.includes(effort) ? effort : DEFAULT_CONFIG.reasoningEffort
-
   for (const key of BOOLEANS) {
     config[key] = typeof source[key] === 'boolean' ? source[key] : DEFAULT_CONFIG[key]
   }
 
-  config.mirrorLimit = clampNumber(source, 'mirrorLimit', 6, 200, DEFAULT_CONFIG.mirrorLimit)
-  config.pollMs = clampNumber(source, 'pollMs', 500, 30000, DEFAULT_CONFIG.pollMs)
   // 状态通知：轮询间隔 / 完成卡停留时长（宿主 auto_hide 钳制是 3s..10min，这里对齐下限）
   config.noticePollMs = clampNumber(source, 'noticePollMs', 500, 30000, DEFAULT_CONFIG.noticePollMs)
   config.noticeDoneHoldMs = clampNumber(source, 'noticeDoneHoldMs', 3000, 600000, DEFAULT_CONFIG.noticeDoneHoldMs)
-  // 展开默认模式：gui（官方界面）/ mirror（镜像消息流），非法值回退默认
-  const noticeExpandMode = readString(source, 'noticeExpandMode')
-  config.noticeExpandMode = ['gui', 'mirror'].includes(noticeExpandMode)
-    ? noticeExpandMode
-    : DEFAULT_CONFIG.noticeExpandMode
   // httpPort：0 合法（系统分配），越界/非法回退默认端口
   config.httpPort = clampNumber(source, 'httpPort', 0, 65535, DEFAULT_CONFIG.httpPort)
   config.guiPort = clampNumber(source, 'guiPort', 0, 65535, DEFAULT_CONFIG.guiPort)
-  // maxTokens：0 合法（不传），非法一律归 0
-  const maxTokens = source.maxTokens
-  config.maxTokens =
-    typeof maxTokens === 'number' && Number.isFinite(maxTokens) && maxTokens > 0
-      ? clampNumber(source, 'maxTokens', 1, MAX_TOKENS_LIMIT, 0)
-      : 0
 
   // 按 DEFAULT_CONFIG 的键序输出，便于快照/比较
   const ordered = {}
