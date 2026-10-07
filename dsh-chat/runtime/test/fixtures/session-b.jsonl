@@ -1,0 +1,20 @@
+{"type":"session","version":4,"id":"session-bbb-2222","createdAt":1791004000000,"cwd":"D:\\Users\\che\\Documents\\deepseek-harness-default-workspace","isSeeded":false,"delegationDepth":0,"agentPreset":"standard"}
+{"type":"session/title","seq":1,"time":1791004000100,"data":{"title":"   ","messageSeqs":[],"source":{"kind":"fallback"}}}
+{"type":"step/start","seq":2,"time":1791004000200,"data":{"turn":1,"step":1}}
+{"type":"agent/inbox/spliced","seq":3,"time":1791004000300,"data":{"target":"next-turn","start":0,"inserted":[{"role":"user","content":[{"type":"text","text":"<runtime-context>\n当前时间 2026-01-01。\n</runtime-context>"}],"source":{"kind":"user"},"id":"inj-bbb-1"}]}}
+{"type":"user/message","seq":4,"time":1791004010000,"data":{"content":[{"type":"text","text":"<runtime-context>\n当前时间 2026-01-01。\n</runtime-context>"}],"source":{"kind":"user"},"role":"user","id":"inj-bbb-2"},"surfaceOp":"append"}
+{"type":"user/message","seq":6,"time":1791004020000,"data":{"content":[{"type":"text","text":"把刚才的结论整理成三点。"}],"source":{"kind":"user"},"role":"user","id":"user-bbb-1"},"surfaceOp":"append"}
+{"type":"assistant/message","seq":8,"time":1791004023000,"data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"reasoning","text":"先拆成三点，再补一句风险。"},{"type":"text","text":"整理如下：一、帧要自己拆；二、解压逐帧做；三、坏文件跳过。"},{"type":"tool-call","id":"call_b1","name":"pwsh","arguments":"{\"command\": \"Get-ChildItem -Recurse\"}"}],"source":{"kind":"model","provider":"deepseek-account","model":"deepseek-flash"},"id":"msg-bbb-1"},"usage":{"inputTokens":900,"outputTokens":52,"cacheReadTokens":0,"cacheWriteTokens":0,"totalTokens":952}}}
+{"type":"tool/call","seq":9,"time":1791004023000,"data":{"turn":1,"step":1,"callId":"call_b1","name":"pwsh","arguments":"{\"command\": \"Get-ChildItem -Recurse\"}"}}
+{"type":"tool/result","seq":10,"time":1791004024000,"data":{"turn":1,"step":1,"message":{"role":"tool","source":{"kind":"tool","callId":"call_b1"},"toolCallId":"call_b1","content":[{"type":"text","text":"runtime\\lib\\zstd-frames.mjs"}],"isError":false,"id":"res-bbb-1"},"sourceEventSeqs":[9],"surfaceOp":"append"}}
+{"type":"unknown/experimental-thing","seq":99,"time":1791004025000,"data":{}}
+{"type":"system/message","seq":11,"time":1791004025000,"data":{"turn":1,"step":1,"message":{"role":"system","content":[{"type":"text","text":"文件列表读取完成。"}],"source":{"kind":"system-prompt"},"id":"sys-bbb-1"}}}
+{"type":"tool/result","seq":12,"time":1791004026000,"data":{"turn":1,"step":1,"message":{"role":"tool","source":{"kind":"tool","callId":"call_b1"},"toolCallId":"call_b1","content":[{"type":"text","text":"ENOENT: 目录不存在"}],"isError":true,"id":"res-bbb-2"},"sourceEventSeqs":[9],"surfaceOp":"append"}}
+{"type":"turn/end","seq":13,"time":1791004027000,"data":{"turn":1,"reason":{"kind":"completed"}}}
+{"type":"step/end","seq":14,"time":1791004027000,"data":{"turn":1,"step":1}}
+{"type":"assistant/message","seq":15,"time":1791004028000,"data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"text","text":"三点整理完。"}],"source":{"kind":"model","provider":"deepseek-account","model":"deepseek-flash"},"id":"msg-bbb-2"}}}
+{"type":"tool/result","seq":16,"time":1791004029000,"data":{"turn":1,"step":1,"message":{"role":"tool","source":{"kind":"tool","callId":"call_missing"},"toolCallId":"call_missing","content":[{"type":"text","text":"没有配套的 tool/call"}],"isError":false,"id":"res-bbb-3"}},"sourceEventSeqs":[],"surfaceOp":"append"}
+{"type":"session/title","seq":17,"time":1791004030000,"data":{"title":"整理三点结论","messageSeqs":[6],"source":{"kind":"fallback"}}}
+{"type":"turn/start","seq":18,"time":1791004031000,"data":{"turn":2}}
+this line is deliberately not valid JSON {oops
+{"type":"step/end","seq":19,"time":1791004032000,"data":{"turn":2,"step":1}}

@@ -1,4 +1,12 @@
 features:
+  dsh-chat:
+    docs:
+      - .agent/features/dsh-chat/README.md
+      - .agent/features/dsh-chat/参考项目orb的悬浮窗怎么实现的-以及为什么本插件没做自绘外壳.md
+      - .agent/features/dsh-chat/紧凑留白-官方留白变量与不该动的content-width.md
+      - .agent/features/dsh-chat/设置改了没反应或插件重启还原-compose漏键踩了三次.md
+    related:
+      - agent-notify
   timer:
     docs:
       - .agent/features/timer/README.md
@@ -28,6 +36,11 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-10-05-紧凑留白开关与compose漏键与orb自绘外壳回退.md
+  - .agent/devlog/2026-10-03-dsh-chat去装饰与grid轨道归零.md
+  - .agent/devlog/2026-10-03-dsh-chat-A2真GUI反代进小窗.md
+  - .agent/devlog/2026-10-03-dsh-chat小窗可读性与设置页可编辑性.md
+  - .agent/devlog/2026-10-03-dsh-chat会话日志与SDK提问与小窗卡槽宽度.md
   - .agent/devlog/2026-09-21-timer-toast按钮语言读宿主locale.md
   - .agent/devlog/2026-09-20-agent-notify-codex前往会话透明窗.md
   - .agent/devlog/2026-09-20-agent-notify-sidecar按职责拆分.md
@@ -38,5 +51,6 @@ devlog:
   - .agent/devlog/2026-09-13-agent-notify-标题链路与品牌徽章观感.md
 
 current:
-  plan: .agent/features/agent-notify/README.md
-  phase: sidecar 已按职责拆 ESM；Toast UI 仍是单文件 Blob
+  plan: .agent/features/dsh-chat/README.md
+  phase: dsh-chat「紧凑留白」开关已提交（729fa2f）；orb 自绘外壳回退到 orb 分支
+  next: 用户真机确认紧凑留白效果；插件分支合入插件 main 后，在主仓 bump tools/plugin-demo 指针
