@@ -17,6 +17,8 @@ const ASSISTANT = (text, seq) =>
   ev('assistant/message', { message: { role: 'assistant', content: [{ type: 'text', text }] } }, seq)
 const ASKED = (id, seq) => ev('approval/asked', { id }, seq)
 const DECIDED = (id, seq) => ev('approval/decided', { id, outcome: 'allowed-once' }, seq)
+const TOOL_CALL = (name, callId, seq) => ev('tool/call', { callId, name }, seq)
+const TOOL_RESULT = (callId, seq) => ev('tool/result', { message: { role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId } }, seq)
 const TITLE = (title, seq) => ev('session/title', { title }, seq)
 const USER = (text, seq) =>
   ev('user/message', { content: [{ type: 'text', text }], source: { kind: 'user' }, role: 'user', id: `u${seq}` }, seq)
@@ -271,4 +273,117 @@ test('summary：跟踪状态可导出（设置页展示用）', () => {
   assert.equal(rows[0].id, 's1')
   assert.equal(rows[0].phase, 'waiting')
   assert.equal(rows[0].pendingApprovals, 1)
+  assert.equal(rows[0].pendingGates, 0)
+})
+
+test('人工闸门：ask_user_question 有 call 没 result → waiting（chip「等你回答」）', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const events = [TURN_START(1, 1)]
+
+  let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions[0].status, 'running')
+
+  // 提问已落盘、用户还没答：这不是「进行中」，是卡在你身上
+  events.push(TOOL_CALL('ask_user_question', 'call-q1', 2))
+  actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'waiting')
+  assert.equal(actions[0].label, '等你回答')
+  assert.equal(actions[0].waitKind, 'question')
+  assert.equal(actions[0].autoExpand, true)
+  assert.equal(actions[0].sticky, true)
+  assert.equal(tracker.summary()[0].pendingGates, 1)
+
+  // 用户答完（tool/result 落盘）→ 回合还在跑，回到进行中
+  clock.advance(28000)
+  events.push(TOOL_RESULT('call-q1', 3))
+  actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'running')
+  assert.equal(actions[0].label, null)
+  assert.equal(tracker.summary()[0].pendingGates, 0)
+})
+
+test('人工闸门：exit_plan_mode 未返回 → 计划待审；回合已结束时答完转 done', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const events = [TURN_START(1, 1), TOOL_CALL('exit_plan_mode', 'call-p1', 2)]
+
+  let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions[0].status, 'waiting')
+  assert.equal(actions[0].label, '计划待审')
+  assert.equal(actions[0].waitKind, 'plan')
+
+  // 计划待审期间回合收尾：不许把 waiting 翻成 done
+  events.push(TURN_END(1, 3))
+  assert.equal(tracker.ingest('s1', events, { now: clock.now() }).length, 0)
+  assert.equal(tracker.stateOf('s1').phase, 'waiting')
+
+  // 用户批准（工具返回）→ 回合已结束 → done
+  clock.advance(60000)
+  events.push(TOOL_RESULT('call-p1', 4))
+  actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'done')
+  assert.equal(actions[0].autoExpand, false)
+})
+
+test('人工闸门：普通工具的 call 不算等人（长跑 pwsh 不该显示等你）', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+  const events = [TURN_START(1, 1), TOOL_CALL('pwsh', 'call-sh1', 2)]
+  const actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'running')
+  assert.equal(tracker.stateOf('s1').pendingGates.size, 0)
+})
+
+test('人工闸门：拿不到 callId 的调用不登记，避免把卡片钉死在 waiting', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+  const events = [TURN_START(1, 1), ev('tool/call', { name: 'ask_user_question' }, 2)]
+  const actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions[0].status, 'running')
+  assert.equal(tracker.stateOf('s1').pendingGates.size, 0)
+})
+
+test('审批与闸门并存：审批优先出「等你审批」，且互不覆盖', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+  const events = [TURN_START(1, 1), TOOL_CALL('ask_user_question', 'call-q1', 2), ASKED('apm-1', 3)]
+
+  let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(actions[0].status, 'waiting')
+  assert.equal(actions[0].label, '等你审批')
+
+  // 审批答完、提问还开着 → 继续 waiting，但文案换成提问
+  clock.advance(1000)
+  events.push(DECIDED('apm-1', 4))
+  actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'waiting')
+  assert.equal(actions[0].label, '等你回答')
+
+  // 提问也答完 → 回 running
+  clock.advance(1000)
+  events.push(TOOL_RESULT('call-q1', 5))
+  actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions[0].status, 'running')
+})
+
+test('新回合作废上一轮遗留的未决登记（崩溃尾部不留孤儿 waiting）', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+  const events = [TURN_START(1, 1), TOOL_CALL('ask_user_question', 'call-q1', 2)]
+  tracker.ingest('s1', events, { now: clock.now(), fresh: true })
+  assert.equal(tracker.stateOf('s1').phase, 'waiting')
+
+  clock.advance(5000)
+  events.push(TURN_END(1, 3), TURN_START(2, 4))
+  const actions = tracker.ingest('s1', events, { now: clock.now() })
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].status, 'running')
+  assert.equal(tracker.stateOf('s1').pendingGates.size, 0)
+  assert.equal(tracker.stateOf('s1').pendingAsks.size, 0)
 })
