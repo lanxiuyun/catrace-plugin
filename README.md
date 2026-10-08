@@ -12,6 +12,13 @@ Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事
 
 ## 有哪些插件
 
+### 🐳 DSH 对话小窗（dsh-chat）
+DSH（DeepSeek Harness）干活时，右下角弹一张**可折叠状态卡**；点正文，同一张卡**原地展开成 DSH 官方界面**——对话流、`/` 指令、`@` 文件、审批全是原生的，插件一行 UI 都不重写。
+
+- **状态卡**：sidecar 读 DSH 会话日志（`$DSH_HOME/sessions/**/session.v4.jsonl.zstd`），「进行中 / 等你审批 / 已完成」自动流转；等你审批时自动展开，完成自动收。
+- **官方界面**：sidecar 用本机凭据自签 cookie、起同源反向代理，把 iframe 指过去；「小窗外观」可裁剪官方顶栏 / 左栏 / 状态条等元素，也能追加自定义 CSS。
+- 需要本机 Node.js ≥ 22.15；展开官方界面还要求 DSH Desktop 正在运行、并在 DSH 里打开「允许在浏览器中打开」。默认关闭。
+
 ### 🤖 Agent 通知（agent-notify）
 Claude / Codex / Gemini / Kimi 的 hook 通知和权限审批，落在桌面小窗。sidecar 监听 `127.0.0.1:23456`。需要本机 Node.js。默认关闭。
 
@@ -69,6 +76,14 @@ LinuxDO 论坛（linux.do）有新的回复 / @我 / 点赞时，弹卡片提醒
 - 和 GitHub 通知同类玩法：轮询、活跃时才弹、卡片停留秒数可调。
 - 在设置里填 LinuxDO 的 cookie（登录态），不保存到别人的机器上，只存在本机配置。
 - 需要本机装 Node.js。
+
+### 📋 PasteDrop 剪贴板存图（pastedrop）
+在**桌面**或**资源管理器**里按 `Ctrl+V`，剪贴板里是图片就直接存成文件，不用再开画图 / 另存为。思路源自独立工具 [PasteDrop](https://github.com/lanxiuyun/PasteDrop)，本插件用 PowerShell 钩子实现，不附带 Python 源码。
+
+- 桌面按 `Ctrl+V` → 存到桌面；资源管理器当前文件夹按 `Ctrl+V` → 存到当前文件夹。剪贴板不是图片时原样放行，别的软件里粘贴行为不变。
+- 自动命名 `PasteDrop 2026-08-13 10-00-00.png`（或 `.jpg`），同名自动加序号；静默运行、无弹窗。
+- 可设保存位置（桌面 + 资源管理器 / 仅桌面 / 仅资源管理器）、文件名前缀、保存格式（自动优先无损 PNG）。
+- Windows + PowerShell 5.1（系统自带，无需额外安装），需要本机 Node.js。默认关闭。
 
 ### 🧪 间隔通知（notify-demo）
 最小的演示插件：每隔几秒 / 几分钟自动弹一张卡片。
