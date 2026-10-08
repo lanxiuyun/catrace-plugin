@@ -19,7 +19,7 @@ import { createInterface } from 'node:readline'
 
 import { cropFlagsFor, DEFAULT_CONFIG, forceLabelsFor, guiSignature, normalizeConfig } from './lib/config.mjs'
 import { GUI_CLASS_GROUPS, listGuiClasses } from './lib/gui-classes.mjs'
-import { describeDiscoveryFailure, discoverHost, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
+import { describeDiscoveryFailure, discoverHost, mintAuthCookie, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
 import { NoticeTracker } from './lib/inspector.mjs'
 import { buildCropCss, startGuiProxy } from './lib/gui-proxy.mjs'
 import {
@@ -115,6 +115,8 @@ async function methodStatus() {
       lastError: info.lastError,
       lastSessionId: info.guiSessionId,
       credentialsFound: info.credentialsFound,
+      cookieRefreshes: info.cookieRefreshes,
+      cookieTtlMs: info.cookieTtlMs,
     }
   } catch {
     gui = null
@@ -163,11 +165,16 @@ async function methodReadSession(params = {}) {
 }
 
 /** GUI 复用状态（A2：把真 DSH GUI 代理进小窗） */
-const gui = { proxy: null, target: null, lastError: null, startedAt: 0, lastSessionId: '', diag: [] }
+const gui = { proxy: null, target: null, lastError: null, startedAt: 0, lastSessionId: '', diag: [], ttlMs: 0 }
 
 /**
  * 确保「真 GUI」可用：发现正在运行的 DSH host → 自签 cookie → 起同源反代。
  * 找不到 host / 拿不到凭据都只抛错，不影响其它功能（状态卡照常巡检发布）。
+ *
+ * **票会过期**（写死 7 天，见 `dsh-gui.mjs` 的 `DEFAULT_COOKIE_TTL_MS`），小窗却是常驻的 ⇒
+ * 把"换一张新票"的能力交给反代（`refreshCookie`）：吃到 401 就重读凭据文件（票过期、密钥被重置
+ * 都一并解决）并按同一个 authority 重签、重放。没有这条，小窗开满寿命后整片 iframe 就变成一行
+ * `dsh web authentication required`（0.3.1 的线上 bug）。
  */
 async function ensureGui() {
   if (gui.proxy && gui.target) {
@@ -176,7 +183,11 @@ async function ensureGui() {
     gui.proxy = null
     gui.target = null
   }
-  const secret = readBrowserSessionSecret({ dshHome: config.dshHome || undefined })
+  // 测试缝：DSH_GUI_COOKIE_TTL_MS 能把票寿命压到毫秒级（生产不设 ⇒ 用 dsh-gui 里写死的 7 天）
+  const ttlOverride = Number(process.env.DSH_GUI_COOKIE_TTL_MS)
+  const ttlMs = Number.isFinite(ttlOverride) && ttlOverride > 0 ? ttlOverride : undefined
+  const readSecret = () => readBrowserSessionSecret({ dshHome: config.dshHome || undefined })
+  const secret = readSecret()
   if (!secret) throw new Error('读不到 ~/.dsh/.credentials.yaml 里的 client-connection/browser-session 密钥')
   gui.diag = []
   // 测试缝：e2e 用临时端口起假 host，生产不设这两个环境变量时走桌面默认探测区间
@@ -185,6 +196,7 @@ async function ensureGui() {
   const found = await discoverHost({
     secret,
     diag: gui.diag,
+    ...(ttlMs === undefined ? {} : { ttlMs }),
     ...(Number.isFinite(probeFrom) ? { from: probeFrom } : {}),
     ...(Number.isFinite(probeDrift) ? { drift: probeDrift } : {}),
   })
@@ -205,13 +217,20 @@ async function ensureGui() {
     port: Number(config.guiPort) || 0,
     cssText,
     log,
+    // 反代换票时**重读凭据**（票过期、密钥被 DSH 重置都能自愈），寿命仍是写死的那 7 天
+    refreshCookie: () => {
+      const fresh = readSecret()
+      if (!fresh) throw new Error('读不到 ~/.dsh/.credentials.yaml 里的 client-connection/browser-session 密钥')
+      return mintAuthCookie({ secret: fresh, authority: found.authority, ...(ttlMs === undefined ? {} : { ttlMs }) })
+    },
   })
   gui.cssBytes = Buffer.byteLength(cssText, 'utf8')
   gui.proxy = proxy
   gui.target = { port: found.port, authority: found.authority, sessions: found.sessions }
+  gui.ttlMs = found.ttlMs
   gui.startedAt = Date.now()
   gui.lastError = null
-  log('info', 'GUI 复用已就绪', { target: found.authority, proxy: proxy.url, sessions: found.sessions })
+  log('info', 'GUI 复用已就绪', { target: found.authority, proxy: proxy.url, sessions: found.sessions, cookieTtlMs: found.ttlMs })
   return gui
 }
 
@@ -226,6 +245,10 @@ async function methodGuiStatus() {
     lastError: gui.lastError,
     startedAt: gui.startedAt || null,
     guiSessionId: gui.lastSessionId || '',
+    // 反代换过几次票（票过 7 天才需要换，正常情况下是 0）
+    cookieRefreshes: gui.proxy?.cookieRefreshes?.() ?? 0,
+    // 这张票的寿命（毫秒；写死 7 天）
+    cookieTtlMs: gui.ttlMs || null,
     // 实际注入的裁剪项（true = 隐藏），由 show* 取反而来，便于排查"设置了没生效"
     crop: cropFlagsFor(config),
     // 紧凑留白是否已进当前反代 + 注入的 CSS 字节数：用户问"怎么没区别"时先看这两个数

@@ -4,13 +4,14 @@
  *  - .credentials.yaml 解析
  *  - host 探活（起一个假 host 在临时端口，走真实 HTTP）
  *  - 反代：三个头改写、HTML 注入会话、透传字节、401 透传、WS 升级转发
+ *  - cookie 换新：吃到 401 换票重放、换不到就透传原文、带 body 不重放、WS 重握
  */
 import assert from 'node:assert/strict'
 import { createHash, createHmac } from 'node:crypto'
 import http from 'node:http'
 import test from 'node:test'
 
-import { cookieNameFor, describeDiscoveryFailure, discoverHost, mintAuthCookie, normalizeAuthority, parseBrowserSessionSecret } from '../lib/dsh-gui.mjs'
+import { DEFAULT_COOKIE_TTL_MS, cookieExpiresAt, cookieNameFor, describeDiscoveryFailure, discoverHost, mintAuthCookie, normalizeAuthority, parseBrowserSessionSecret } from '../lib/dsh-gui.mjs'
 import { buildCropCss, escapeStyleText, injectIntoHtml, startGuiProxy } from '../lib/gui-proxy.mjs'
 
 const SECRET = Buffer.from('0123456789abcdef0123456789abcdef', 'utf8').toString('base64url') // 32 字节
@@ -35,6 +36,17 @@ test('cookie 值：v1.<body>.<hmac(body)>，且 HMAC 覆盖 base64url 后的 bod
   const expectedSignature = Buffer.from(createHmac('sha256', Buffer.from(SECRET, 'base64url')).update(body).digest()).toString('base64url')
   assert.equal(signature, expectedSignature, 'HMAC 必须覆盖 base64url 后的 body 字符串')
   assert.equal(name, cookieNameFor(AUTHORITY))
+})
+
+test('cookie 到期时刻：反代不验签也能读出来（payload 是明文，只当"该不该换新"的提示）', () => {
+  const now = 1_700_000_000_000
+  const cookie = mintAuthCookie({ secret: SECRET, authority: AUTHORITY, now, ttlMs: 60_000 })
+  assert.equal(cookie.issuedAt, now - 5000, 'mintAuthCookie 要把 issuedAt/expiresAt 一并交出来')
+  assert.equal(cookie.expiresAt, now + 60_000)
+  assert.equal(cookieExpiresAt(cookie), now + 60_000)
+  assert.equal(cookieExpiresAt(cookie.value), now + 60_000, '传裸值也要能读')
+  assert.equal(cookieExpiresAt(null), null)
+  assert.equal(cookieExpiresAt('v1.@@not-base64@@.sig'), null, '解不出来就返回 null（调用方按"不刷新"处理）')
 })
 
 test('cookie 签名密钥必须 32 字节', () => {
@@ -398,29 +410,63 @@ test('反代：带 dshw-session 时照样字节透传其余查询串', async (t)
   assert.equal(host.seen.at(-1).path, '/plugins/x/client.js?rev=abc&v=2', '只应剥掉 dshw-session，其余原样')
 })
 
-test('反代：WS 升级按同样规则转发（带 cookie、无 Origin）', async (t) => {
-  const host = await startFakeHost()
-  const cookie = mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}` })
-  const proxy = await startGuiProxy({ targetPort: host.port, authority: `127.0.0.1:${host.port}`, cookie })
-  t.after(async () => {
-    await proxy.close()
-    host.server.close()
+/**
+ * 只认「不是这一张」的假 host：用来演"cookie 过期 / 凭据轮换后被 401，换新后放行"。
+ * `accept(rawCookieHeader)` 拿到的是原始 `name=value` 串。
+ */
+function startAuthHost({ accept }) {
+  const seen = []
+  const server = http.createServer((req, res) => {
+    seen.push({ path: req.url, cookie: req.headers.cookie })
+    if (!accept(req.headers.cookie)) {
+      res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('dsh web authentication required; reopen the URL printed by dsh web.\n')
+      return
+    }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<html><head><base href="./"></head><body>app</body></html>')
+      return
+    }
+    if (req.url?.startsWith('/api/')) {
+      let text = ''
+      req.on('data', (c) => {
+        text += c
+      })
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ type: 'server-response', rpcId: JSON.parse(text || '{}').rpcId, result: { ok: true, value: { items: [] } } }))
+      })
+      return
+    }
+    res.writeHead(404)
+    res.end('nope')
   })
+  server.on('upgrade', (req, socket) => {
+    seen.push({ upgrade: req.url, cookie: req.headers.cookie })
+    if (!accept(req.headers.cookie)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    const handshake = createHash('sha1').update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-accept: ${handshake}\r\n\r\n`)
+    socket.on('data', (chunk) => socket.write(chunk))
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, seen }))
+  })
+}
 
-  // 裸 WebSocket 握手（不依赖 ws 包）：只验证 upgrade 分支把三个头处理对了、并回到 101
+/** 裸 WebSocket 握手（不依赖 ws 包） */
+function wsHandshake(port, path) {
   const key = Buffer.from('0123456789abcdef').toString('base64')
-  const result = await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const req = http.request({
       host: '127.0.0.1',
-      port: proxy.port,
-      path: '/api/remote.mux',
-      headers: {
-        connection: 'Upgrade',
-        upgrade: 'websocket',
-        'sec-websocket-key': key,
-        'sec-websocket-version': '13',
-        Origin: 'http://127.0.0.1:9999',
-      },
+      port,
+      path,
+      headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': key, 'sec-websocket-version': '13', Origin: 'http://127.0.0.1:9999' },
     })
     const timer = setTimeout(() => reject(new Error('WS 升级超时')), 5000)
     req.on('upgrade', (res, socket) => {
@@ -439,6 +485,160 @@ test('反代：WS 升级按同样规则转发（带 cookie、无 Origin）', asy
     })
     req.end()
   })
+}
+
+const rawCookie = (cookie) => `${cookie.name}=${cookie.value}`
+
+/** 票在签名里声明的跨度：`expiresAt - issuedAt` = ttl + 5s（issuedAt 提前 5 秒给时钟回拨留余量） */
+const spanOf = (cookie) => cookieExpiresAt(cookie) - cookie.issuedAt
+
+test('discoverHost：票寿命写死 7 天（不探测宿主上限，桌面恒为 30 天 > 7 天）', async (t) => {
+  const host = await startFakeHost()
+  t.after(() => host.server.close())
+
+  const found = await discoverHost({ secret: SECRET, from: host.port, drift: 0 })
+  assert.ok(found, '应能发现假 host')
+  assert.equal(found.ttlMs, DEFAULT_COOKIE_TTL_MS)
+  assert.equal(DEFAULT_COOKIE_TTL_MS, 7 * 24 * 60 * 60 * 1000, '票寿命写死 7 天')
+  assert.equal(spanOf(found.cookie), DEFAULT_COOKIE_TTL_MS + 5000)
+  assert.equal(host.seen.filter((s) => s.path === '/api/session/list').length, 1, '只该有那一次探活，不额外问上限')
+})
+
+test('discoverHost：显式给了 ttlMs 就用它（测试缝：毫秒级寿命才能把"过期→换票"跑成确定性用例）', async (t) => {
+  const host = await startFakeHost()
+  t.after(() => host.server.close())
+
+  const found = await discoverHost({ secret: SECRET, from: host.port, drift: 0, ttlMs: 1234 })
+  assert.equal(found.ttlMs, 1234)
+  assert.equal(spanOf(found.cookie), 1234 + 5000)
+})
+
+test('反代：吃到 401 会换 cookie 重放一次（票过期 / 凭据轮换都走这条）', async (t) => {
+  const rejected = mintAuthCookie({ secret: SECRET, authority: AUTHORITY, ttlMs: 3600_000 })
+  const host = await startAuthHost({ accept: (raw) => !String(raw ?? '').includes(rejected.value) })
+  const accepted = mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}`, ttlMs: 3600_000 })
+  let refreshes = 0
+  const proxy = await startGuiProxy({
+    targetPort: host.port,
+    authority: `127.0.0.1:${host.port}`,
+    cookie: rejected,
+    refreshCookie: () => {
+      refreshes += 1
+      return accepted
+    },
+  })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+
+  const home = await fetch(proxy.url)
+  assert.equal(home.status, 200, '401 → 换 cookie → 重放，浏览器不该看到那行 401 纯文本')
+  assert.equal(refreshes, 1)
+  assert.equal(host.seen.length, 2, '上游应收到两次：被拒的一次 + 换 cookie 后的重放')
+  assert.match(String(host.seen[0].cookie), /dsh-auth-/, '第一次带的是旧 cookie')
+  assert.ok(String(host.seen[1].cookie).includes(accepted.value), '第二次必须带换来的新 cookie')
+})
+
+test('反代：换不到新 cookie 时，把上游的 401 原文透传（别吞掉话术、也别死循环）', async (t) => {
+  const rejected = mintAuthCookie({ secret: SECRET, authority: AUTHORITY, ttlMs: 3600_000 })
+  const host = await startAuthHost({ accept: () => false })
+  let refreshes = 0
+  const proxy = await startGuiProxy({
+    targetPort: host.port,
+    authority: `127.0.0.1:${host.port}`,
+    cookie: rejected,
+    maxAuthRetries: 1,
+    // 每次都签一张"新"的（值确实不同），但宿主一张都不认 —— 演"凭据彻底不对"
+    refreshCookie: () => {
+      refreshes += 1
+      return mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}`, ttlMs: 3600_000, now: Date.now() + refreshes })
+    },
+  })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+
+  const home = await fetch(proxy.url)
+  assert.equal(home.status, 401)
+  assert.match(await home.text(), /dsh web authentication required/, '原文要透传，用户/日志才看得出是 DSH 的鉴权话术')
+  assert.equal(refreshes, 1, 'maxAuthRetries=1 ⇒ 只换一次')
+  assert.equal(host.seen.length, 2, '重试次数必须有上限，不能 401 打转')
+})
+
+test('反代：没给 refreshCookie 时行为与从前一致（401 直接透传、不重试）', async (t) => {
+  const host = await startAuthHost({ accept: () => false })
+  const proxy = await startGuiProxy({ targetPort: host.port, authority: `127.0.0.1:${host.port}`, cookie: mintAuthCookie({ secret: SECRET, authority: AUTHORITY }) })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+  const home = await fetch(proxy.url)
+  assert.equal(home.status, 401)
+  assert.equal(host.seen.length, 1, '没有换 cookie 的能力就不该重放')
+})
+
+test('反代：带 body 的请求不吃"换 cookie 重放"（绝不能把上传/表单悄悄丢掉）', async (t) => {
+  const host = await startAuthHost({ accept: () => false })
+  let refreshes = 0
+  const proxy = await startGuiProxy({
+    targetPort: host.port,
+    authority: `127.0.0.1:${host.port}`,
+    cookie: mintAuthCookie({ secret: SECRET, authority: AUTHORITY }),
+    refreshCookie: () => {
+      refreshes += 1
+      return mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}` })
+    },
+  })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+
+  const res = await fetch(`${proxy.url}api/session/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'r1', prompt: 'x'.repeat(64) }),
+  })
+  assert.equal(res.status, 401)
+  assert.equal(refreshes, 0, '带 body 的请求不重放（重放要重读 body，风险大于收益）')
+  assert.equal(host.seen.length, 1)
+})
+
+test('反代：WS 升级吃到 401 也会换 cookie 重握一次', async (t) => {
+  const rejected = mintAuthCookie({ secret: SECRET, authority: AUTHORITY, ttlMs: 3600_000 })
+  const host = await startAuthHost({ accept: (raw) => !String(raw ?? '').includes(rejected.value) })
+  const accepted = mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}`, ttlMs: 3600_000 })
+  const proxy = await startGuiProxy({
+    targetPort: host.port,
+    authority: `127.0.0.1:${host.port}`,
+    cookie: rejected,
+    refreshCookie: () => accepted,
+  })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+
+  const result = await wsHandshake(proxy.port, '/api/remote.mux')
+  assert.equal(result.status, 101, '换 cookie 后重握必须成功')
+  const upgrades = host.seen.filter((s) => s.upgrade)
+  assert.equal(upgrades.length, 2, '上游应收到两次握手：被拒的一次 + 换 cookie 后的重试')
+  assert.ok(String(upgrades[1].cookie).includes(accepted.value), '重试要带上新 cookie')
+})
+
+test('反代：WS 升级按同样规则转发（带 cookie、无 Origin）', async (t) => {
+  const host = await startFakeHost()
+  const cookie = mintAuthCookie({ secret: SECRET, authority: `127.0.0.1:${host.port}` })
+  const proxy = await startGuiProxy({ targetPort: host.port, authority: `127.0.0.1:${host.port}`, cookie })
+  t.after(async () => {
+    await proxy.close()
+    host.server.close()
+  })
+
+  // 裸 WebSocket 握手（不依赖 ws 包）：只验证 upgrade 分支把三个头处理对了、并回到 101
+  const result = await wsHandshake(proxy.port, '/api/remote.mux')
 
   assert.notEqual(result.status, 401, '代理必须带上 cookie，否则假 host 会 401')
   assert.notEqual(result.status, 403)
