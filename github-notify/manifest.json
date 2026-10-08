@@ -1,7 +1,7 @@
 {
   "id": "github-notify",
   "name": "GitHub 通知",
-  "version": "0.2.1",
+  "version": "2026.10.08",
   "description": "拉取 GitHub 未读通知，启动时推送所有未通知过的通知",
   "main": "ui.mjs",
   "settings": "settings.mjs",

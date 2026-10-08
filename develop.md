@@ -62,7 +62,7 @@
 {
   "id": "my-plugin",
   "name": "我的插件",
-  "version": "0.1.0",
+  "version": "2026.10.08",
   "description": "一句话说明",
   "main": "ui.mjs",
   "background": "background.mjs",
@@ -73,6 +73,8 @@
 }
 ```
 
+- `version` 用**年月日**（本仓库约定，例 `2026.10.08`）：改了就把版本号改成改动当天；同一天再改加第 4 位 `2026.10.08.1`。
+  宿主按 `.` 切数字逐段比"严格大于"才覆盖已装插件，相等不覆盖 —— 所以**改了必须 bump**，否则老用户拿不到。
 - `sidecar.env` 可选；宿主会**最后**注入 `CATRACE_PLUGIN_ID` 与 `CATRACE_PROTOCOL_VERSION=1`（覆盖同名）。
 - 宿主**不会**执行 `npm install`；`command: "node"` 要求用户机器 PATH 里有 Node。
 
@@ -155,8 +157,8 @@ await plugin.events.publish({
 
 ## 5. 提交与发布
 
-1. 改版本号：`manifest.version` 递增（语义化版本）。
-2. 要随宿主 release 打包的，去宿主 `tauri.conf.json` 的 `bundle.resources` 补一行（当前只打 `timer` / `bt-music` / `sidecar-echo`）。
+1. 改版本号：`manifest.version` 改成**改动当天的年月日**（例 `2026.10.08`；同一天第二次改写 `2026.10.08.1`）。宿主按 `.` 切数字逐段比"严格大于"才覆盖已装插件，**相等不覆盖** ⇒ 改了必须 bump。
+2. 插件**全都会随宿主 release 打包**：构建时 `scripts/sync-plugins.mjs` 把 `tools/plugin-demo/*`（= submodule 指针那个提交）整体拷进 `src-tauri/.bundled-plugins/`，再由 `tauri.conf.json` 的 `bundle.resources` 打进安装包 —— 不需要再往 resources 里补行。
 3. commit 推本仓库 `main`；宿主仓库 `git add tools/plugin-demo` 更新 submodule 指针。
 4. 更新 `README.md` 插件列表与 `develop.md` 插件索引。
 

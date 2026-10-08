@@ -4,4 +4,4 @@
 
 用 `plugin.i18n.getLocale()`（宿主 DB `locale`）。`zh*` → 知道了 / 5 分钟后 / 跳过；否则英文。测试通知不要写死中文。
 
-改 `background.mjs` / `settings.mjs` 必须同时递增 `manifest.version`。宿主 `seed_bundled_plugins` 只在版本号变大时覆盖 `app_data`；26.9.24 的 locale 修复停在 `0.1.0`，老用户仍走 `html.lang=en` → `Got it`。
+改 `background.mjs` / `settings.mjs` 必须同时把 `manifest.version` 改成改动当天（年月日，见 `SKILL.md` §7）。宿主 `seed_bundled_plugins` 只在版本号变大时覆盖 `app_data`；26.9.24 的 locale 修复停在 `0.1.0`，老用户仍走 `html.lang=en` → `Got it`。
