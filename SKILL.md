@@ -58,7 +58,7 @@ description: >
 {
   "id": "my-plugin",
   "name": "我的插件",
-  "version": "0.1.0",
+  "version": "2026.10.08",
   "description": "一句话说明",
   "main": "ui.mjs",
   "background": "background.mjs",
@@ -70,6 +70,10 @@ description: >
 ```
 
 - `events` 是 publish 白名单：把以后要发的 `eventType`、裸 `kind`、`kind:<id>` 都列全。漏了 → 不发 Toast。
+- **`version` 用「年月日」**（本仓库约定，例 `2026.10.08`）：改了这个插件就把版本号改成**改动当天**的日期；
+  同一天再改一次就加第 4 位（`2026.10.08.1`）。这样一看版本号就知道"是不是我这次改的那份"，
+  也不会再出现两个分支各写 `0.3.1` / `0.3.4` 撞车。宿主按 `.` 切数字逐段比较（`2026.10.08 > 0.3.4`、`2026.10.09 > 2026.10.08`），
+  日期式完全兼容；**相等不覆盖**（用户手改过的那份会留着），所以"改了必须把它改成新日期"。
 - `sidecar.env` 可选；宿主最后注入 `CATRACE_PLUGIN_ID`、`CATRACE_PROTOCOL_VERSION=1`（覆盖同名）。
 - 宿主不跑 `npm install`。`command:"node"`：系统 Node 优先；没有则宿主插件页整页引导一键装便携 Node（Windows x64，写入应用数据目录，不必重启应用）。
 - **文件必须是 UTF-8、合法 JSON**（宿主 `serde_json` 严格解析）。
@@ -167,8 +171,8 @@ await plugin.events.publish({
 
 ## 7. 提交
 
-1. 递增 `manifest.version`。宿主 release 只在 bundled version **严格大于** `app_data/plugins/<id>` 时覆盖；不 bump 则老用户永远拿不到这次修复（#81：timer locale 改了代码仍停在 0.1.0）。
-2. 要随宿主 release 打包 → 宿主 `tauri.conf.json` `bundle.resources` 补一行（当前只打 `timer`/`bt-music`/`sidecar-echo`）。
+1. 把 `manifest.version` 改成**改动当天的年月日**（例 `2026.10.08`；同一天第二次改就写 `2026.10.08.1`）。宿主 release 只在 bundled version **严格大于** `app_data/plugins/<id>` 时覆盖，**相等不覆盖**；不 bump 则老用户永远拿不到这次修复（#81：timer locale 改了代码仍停在 `0.1.0`）。
+2. 插件**全都会随宿主 release 打包**：构建时 `scripts/sync-plugins.mjs` 把 `tools/plugin-demo/*`（= submodule 指针那个提交）整体拷进 `src-tauri/.bundled-plugins/`，再由 `tauri.conf.json` 的 `bundle.resources` 打进安装包。**不需要**再往 resources 里补行。
 3. commit 推本仓库 `main`；宿主 `git add tools/plugin-demo` 更新 submodule 指针。
 4. 更新 `README.md` 插件列表与 `develop.md` 插件索引。
 

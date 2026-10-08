@@ -1,7 +1,7 @@
 {
   "id": "dsh-chat",
   "name": "DSH 对话小窗",
-  "version": "0.3.4",
+  "version": "2026.10.08.1",
   "description": "DSH 干活时在右下角弹可折叠状态卡，点开直接进 DSH 官方界面的小窗。",
   "icon": "icon.svg",
   "main": "ui.mjs",

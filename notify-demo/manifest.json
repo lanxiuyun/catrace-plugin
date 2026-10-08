@@ -1,7 +1,7 @@
 {
   "id": "notify-demo",
   "name": "间隔通知 Demo",
-  "version": "0.2.1",
+  "version": "2026.10.08",
   "description": "按间隔自动 Toast，可选仅活跃时通知",
   "main": "ui.mjs",
   "background": "background.mjs",
