@@ -1,7 +1,7 @@
 {
   "id": "pywechat-reply",
   "name": "微信 PC 快捷回复",
-  "version": "0.1.0",
+  "version": "2026.10.08",
   "description": "通过 pywechat 操控微信 PC 客户端，在 Catrace 弹通知并快捷回复",
   "main": "ui.mjs",
   "background": "background.mjs",

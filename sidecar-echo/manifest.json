@@ -1,7 +1,7 @@
 {
   "id": "sidecar-echo",
   "name": "Sidecar 能力 Demo",
-  "version": "0.3.1",
+  "version": "2026.10.08",
   "description": "完整验证 sidecar、环境变量、文件/目录选择、启动程序与 HTTP GET",
   "icon": "icon.svg",
   "main": "ui.mjs",
