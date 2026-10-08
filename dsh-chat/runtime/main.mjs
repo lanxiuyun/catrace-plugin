@@ -319,7 +319,8 @@ function noticeTracker() {
 
 /** 把巡检产出的动作转成 publish op（dedupeKey 按会话，宿主原地刷新同一张卡）。 */
 function publishNotice(sessionId, action) {
-  const statusLabel = NOTICE_STATUS_LABELS[action.status] ?? action.status
+  // 巡检按「在等什么」给文案（等你审批 / 等你回答 / 计划待审）；没有就用状态默认值
+  const statusLabel = action.label || NOTICE_STATUS_LABELS[action.status] || action.status
   const preview = action.preview || ''
   send({
     op: 'publish',
@@ -336,6 +337,7 @@ function publishNotice(sessionId, action) {
         sessionId,
         status: action.status,
         statusLabel,
+        waitKind: action.waitKind ?? null,
         preview,
         // 独立外壳：状态卡自己画完整的卡面（折叠条也要自己的边框圆角阴影）
         toastStyle: 'standalone',

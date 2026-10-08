@@ -5,6 +5,7 @@ features:
       - .agent/features/dsh-chat/参考项目orb的悬浮窗怎么实现的-以及为什么本插件没做自绘外壳.md
       - .agent/features/dsh-chat/紧凑留白-官方留白变量与不该动的content-width.md
       - .agent/features/dsh-chat/设置改了没反应或插件重启还原-compose漏键踩了三次.md
+      - .agent/features/dsh-chat/状态卡在等你的三种来源-审批事件与未返回的人工闸门工具.md
     related:
       - agent-notify
   timer:
@@ -36,6 +37,7 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-10-08-dsh-chat状态卡在等你的三种来源.md
   - .agent/devlog/2026-10-05-紧凑留白开关与compose漏键与orb自绘外壳回退.md
   - .agent/devlog/2026-10-03-dsh-chat去装饰与grid轨道归零.md
   - .agent/devlog/2026-10-03-dsh-chat-A2真GUI反代进小窗.md
@@ -52,5 +54,5 @@ devlog:
 
 current:
   plan: .agent/features/dsh-chat/README.md
-  phase: dsh-chat「紧凑留白」开关已提交（729fa2f）；orb 自绘外壳回退到 orb 分支
-  next: 用户真机确认紧凑留白效果；插件分支合入插件 main 后，在主仓 bump tools/plugin-demo 指针
+  phase: dsh-chat 状态卡补上「等你回答 / 计划待审」两种人工闸门（工作区未提交）
+  next: 用户真机确认（重装/重打包插件后找 DSH 提一次问）；确认后再合入插件 main，并在主仓 bump tools/plugin-demo 指针

@@ -5,14 +5,17 @@
  * 产出「应该发布状态卡」的动作清单，由 main.mjs 转成 publish op：
  *  - running  进行中：sticky 常驻，随最新模型输出节流刷新
  *  - done     本轮完成：非 sticky，auto_hide_ms = 完成停留时长
- *  - waiting  等你审批：sticky，并让卡片自动展开成真 GUI 去处理
+ *  - waiting  等你处理：sticky，并让卡片自动展开成真 GUI 去处理；chip 文案按原因分
+ *              等你审批（approval/asked）/ 等你回答（ask_user_question）/ 计划待审（exit_plan_mode）
  *
- * 设计约定（2026-10-06 grill 定稿）：
+ * 设计约定（2026-10-06 grill 定稿，2026-10-08 补人工闸门）：
  *  - 只有活跃会话出卡：新回合（turn/start）才诞生卡片，静默的会话永远不出卡
  *  - 完成是回合级：turn/end 即完成；用户继续追问 → 下一轮 开始→进行中→完成
- *  - 首见快进不轰炸：sidecar 重启/冷启动全量读历史时，只在「审批未决」或
+ *  - 首见快进不轰炸：sidecar 重启/冷启动全量读历史时，只在「有人在等你」或
  *    「回合未结束且日志仍在新鲜期」时补发一张卡
- *  - 审批优先级最高：哪怕卡片被用户 × 掉，waiting 也会重新弹出
+ *  - 「在等你」有两个来源，都优先于 running：审批事件（approval/asked 未配 decided），
+ *    以及未返回的人工闸门工具调用（见 HUMAN_GATE_TOOLS）
+ *  - 等你的卡优先级最高：哪怕卡片被用户 × 掉，waiting 也会重新弹出
  *  - × 关掉的卡在本轮内静默（dismissed），下一个 turn/start 解除
  *  - 卡片展开期间（用户在看真 GUI）一律 sticky：完成也不自动消失，收起时再按状态计时
  */
@@ -25,6 +28,23 @@ const PREVIEW_MAX_CHARS = 140
 const PREVIEW_REPUBLISH_MS = 4000
 /** 标题回退：首条真人输入的截断长度 */
 const TITLE_FALLBACK_CHARS = 60
+
+/**
+ * 阻塞在「人」身上的工具：`tool/call` 已经落盘、配对的 `tool/result` 还没来，
+ * 就说明 DSH 这一轮正卡在等你。这类等待**不会**写 `approval/asked`（审批事件只在
+ * 真弹工具审批时才有，而 DSH 常态是 `approval/policy: never`，或者 `ask` 但工具
+ * 根本不需要越权），所以只认审批事件的话卡片会永远停在「进行中」。
+ *
+ * - `ask_user_question`：DSH 提问（官方客户端把这叫「等待回答」）
+ * - `exit_plan_mode`：计划待审
+ *
+ * 只有 allowlist 里的工具算闸门：普通工具（pwsh、长跑任务）同样会「有 call 没
+ * result」，那是在干活，不是在等人。
+ */
+const HUMAN_GATE_TOOLS = new Map([
+  ['ask_user_question', { kind: 'question', label: '等你回答' }],
+  ['exit_plan_mode', { kind: 'plan', label: '计划待审' }],
+])
 
 export const NOTICE_STATUSES = ['running', 'done', 'waiting']
 
@@ -73,6 +93,19 @@ function approvalId(event, data) {
   return `seq-${event?.seq ?? '?'}`
 }
 
+/**
+ * 工具调用的 id：`tool/call` 在 `data.callId`，`tool/result` 藏在 message 里
+ * （`message.toolCallId` / `message.source.callId`）。取不到返回空串——这时宁可
+ * 不认这个闸门，也不要挂一个永远配不上对、把卡片钉死在 waiting 的登记。
+ */
+function callIdOf(data) {
+  const candidates = [data.callId, data.toolCallId, data.message?.toolCallId, data.message?.source?.callId]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate
+  }
+  return ''
+}
+
 function emptySessionState() {
   return {
     seen: 0, // 已消费的事件数（增量下标）
@@ -83,12 +116,14 @@ function emptySessionState() {
     turnNo: null,
     phase: 'idle', // idle | running | done | waiting
     pendingAsks: new Set(), // 未决审批 id
+    pendingGates: new Map(), // 未返回的人工闸门工具：callId -> { kind, label }
     preview: '',
     dismissed: false, // 用户 × 过这张卡：本轮静默
     expanded: false, // 卡片当前展开（真 GUI 在看）
     doneAt: 0,
     lastPublishAt: 0,
     lastPublishPreview: '',
+    lastWaitKind: null, // 上次发布时「在等什么」（approval/question/plan）
     mtimeMs: 0,
     sizeBytes: 0,
   }
@@ -125,20 +160,64 @@ export class NoticeTracker {
   }
 
   /**
+   * 当前「在等你」的原因：审批优先，其次是最近一个没返回的人工闸门工具。
+   * 返回 null 表示没人在等你（phase 就不该是 waiting）。
+   */
+  #waitInfo(state) {
+    if (state.pendingAsks.size > 0) return { kind: 'approval', label: '等你审批' }
+    if (state.pendingGates.size > 0) {
+      let last = null
+      for (const gate of state.pendingGates.values()) last = gate
+      return last
+    }
+    return null
+  }
+
+  /**
+   * 人答完了（审批 decided / 闸门工具返回）：还有人等就继续 waiting，
+   * 否则按回合是否结束回到 running；回合已结束时收成 done。
+   *
+   * 还在 waiting 但「等的理由」换了（审批答完、提问还开着）也要返回 true：
+   * 卡片上的 chip 得从「等你审批」换成「等你回答」。
+   */
+  #settleWaiting(state, now) {
+    const wait = this.#waitInfo(state)
+    if (wait) {
+      if (state.phase !== 'waiting') {
+        state.phase = 'waiting'
+        return true
+      }
+      return wait.kind !== state.lastWaitKind
+    }
+    if (state.turnActive) return this.#setPhase(state, 'running')
+    if (state.phase === 'waiting') {
+      if (state.doneAt === 0) state.doneAt = now
+      return this.#setPhase(state, 'done')
+    }
+    return false
+  }
+
+  /**
    * 依据当前状态生成发布动作；返回 null 表示这次不该打扰用户。
    * `force` 用于首见快进/展开收起这类"必须表态"的场景（仍受 dismissed 约束，审批除外）。
    */
   #actionFor(state, { now = this.now() } = {}) {
     if (state.phase === 'idle') return null
+    const wait = state.phase === 'waiting' ? this.#waitInfo(state) : null
     const isWaiting = state.phase === 'waiting'
-    // × 过的卡保持静默（审批除外）——force 也越不过去
+    // × 过的卡保持静默（审批/等人的卡除外）——force 也越不过去
     if (state.dismissed && !isWaiting) return null
     const expanded = state.expanded
     const sticky = state.phase === 'done' ? expanded : true
     state.lastPublishAt = now
     state.lastPublishPreview = state.preview
+    // 记住这次发布的「等的理由」：理由变了要重发一次换 chip
+    state.lastWaitKind = wait ? wait.kind : null
     return {
       status: state.phase,
+      // 等什么决定 chip 文案：等你审批 / 等你回答 / 计划待审
+      label: wait ? wait.label : null,
+      waitKind: wait ? wait.kind : null,
       sticky,
       // done 且未展开时交给宿主 auto-hide 计时（毫秒）；展开期间 sticky 持有
       autoHideMs: state.phase === 'done' && !expanded ? this.doneHoldMs : null,
@@ -241,18 +320,35 @@ export class NoticeTracker {
       state.turnActive = true
       if (turn !== null) state.turnNo = turn
       if (isNewTurn) {
-        // 新回合：× 的静默解除，完成时间清零
+        // 新回合：× 的静默解除，完成时间清零。
+        // 上一轮遗留的未决登记一并作废：DSH 的审批对与工具调用都 turn-enclosed，
+        // 新回合开始时它们不可能还开着（崩溃尾部的半个回合会留下孤儿登记）。
         state.dismissed = false
         state.doneAt = 0
+        state.pendingAsks.clear()
+        state.pendingGates.clear()
       }
       return this.#setPhase(state, 'running')
     }
     if (type === 'turn/end') {
       state.turnActive = false
       if (state.doneAt === 0) state.doneAt = now
-      // 审批未决优先展示：turn/end 不把 waiting 翻成 done
+      // 有人在等你（审批/提问/计划待审）优先展示：turn/end 不把 waiting 翻成 done
       if (state.phase === 'waiting') return false
       return this.#setPhase(state, 'done')
+    }
+    if (type === 'tool/call') {
+      const gate = HUMAN_GATE_TOOLS.get(typeof data.name === 'string' ? data.name : '')
+      if (!gate) return false
+      const callId = callIdOf(data)
+      if (callId === '') return false
+      state.pendingGates.set(callId, gate)
+      return this.#setPhase(state, 'waiting')
+    }
+    if (type === 'tool/result') {
+      const callId = callIdOf(data)
+      if (callId === '' || !state.pendingGates.delete(callId)) return false
+      return this.#settleWaiting(state, now)
     }
     if (type === 'approval/asked') {
       state.pendingAsks.add(approvalId(event, data))
@@ -260,13 +356,7 @@ export class NoticeTracker {
     }
     if (type === 'approval/decided') {
       state.pendingAsks.delete(approvalId(event, data))
-      if (state.pendingAsks.size > 0) return false
-      if (state.turnActive) return this.#setPhase(state, 'running')
-      if (state.phase === 'waiting') {
-        if (state.doneAt === 0) state.doneAt = now
-        return this.#setPhase(state, 'done')
-      }
-      return false
+      return this.#settleWaiting(state, now)
     }
     // 其他事件（step/*、tool/*、inbox/spliced、未知类型）一律只影响预览/标题，不动 phase
     return false
@@ -315,6 +405,7 @@ export class NoticeTracker {
         preview: state.preview,
         turnActive: state.turnActive,
         pendingApprovals: state.pendingAsks.size,
+        pendingGates: state.pendingGates.size,
         expanded: state.expanded,
         dismissed: state.dismissed,
         eventsSeen: state.seen,

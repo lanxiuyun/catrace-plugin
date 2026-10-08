@@ -294,6 +294,12 @@ function setupNoticeCard(props, { emit }) {
   const sessionId = computed(() => String(payload.value.sessionId || ''))
   const status = computed(() => (NOTICE_STATUS_META[payload.value.status] ? payload.value.status : 'running'))
   const statusMeta = computed(() => NOTICE_STATUS_META[status.value])
+  // chip 文案以 sidecar 给的 statusLabel 为准（等你审批 / 等你回答 / 计划待审），
+  // 旧版宿主或测试卡没带就用状态默认文案
+  const statusLabel = computed(() => {
+    const label = String(payload.value.statusLabel || '').trim()
+    return label.length > 0 ? label : statusMeta.value.label
+  })
   const title = computed(() => props.event?.title || sessionId.value || 'DSH 任务')
   const preview = computed(() => String(payload.value.preview || ''))
   const expanded = ref(false)
@@ -416,7 +422,7 @@ function setupNoticeCard(props, { emit }) {
         ]),
       ]),
       h('span', { class: 'dsh-chat-notice__title' }, title.value),
-      h('span', { class: 'dsh-chat-notice__chip' }, statusMeta.value.label),
+      h('span', { class: 'dsh-chat-notice__chip' }, statusLabel.value),
       expanded.value
         ? h('button', { class: 'dsh-chat-notice__collapse', type: 'button', onClick: collapse }, '收起')
         : null,
