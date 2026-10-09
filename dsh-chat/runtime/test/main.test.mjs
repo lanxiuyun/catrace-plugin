@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { DEFAULT_COOKIE_TTL_MS } from '../lib/dsh-gui.mjs'
 import zlib from 'node:zlib'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -98,6 +99,56 @@ function makeHome({ credentials = false } = {}) {
   utimesSync(join(home, 'sessions', '--D-workspace-Beta--', 'session-bbb', 'session.v4.jsonl.zstd'), new Date(now), new Date(now))
   if (credentials) writeCredentials(home)
   return home
+}
+
+/** 读出一张自签 cookie 的有效期（payload 是明文，不用密钥）—— 假 host 用它学真宿主的拒收行为 */
+function cookieExpired(rawHeader) {
+  const value = String(rawHeader ?? '').split('=').slice(1).join('=')
+  const body = value.split('.')[1]
+  if (!body) return true
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'))
+    return !(payload.issuedAt <= Date.now() && payload.expiresAt > Date.now())
+  } catch {
+    return true
+  }
+}
+
+/**
+ * 会**像真宿主一样拒收过期 cookie** 的假 host：用于"小窗长开、cookie 过期"的端到端回归。
+ * 2026-10-08 线上 bug：代理 11:09 起、cookie 12:09 过期，之后 iframe 就只剩一行
+ * `dsh web authentication required`（真宿主 401 的原文）。
+ */
+async function startExpiryCheckingHost() {
+  const seen = []
+  const server = http.createServer((req, res) => {
+    seen.push({ path: req.url, cookie: req.headers.cookie })
+    if (cookieExpired(req.headers.cookie)) {
+      res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('dsh web authentication required; reopen the URL printed by dsh web.\n')
+      return
+    }
+    if (req.url === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<html><head><base href="./"></head><body>app</body></html>')
+      return
+    }
+    if (req.url?.startsWith('/api/')) {
+      let text = ''
+      req.on('data', (c) => {
+        text += c
+      })
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ type: 'server-response', rpcId: JSON.parse(text || '{}').rpcId, result: { ok: true, value: { items: [] } } }))
+      })
+      return
+    }
+    res.writeHead(404)
+    res.end('nope')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return { server, port: server.address().port, seen }
 }
 
 /** 假 DSH host：探活（POST /api/session/list 需自签 cookie）+ 一个 HTML 首页。 */
@@ -323,6 +374,38 @@ test('sidecar 协议：状态 / 生效配置 / 裁剪项 / 速查表 / 会话读
   assert.match(unknown.error, /未知方法/)
 })
 
+test('真 GUI：cookie 过期后小窗照样能开（反代自己换 cookie，不会变成一行 401）', async (t) => {
+  const host = await startExpiryCheckingHost()
+  const home = makeHome({ credentials: true })
+  // DSH_GUI_COOKIE_TTL_MS=1000 把 cookie 寿命压到 1 秒（生产是 1 小时），好在测试里等到它过期
+  const sidecar = startSidecar({
+    env: { DSH_GUI_PROBE_FROM: String(host.port), DSH_GUI_PROBE_DRIFT: '0', DSH_GUI_COOKIE_TTL_MS: '1000' },
+  })
+  t.after(async () => {
+    sidecar.child.kill()
+    rmSync(home, { recursive: true, force: true })
+    host.server.close()
+  })
+
+  await sidecar.waitFor((op) => op.op === 'ready', 20000)
+  sidecar.send({ op: 'config', config: { dshHome: home, guiPort: 0, noticeEnabled: false } })
+  await sidecar.waitFor((op) => op.op === 'log' && op.message === '配置已更新')
+  const opened = await sidecar.call('openGui', {})
+  assert.equal(opened.ok, true, JSON.stringify(opened))
+
+  // 等到那张 cookie 过期：修好之前，接下来任何一次请求都会拿到宿主的 401 纯文本
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+
+  const page = await fetch(opened.result.guiUrl)
+  const html = await page.text()
+  assert.equal(page.status, 200, `cookie 过期后反代必须自己换新；实际 ${page.status} ${html.slice(0, 80)}`)
+  assert.match(html, /catrace-dsh-gui-crop/, '换 cookie 后仍要正常注入')
+  assert.ok(!/authentication required/.test(html), '绝不能把宿主的 401 话术当页面显示')
+
+  const after = await sidecar.call('status')
+  assert.ok(after.result.gui.cookieRefreshes >= 1, `状态里应能看到反代换过 cookie；实际 ${JSON.stringify(after.result.gui)}`)
+})
+
 test('真 GUI 小窗：openGui 发布 iframe 卡（默认最近活跃会话），guiUrl 经反代拿到注入后的官方页面', async (t) => {
   const host = await startFakeHost()
   const home = makeHome({ credentials: true })
@@ -371,6 +454,8 @@ test('真 GUI 小窗：openGui 发布 iframe 卡（默认最近活跃会话）�
   const after = await sidecar.call('status')
   assert.equal(after.result.gui.ready, true, '开过一次后 GUI 应就绪')
   assert.equal(after.result.gui.lastSessionId, 'session-bbb')
+  // 票寿命写死 7 天（不探测宿主上限：桌面恒为 30 天）
+  assert.equal(after.result.gui.cookieTtlMs, DEFAULT_COOKIE_TTL_MS, '票寿命应是写死的 7 天')
 })
 
 test('本机 HTTP 桥：鉴权 / health / 会话 / window / 移除的路由 / 错误码', async (t) => {

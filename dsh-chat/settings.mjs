@@ -407,6 +407,14 @@ const DshChatSettings = {
       const s = status.value || {}
       const tag = (label, type = 'default') =>
         NTag ? h(NTag, { size: 'small', type, bordered: false }, { default: () => label }) : null
+      /** 票据寿命说人话：30 天 / 7 天 / 1 天 / 6 小时 / 55 分钟 */
+      const ttlLabel = (ttlMs) => {
+        const minutes = Math.round(Number(ttlMs) / 60000)
+        if (!Number.isFinite(minutes) || minutes <= 0) return '—'
+        if (minutes >= 60 * 24) return `${Math.round(minutes / (60 * 24))} 天`
+        if (minutes >= 60) return `${Math.round(minutes / 60)} 小时`
+        return `${minutes} 分钟`
+      }
       const button = (label, onClick, options = {}) =>
         NButton ? h(NButton, { size: 'small', onClick, ...options }, { default: () => label }) : null
       // 端口被占用时 sidecar 会自动换一个；这里说清"实际在用哪个"，否则用户以为设置没生效
@@ -439,6 +447,9 @@ const DshChatSettings = {
             [
               tag(`Node ${s.node || '—'}`),
               tag(s.zstd === false ? 'zstd 不可用' : 'zstd 正常', s.zstd === false ? 'error' : 'success'),
+              // 小窗的登录票据有寿命（顶到 DSH 允许的上限），反代到期前自己续；续过就写出来
+              s.gui && s.gui.cookieTtlMs ? tag(`小窗票据 ${ttlLabel(s.gui.cookieTtlMs)}`) : null,
+              s.gui && s.gui.cookieRefreshes > 0 ? tag(`小窗票据已自动续期 ${s.gui.cookieRefreshes} 次`) : null,
             ],
             s.zstd === false
               ? 'zstd 用来解压 DSH 的会话日志；「不可用」说明 Node 版本过低（需 ≥ 22.15）。'

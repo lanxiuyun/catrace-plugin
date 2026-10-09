@@ -13,8 +13,14 @@
  *   Cookie → 我们自签的 dsh-auth-*（丢弃浏览器带来的）
  *   Origin → 删除（栅栏要求 Origin 缺省或等于 Host；带代理端口会被 403）
  * 另外不能 sandbox iframe（`Origin: null` 直接被判 cross-site 403）。
+ *
+ * 还有一件事（线上踩过）：自签 cookie 有寿命（7 天），凭据也可能被 DSH 重置。
+ * 小窗是常驻卡片 ⇒ 代理**必须自己换 cookie**：吃到 401 就换一张新票并重放。
+ * 详见下面 `AUTH_RETRIES` 的注释。
  */
 import http from 'node:http'
+
+import { cookieExpiresAt } from './dsh-gui.mjs'
 
 /**
  * 小窗里的「去装饰」CSS。
@@ -178,6 +184,67 @@ const HOP_BY_HOP = new Set([
 ])
 
 /**
+ * cookie 换新策略 —— 小窗"开久了变成一行 401 纯文本"的正面修法（2026-10-08 线上 bug）。
+ *
+ * 事实：自签 cookie 的寿命由我们定（`dsh-gui.mjs` 的 `DEFAULT_COOKIE_TTL_MS`，写死 7 天），
+ * 而小窗是**常驻卡片**：票一过期，代理还是拿那张旧票去请求，上游一律回
+ * `401 dsh web authentication required; reopen the URL printed by dsh web.`，
+ * iframe 就把这行纯文本当页面显示出来，而且**永远不会自己好**（健康检查只探本机端口，不看上游）。
+ *
+ * 修法只有一道闸：**吃到 401 就换一张新票并重放**（凭据被 DSH 重置也走这条），最多 `maxAuthRetries` 次；
+ * 换不到就把上游那行原文透传，绝不打转。只对**没有请求体**的请求重放 ——
+ * 重试要重放 body，绝不能把上传悄悄丢掉。
+ *
+ * 为什么**不做"到期前主动换票"**：票有 7 天寿命、宿主上限 30 天，主动换只是把每 7 天一次的
+ * "401→换票→重放"从 1 个额外往返省成 0，代价却是一套到期判断 + 每个请求都读一次票的到期时间。
+ * 不划算，删了（2026-10-08 用户确认）。
+ */
+const AUTH_RETRIES = 2
+/** 401 的响应体只留这么多（官方就一行纯文本）；超了只透传响应头，别把小窗内存吃掉 */
+const AUTH_BODY_LIMIT = 64 * 1024
+
+/** 逐跳头 / 反 framing 头剥掉，其余原样透传；顺带标出是不是 HTML（要注入的那一类） */
+function filterResponseHeaders(rawHeaders) {
+  const headers = {}
+  let isHtml = false
+  for (const [key, value] of Object.entries(rawHeaders)) {
+    const lower = key.toLowerCase()
+    if (HOP_BY_HOP.has(lower)) continue
+    // 防御性剥掉反 framing 头（宿主当前不发，剥了无害）
+    if (lower === 'x-frame-options') continue
+    if (lower === 'content-security-policy' && /frame-ancestors/i.test(String(value))) continue
+    headers[key] = value
+    if (lower === 'content-type' && /text\/html/i.test(String(value))) isHtml = true
+  }
+  return { headers, isHtml }
+}
+
+/** 读完一个上游响应体（有上限）；用于"不要丢掉 401 那行话术"的场景 */
+function drainBody(stream, limit) {
+  return new Promise((resolve) => {
+    const chunks = []
+    let size = 0
+    stream.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        chunks.length = 0
+        return
+      }
+      chunks.push(chunk)
+    })
+    stream.on('end', () => resolve(Buffer.concat(chunks)))
+    stream.on('error', () => resolve(Buffer.alloc(0)))
+  })
+}
+
+/** 没有请求体才允许"换 cookie 后重试"（要重放的 body 绝不能丢，所以带 body 的一律不重试） */
+function isBodyless(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') return true
+  if (req.headers['transfer-encoding']) return false
+  return !Number(req.headers['content-length'] ?? 0)
+}
+
+/**
  * 我们自己的注入：会话预选（必须在应用 bundle 之前跑，bundle 是 type=module 所以 head 里的 classic script 一定更早）。
  *
  * 注意：**不要**在这里做"自愈"（补写 + 合成 storage 事件 + 重载）。实测过一版：
@@ -208,7 +275,9 @@ function injectIntoHtml(html, { sessionId, storageKey, cssText }) {
 /**
  * 起一个把 `<targetPort>` 的 DSH GUI 代理到本机 `<port>` 的服务器。
  *
- * @returns {Promise<{port:number, url:string, close:()=>Promise<void>}>}
+ * @param refreshCookie 可选：`() => Promise<{name,value}|null>`，换一张新的自签 cookie。
+ *   给了它，代理才具备"吃到 401 换票重放"的能力（见文件里 `AUTH_RETRIES` 的注释）。
+ * @returns {Promise<{port:number, url:string, cookieRefreshes:()=>number, close:()=>Promise<void>}>}
  */
 export async function startGuiProxy({
   targetPort,
@@ -219,15 +288,53 @@ export async function startGuiProxy({
   storageKey = 'dsh.sessions.current',
   cssText = '',
   log = () => {},
+  refreshCookie = null,
+  maxAuthRetries = AUTH_RETRIES,
 } = {}) {
-  const server = http.createServer((req, res) => {
-    // 关键：**不能**用 new URL / searchParams 重写查询串 —— 客户端的插件 bundle URL 形如
-    // `/plugins/??@scope/a/client.js,@scope/b/client.js&rev=hash`，URLSearchParams 一轮往返会把
-    // `@` `,` `??` 重新编码，导致模块加载全 404（实测踩过）。所以按字符串处理，字节保真。
-    const rawUrl = String(req.url || '/')
-    const queryIndex = rawUrl.indexOf('?')
-    const rawPath = queryIndex < 0 ? rawUrl : rawUrl.slice(0, queryIndex)
-    const rawQuery = queryIndex < 0 ? '' : rawUrl.slice(queryIndex + 1)
+  let currentCookie = cookie
+  let cookieRefreshes = 0
+  let renewing = null
+
+  /**
+   * 换一张新 cookie：读凭据、签名、宿主不在线都可能失败。
+   * **任何失败都不挡请求**（继续用旧的，让上游照常回 401，界面上的话术比"卡死"有用）。
+   * 并发请求只换一次（`renewing` 去重），换不出**不同**的 cookie 就当作没换（避免 401 打转）。
+   *
+   * @param attempt 这是本次请求的第几次重试（0 = 第一次 401）。只作诊断信息透传给回调。
+   */
+  function renewCookie(reason, attempt = 0) {
+    if (typeof refreshCookie !== 'function') return Promise.resolve(false)
+    if (renewing) return renewing
+    renewing = (async () => {
+      try {
+        const next = await refreshCookie({ reason, attempt, authority, targetPort, previous: currentCookie })
+        if (!next || !next.name || !next.value || next.value === currentCookie?.value) return false
+        currentCookie = next
+        cookieRefreshes += 1
+        log('info', 'GUI 代理：已更换浏览器会话 cookie', { reason, target: authority, expiresAt: cookieExpiresAt(next) })
+        return true
+      } catch (error) {
+        log('warn', 'GUI 代理：更换 cookie 失败', { reason, error: String(error) })
+        return false
+      }
+    })().finally(() => {
+      renewing = null
+    })
+    return renewing
+  }
+
+  /**
+   * 按字符串剥掉我们自己的 `dshw-session` 参数，其余字节保真。
+   *
+   * 关键：**不能**用 new URL / searchParams 重写查询串 —— 客户端的插件 bundle URL 形如
+   * `/plugins/??@scope/a/client.js,@scope/b/client.js&rev=hash`，URLSearchParams 一轮往返会把
+   * `@` `,` `??` 重新编码，导致模块加载全 404（实测踩过）。
+   */
+  function classifyRequest(rawUrl) {
+    const url = String(rawUrl || '/')
+    const queryIndex = url.indexOf('?')
+    const rawPath = queryIndex < 0 ? url : url.slice(0, queryIndex)
+    const rawQuery = queryIndex < 0 ? '' : url.slice(queryIndex + 1)
 
     let requestSessionId = sessionId
     let upstreamQuery = rawQuery
@@ -250,63 +357,96 @@ export async function startGuiProxy({
       }
       upstreamQuery = kept.join('&')
     }
-    const upstreamPath = upstreamQuery ? `${rawPath}?${upstreamQuery}` : rawPath
+    return { rawPath, requestSessionId, upstreamPath: upstreamQuery ? `${rawPath}?${upstreamQuery}` : rawPath }
+  }
 
-    // 自带健康检查（不转发），卡片/设置页用它判断代理是否活着
-    if (rawPath === '/catrace-gui-health') {
-      const body = Buffer.from(JSON.stringify({ ok: true, targetPort, authority, sessionId: requestSessionId }), 'utf8')
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': body.length })
-      res.end(body)
-      return
-    }
-
+  /** 转发头：Host → 签发 cookie 的 authority、Cookie → 我们自签的、Origin 删掉；其余原样 */
+  function upstreamHeaders(reqHeaders) {
     const headers = {}
-    for (const [key, value] of Object.entries(req.headers)) {
+    for (const [key, value] of Object.entries(reqHeaders)) {
       const lower = key.toLowerCase()
       if (HOP_BY_HOP.has(lower)) continue
       if (lower === 'host' || lower === 'cookie' || lower === 'origin') continue
       headers[key] = value
     }
     headers.host = authority
-    headers.cookie = `${cookie.name}=${cookie.value}`
+    headers.cookie = `${currentCookie.name}=${currentCookie.value}`
+    return headers
+  }
 
+  /** 回给浏览器：HTML 走注入，其余字节流式透传 */
+  function respond(upstreamRes, res, requestSessionId) {
+    const { headers: responseHeaders, isHtml } = filterResponseHeaders(upstreamRes.headers)
+    if (isHtml) {
+      const chunks = []
+      upstreamRes.on('data', (chunk) => chunks.push(chunk))
+      upstreamRes.on('end', () => {
+        // 会话预选脚本 + （可选）去装饰 CSS 都在首屏注入，不改动官方任何文件
+        const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), {
+          sessionId: requestSessionId,
+          storageKey,
+          cssText,
+        })
+        const body = Buffer.from(html, 'utf8')
+        delete responseHeaders['content-length']
+        responseHeaders['content-length'] = String(body.length)
+        res.writeHead(upstreamRes.statusCode || 200, responseHeaders)
+        res.end(body)
+      })
+      upstreamRes.on('error', () => res.destroy())
+      return
+    }
+    res.writeHead(upstreamRes.statusCode || 200, responseHeaders)
+    upstreamRes.pipe(res)
+  }
+
+  async function handleRequest(req, res, attempt) {
+    const { rawPath, requestSessionId, upstreamPath } = classifyRequest(req.url)
+
+    // 自带健康检查（不转发），卡片/设置页用它判断代理是否活着
+    if (rawPath === '/catrace-gui-health') {
+      const body = Buffer.from(
+        JSON.stringify({
+          ok: true,
+          targetPort,
+          authority,
+          sessionId: requestSessionId,
+          cookieExpiresAt: cookieExpiresAt(currentCookie),
+          cookieRefreshes,
+        }),
+        'utf8',
+      )
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': body.length })
+      res.end(body)
+      return
+    }
+
+    const bodyless = isBodyless(req)
     const upstream = http.request(
-      { host: '127.0.0.1', port: targetPort, method: req.method, path: upstreamPath, headers },
+      {
+        host: '127.0.0.1',
+        port: targetPort,
+        method: req.method,
+        path: upstreamPath,
+        headers: upstreamHeaders(req.headers),
+      },
       (upstreamRes) => {
-        const responseHeaders = {}
-        let isHtml = false
-        for (const [key, value] of Object.entries(upstreamRes.headers)) {
-          const lower = key.toLowerCase()
-          if (HOP_BY_HOP.has(lower)) continue
-          // 防御性剥掉反 framing 头（宿主当前不发，剥了无害）
-          if (lower === 'x-frame-options') continue
-          if (lower === 'content-security-policy' && /frame-ancestors/i.test(String(value))) continue
-          responseHeaders[key] = value
-          if (lower === 'content-type' && /text\/html/i.test(String(value))) isHtml = true
-        }
-
-        if (isHtml) {
-          const chunks = []
-          upstreamRes.on('data', (chunk) => chunks.push(chunk))
-          upstreamRes.on('end', () => {
-            // 会话预选脚本 + （可选）去装饰 CSS 都在首屏注入，不改动官方任何文件
-            const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), {
-              sessionId: requestSessionId,
-              storageKey,
-              cssText,
-            })
-            const body = Buffer.from(html, 'utf8')
-            delete responseHeaders['content-length']
-            responseHeaders['content-length'] = String(body.length)
-            res.writeHead(upstreamRes.statusCode || 200, responseHeaders)
-            res.end(body)
+        // 401 且还能再换一次 cookie：把这一行话术读下来（换不到时要原样回吐），换新后重放
+        if (upstreamRes.statusCode === 401 && bodyless && attempt < maxAuthRetries && typeof refreshCookie === 'function') {
+          const { headers: failHeaders } = filterResponseHeaders(upstreamRes.headers)
+          drainBody(upstreamRes, AUTH_BODY_LIMIT).then(async (failBody) => {
+            if (await renewCookie('401', attempt)) {
+              await handleRequest(req, res, attempt + 1)
+              return
+            }
+            delete failHeaders['content-length']
+            failHeaders['content-length'] = String(failBody.length)
+            res.writeHead(401, failHeaders)
+            res.end(failBody)
           })
-          upstreamRes.on('error', () => res.destroy())
           return
         }
-
-        res.writeHead(upstreamRes.statusCode || 200, responseHeaders)
-        upstreamRes.pipe(res)
+        respond(upstreamRes, res, requestSessionId)
       },
     )
     upstream.on('error', (error) => {
@@ -319,7 +459,22 @@ export async function startGuiProxy({
         res.destroy()
       }
     })
-    req.pipe(upstream)
+    // 有 body 的一律流式转发（重试要重放 body，所以这一类不参与换 cookie 重试）
+    if (bodyless) upstream.end()
+    else req.pipe(upstream)
+  }
+
+  const server = http.createServer((req, res) => {
+    handleRequest(req, res, 0).catch((error) => {
+      log('warn', 'GUI 代理处理请求失败', { path: req.url, error: String(error) })
+      if (!res.headersSent) {
+        const body = Buffer.from(JSON.stringify({ error: `proxy failure: ${String(error)}` }), 'utf8')
+        res.writeHead(502, { 'content-type': 'application/json', 'content-length': body.length })
+        res.end(body)
+      } else {
+        res.destroy()
+      }
+    })
   })
 
   // 升级后的 socket 不受 closeAllConnections() 管辖，必须自己记账并在 close() 时销毁，
@@ -330,8 +485,7 @@ export async function startGuiProxy({
     socket.on('close', () => liveSockets.delete(socket))
   })
 
-  // WebSocket（/api/remote.mux 等）：必须走 upgrade 分支，raw 转发
-  server.on('upgrade', (req, socket, head) => {
+  async function handleUpgrade(req, socket, head, attempt) {
     const headers = {}
     for (const [key, value] of Object.entries(req.headers)) {
       const lower = key.toLowerCase()
@@ -342,7 +496,7 @@ export async function startGuiProxy({
       headers[key] = value
     }
     headers.host = authority
-    headers.cookie = `${cookie.name}=${cookie.value}`
+    headers.cookie = `${currentCookie.name}=${currentCookie.value}`
 
     const upstream = http.request({ host: '127.0.0.1', port: targetPort, method: req.method, path: req.url, headers })
     upstream.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
@@ -365,6 +519,20 @@ export async function startGuiProxy({
       upstreamSocket.on('error', destroy)
     })
     upstream.on('response', (upstreamRes) => {
+      // WS 也会因为 cookie 过期被挡（长驻页面的重连最常撞上）：换一张 cookie 再握一次手
+      if (upstreamRes.statusCode === 401 && attempt < maxAuthRetries && typeof refreshCookie === 'function') {
+        upstreamRes.resume()
+        void renewCookie('401-ws', attempt).then((renewed) => {
+          if (renewed) {
+            void handleUpgrade(req, socket, head, attempt + 1).catch(() => socket.destroy())
+            return
+          }
+          log('warn', 'GUI 代理 WS 升级被拒（cookie 换不到）', { path: req.url, status: 401 })
+          socket.write('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\n\r\n')
+          socket.end()
+        })
+        return
+      }
       // 上游拒绝升级（401/403）：把原始响应回吐，便于诊断
       log('warn', 'GUI 代理 WS 升级被拒', { path: req.url, status: upstreamRes.statusCode })
       socket.write(`HTTP/1.1 ${upstreamRes.statusCode} ${upstreamRes.statusMessage}\r\nconnection: close\r\n\r\n`)
@@ -372,6 +540,14 @@ export async function startGuiProxy({
     })
     upstream.on('error', () => socket.destroy())
     upstream.end()
+  }
+
+  // WebSocket（/api/remote.mux 等）：必须走 upgrade 分支，raw 转发
+  server.on('upgrade', (req, socket, head) => {
+    handleUpgrade(req, socket, head, 0).catch((error) => {
+      log('warn', 'GUI 代理处理升级失败', { path: req.url, error: String(error) })
+      socket.destroy()
+    })
   })
 
   await new Promise((resolve, reject) => {
@@ -384,6 +560,8 @@ export async function startGuiProxy({
   return {
     port: actualPort,
     url: `http://127.0.0.1:${actualPort}/`,
+    /** 换过几次 cookie：设置页/排查"小窗开了很久"时用得上 */
+    cookieRefreshes: () => cookieRefreshes,
     close: () =>
       new Promise((resolve) => {
         for (const socket of liveSockets) {

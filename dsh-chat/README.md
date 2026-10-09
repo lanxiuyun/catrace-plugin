@@ -2,7 +2,8 @@
 
 DSH（DeepSeek Harness）干活时，Catrace 右下角弹一张**可折叠状态卡**；点正文，**同一张卡原地展开成 DSH 官方界面**（GUI iframe）——对话流、`/` 指令、`@` 文件、审批全是原生的，本插件一行 UI 都不重写。
 
-- **状态卡**：sidecar 轮询 DSH 会话日志（`$DSH_HOME/sessions/**/session.v4.jsonl.zstd`），DSH 开始干活 → 「进行中」，等你审批 → 「等你审批」并自动展开，完成 → 「已完成」自动收。
+- **状态卡**：sidecar 轮询 DSH 会话日志（`$DSH_HOME/sessions/**/session.v4.jsonl.zstd`），DSH 开始干活 → 「进行中」，
+  DSH 在等你 → 「等你审批 / 等你回答 / 计划待审」并自动展开，完成 → 「已完成」自动收。
 - **官方界面**：sidecar 发现正在运行的 DSH Desktop → 用本地凭据自签 cookie → 起同源反向代理 → 状态卡/设置页把 iframe 指到代理上。
 
 > 0.3.0 起大幅瘦身：0.2.x 的**镜像消息流**与 **SDK 提问**（`dsh --profile sdk`）已整链移除，
@@ -53,7 +54,12 @@ DSH Desktop（本机 web 服务）──反代──┘                         
 - **展开态**：点正文，**同一张卡原地长高**（30rem），正文区换成官方 GUI iframe；header 出现「收起」。
   展开期间卡片调 `POST /notice/view {expanded:true}`，sidecar 把该会话置为**展开持有**——
   完成也不自动收（用户正在看）；收起时 `expanded:false`，按当前状态补发并恢复停留计时。
-- **等你审批**：`approval/asked` → waiting 卡带 `autoExpand:true`，卡片看到标记后**自动展开**官方界面。
+- **等你处理**（chip 按原因换字，都带 `autoExpand:true`，卡片看到标记后**自动展开**官方界面）：
+  - 「等你审批」← `approval/asked` 落盘且还没有 `approval/decided`；
+  - 「等你回答」← 工具 `ask_user_question` 有 `tool/call` 没 `tool/result`（DSH 在等你答题）；
+  - 「计划待审」← 工具 `exit_plan_mode` 同上（DSH 在等你批计划）。
+  为什么不能只认审批事件：审批只在真弹审批时才有，DSH 常态是 `approval/policy: never`，
+  或者 `ask` 但工具压根不需要越权 —— 只认审批的话卡片会一直停在「进行中」。
 - **生命周期**由 sidecar 巡检驱动：同 `dedupeKey`（`dsh-chat.notice:<sessionId>`）原地刷新；× = 本轮静默，新回合解除。
 - 设置页可以发「进行中 / 已完成 / 等你审批」**测试卡**，不开 DSH 也能看手感。
 
@@ -74,6 +80,14 @@ DSH Desktop（本机 web 服务）──反代──┘                         
    （信任栅栏在鉴权之前：`Host` 必须回环、`Origin` 缺省或等于 Host、`sec-fetch-site: cross-site` 一律 403）；
 4. 首屏 HTML 里注入一段脚本，把 `localStorage['dsh.sessions.current']` 设成要显示的那条会话
    （客户端就是靠这个键决定显示哪条；**不写就落到"选择工作区"引导页**）。
+5. **票据会过期，反代自己换**：自签 cookie 的寿命写死 **7 天**（宿主只要求"跨度 ≤ 它自己的
+   `cookieMaxAgeDays`"，而桌面版恒为默认 **30 天** —— 没有这个开关，所以 7 天不会越界）。
+   小窗是常驻卡片，因此反代**吃到 401** 时会重读 `~/.dsh/.credentials.yaml` 换一张新票并重放
+   （票过期、凭据被 DSH 重置都走这条）；换不到就把上游那行 401 原文透传，绝不打转。
+   只对**没有请求体**的请求重放——带 body 的上传绝不重放，宁可那一次失败。
+   设置页「运行环境」会写「小窗票据 7 天」。
+   **不做"到期前主动换票"**：票有 7 天，主动换只是省掉每 7 天一次的"401→换票→重放"往返，
+   不值得多一套到期判断 + 每个请求多读一次票（2026-10-08 用户拍板）。
 
 好消息：rc.2 的 SPA 全部用**文档相对 URL**（`api/session/list`、WS 走 `document.baseURI`），
 且 `<base href="./">` 是宿主自己插的，所以 HTML **一个字节都不用改写**，透传即可。
@@ -181,8 +195,10 @@ DSH Desktop（本机 web 服务）──反代──┘                         
 - **不能给 iframe 加 `sandbox`**：那会变成 opaque origin，`Origin: null` 直接 403。
 - 关掉 DSH 主窗**不会**停服务（托盘常驻，host 子进程还活着）；**退出托盘/退出应用**才会。
 - 若在 DSH 设置里关掉「普通浏览器访问」或离开 compatibility 模式 → 全链路 403（实时生效）。
-- 端口漂移、cookie 30 天过期、凭据重置都会让复用失效；展开状态卡时会当场报错（卡片上有「重试」，
-  设置页「最近一次错误」也会带出原因）。
+- 端口漂移（DSH 换了端口）、关掉浏览器访问、凭据被重置都会让复用失效；展开状态卡时会当场报错
+  （设置页「最近一次错误」也会带出原因）。
+- **「票据过期」不再是失效场景**：票寿命写死 7 天，反代吃到 401 会换一张重放（见上面第 5 条）。
+  0.3.1 及更早的版本没有这一步 —— 小窗开着超过 1 小时就会整片变成一行 `dsh web authentication required`（已修）。
 
 ## 安装
 
@@ -217,7 +233,7 @@ DSH 桌面版为此加了一道**渲染器准入**栅栏（`desktop-browser-acce
 ### 状态卡
 
 - 折叠：徽标 + 标题 + 状态 chip + 最新输出；点正文原地展开。
-- 展开：官方界面（iframe）+「收起」；等你审批时自动展开。
+- 展开：官方界面（iframe）+「收起」；DSH 在等你（审批 / 提问 / 计划待审）时自动展开。
 - × = 本轮静默；完成卡停留 `noticeDoneHoldMs` 后自动收。
 
 ### 设置页
