@@ -70,30 +70,81 @@ const CARD_CSS = `
   color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem; line-height: 1.6;
 }
 
-/* ---------- 状态通知卡（dsh-chat.notice）：agent-notify 风格状态卡 ----------
-   徽标 + 标题 + 状态 chip + 项目路径 + 最新输出正文；没有 footer，正文点击原地展开官方界面。
-   视觉借鉴 agent-notify：左侧 0.25rem 状态色边框条（--accent，随状态琥珀/绿/紫）+
-   彩色状态 chip + 正文悬停下划线；主题变量内联到根节点。 */
+/* ---------- 状态通知卡（dsh-chat.notice）：方案 2 · Ambient Fluid Aura ----------
+   保留参考方案 2 的内部状态光晕、边框和阴影；桌面通知改用不透明白底，
+   不采样或模糊卡片背后的窗口/壁纸，确保不同背景下底色和可读性稳定。
+   内部光晕仍半透明并独立模糊；不画底沿进度流丝。 */
 .dsh-chat-notice {
   width: 100%; box-sizing: border-box;
   display: flex; flex-direction: column;
-  background: var(--ct-surface, #ffffff);
   color: var(--ct-text, #2e1065);
-  border: 1px solid var(--ct-border, rgba(0, 0, 0, 0.10));
-  /* 状态色条 = 左边框本体（--accent 随状态琥珀/绿/紫）：border 天然跟随圆角、
-     全高贯通，不会被 iframe/正文盖住，也没有 inset 阴影在圆角处的楔形缺损 */
-  border-left: 0.25rem solid var(--accent, #64748b);
-  border-radius: 0.75rem;
-  box-shadow:
-    0 0.5rem 1.5rem rgba(0, 0, 0, 0.18),
-    0 0.125rem 0.375rem rgba(0, 0, 0, 0.12);
+  position: relative;
+  isolation: isolate;
+  border-radius: 1rem; /* rounded-2xl */
   overflow: hidden;
   font-size: 0.8125rem; line-height: 1.5;
   overflow-wrap: anywhere;
+  /* 不透明底隔离桌面背景；只模糊内部光晕，不使用 backdrop-filter */
+  background: #ffffff;
+  /* border-slate-200/90 */
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  /* shadow-2xl shadow-black/20 */
+  box-shadow: 0 1.5625rem 3.125rem -0.75rem rgba(0, 0, 0, 0.2);
+  /* 参考的 transition-all duration-300；这里只过渡状态色，避免连展开高度一起动画 */
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+/* 状态色 border + shadow（对应参考里 toastCard.className 的整串覆盖） */
+.dsh-chat-notice.is-running {
+  border-color: #93c5fd; /* border-blue-300 */
+  box-shadow: 0 1.5625rem 3.125rem -0.75rem rgba(59, 130, 246, 0.15); /* shadow-2xl shadow-blue-500/15 */
+}
+.dsh-chat-notice.is-done {
+  border-color: rgba(167, 243, 208, 0.8); /* border-emerald-200/80 */
+  box-shadow: /* shadow-xl */
+    0 1.25rem 1.5625rem -0.3125rem rgba(0, 0, 0, 0.1),
+    0 0.5rem 0.625rem -0.375rem rgba(0, 0, 0, 0.1);
+}
+.dsh-chat-notice.is-waiting {
+  border-color: rgba(253, 230, 138, 0.8); /* border-amber-200/80 */
+  box-shadow:
+    0 1.25rem 1.5625rem -0.3125rem rgba(0, 0, 0, 0.1),
+    0 0.5rem 0.625rem -0.375rem rgba(0, 0, 0, 0.1);
+}
+.dsh-chat-notice.is-error {
+  border-color: rgba(253, 164, 175, 0.8); /* border-rose-200/80 */
+  box-shadow:
+    0 1.25rem 1.5625rem -0.3125rem rgba(0, 0, 0, 0.1),
+    0 0.5rem 0.625rem -0.375rem rgba(0, 0, 0, 0.1);
+}
+/* 弥散流体层 = 参考里的 #ambientGlowLayer（inset-0，压在内容之下） */
+.dsh-chat-notice::before {
+  content: ''; position: absolute; z-index: 0; inset: 0;
+  pointer-events: none;
+}
+.dsh-chat-notice.is-running::before {
+  /* 增强蓝色识别度：蓝为主色，青/靛为流动层次；保留参考的弥散结构 */
+  background-image: linear-gradient(to right,
+    rgba(59, 130, 246, 0.24), rgba(34, 211, 238, 0.18), rgba(99, 102, 241, 0.20));
+  background-size: 200% 200%;
+  filter: blur(1.5rem); /* blur-xl */
+  animation: dsh-chat-ambient-aura 6s ease-in-out infinite;
+}
+.dsh-chat-notice.is-done::before { background-color: rgba(16, 185, 129, 0.14); } /* 增强绿色识别度，仍保持浅底 */
+.dsh-chat-notice.is-waiting::before { background-color: rgba(245, 158, 11, 0.05); } /* bg-amber-500/5 */
+.dsh-chat-notice.is-error::before { background-color: rgba(244, 63, 94, 0.05); } /* bg-rose-500/5 */
+.dsh-chat-notice__statusline { display: none; } /* 参考底部流丝按用户要求去掉 */
+.dsh-chat-notice > :not(.dsh-chat-notice__statusline) { position: relative; z-index: 1; }
+@keyframes dsh-chat-ambient-aura {
+  0% { background-position: 0% 50%; opacity: 0.6; }
+  50% { background-position: 100% 50%; opacity: 0.9; }
+  100% { background-position: 0% 50%; opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dsh-chat-notice.is-running::before { animation: none; opacity: 0.75; }
 }
 .dsh-chat-notice__bar {
   display: flex; align-items: center; gap: 0.375rem;
-  padding: 0.375rem 0.5rem 0.125rem 0.875rem;
+  padding: 0.625rem 0.5rem 0.125rem 0.75rem;
   min-width: 0;
 }
 .dsh-chat-notice__badge {
@@ -261,14 +312,16 @@ const DSH_WHALE_PATH = 'M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032
 const NOTICE_STATUS_META = {
   running: { label: '进行中' },
   done: { label: '已完成' },
-  waiting: { label: '等你审批' },
+  waiting: { label: '等你处理' },
+  error: { label: '处理失败' },
 }
 
-/** running 对齐 PreToolUse（琥珀=干活）、done 对齐 Stop（绿=完成）、waiting 对齐 Notification（紫=需要你回来） */
+/** running 蓝色=工作中、done 绿色=完成、waiting 黄色=需要你处理 */
 const NOTICE_THEMES = {
-  running: { accent: '#F59E0B', badgeBg: '#FEF3C7', badgeFg: '#B45309', border: '#FDE68A' },
-  done: { accent: '#10B981', badgeBg: '#D1FAE5', badgeFg: '#047857', border: '#6EE7B7' },
-  waiting: { accent: '#8B5CF6', badgeBg: '#EDE9FE', badgeFg: '#6D28D9', border: '#DDD6FE' },
+  running: { accent: '#3B82F6', badgeBg: '#DBEAFE', badgeFg: '#1D4ED8', border: 'rgba(147,197,253,0.9)' },
+  done: { accent: '#10B981', badgeBg: '#ECFDF5', badgeFg: '#047857', border: 'rgba(167,243,208,0.9)' },
+  waiting: { accent: '#F59E0B', badgeBg: '#FFFBEB', badgeFg: '#B45309', border: 'rgba(253,230,138,0.9)' },
+  error: { accent: '#F43F5E', badgeBg: '#FFF1F2', badgeFg: '#BE123C', border: 'rgba(253,164,175,0.9)' },
 }
 
 function noticeThemeStyle(theme) {
@@ -292,7 +345,7 @@ function noticeThemeStyle(theme) {
 function setupNoticeCard(props, { emit }) {
   const payload = computed(() => (props.event && props.event.payload) || {})
   const sessionId = computed(() => String(payload.value.sessionId || ''))
-  const status = computed(() => (NOTICE_STATUS_META[payload.value.status] ? payload.value.status : 'running'))
+  const status = computed(() => (NOTICE_STATUS_META[payload.value.status] ? payload.value.status : payload.value.status === 'error' ? 'error' : 'running'))
   const statusMeta = computed(() => NOTICE_STATUS_META[status.value])
   // chip 文案以 sidecar 给的 statusLabel 为准（等你审批 / 等你回答 / 计划待审），
   // 旧版宿主或测试卡没带就用状态默认文案
@@ -479,10 +532,14 @@ function setupNoticeCard(props, { emit }) {
     h(
       'div',
       {
-        class: `dsh-chat-notice${expanded.value ? ' is-expanded' : ''}`,
+        class: `dsh-chat-notice is-${status.value}${expanded.value ? ' is-expanded' : ''}`,
         style: noticeThemeStyle(NOTICE_THEMES[status.value] ?? NOTICE_THEMES.running),
       },
-      [renderBar(), renderBody()],
+      [
+        h('div', { class: 'dsh-chat-notice__statusline', 'aria-hidden': 'true' }),
+        renderBar(),
+        renderBody(),
+      ],
     )
 }
 

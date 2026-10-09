@@ -198,6 +198,8 @@ test('ui.mjs：真 GUI 窗口卡渲染 iframe，状态通知卡渲染折叠条',
   assert.match(text, /dsh-chat-notice/, '应渲染 dsh-chat-notice 根节点')
   assert.match(text, /整理三点结论/, '折叠条要显示会话标题')
   assert.match(text, /进行中/, '要显示状态 chip')
+  assert.match(text, /is-running/, '进行中状态要标记为 running，供顶部流动色条启用动画')
+  assert.match(text, /dsh-chat-notice__statusline/, '状态边框层应随通知卡渲染')
   assert.match(text, /最新的输出文本/, '要显示最新输出预览')
   assert.ok(!text.includes('发送'), '状态卡不该有对话输入框')
 })

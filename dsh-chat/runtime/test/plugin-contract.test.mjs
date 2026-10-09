@@ -127,6 +127,25 @@ test('ui.mjs：Toast 窗不许调 plugin.sidecar.request（宿主只放行 main 
   assert.match(source, /fetch\(/, '卡片应通过 fetch 访问 sidecar 的本机 HTTP 桥')
 })
 
+test('状态通知卡：不透明底隔离桌面背景，保留方案2内部状态光晕（不含底沿流丝）', () => {
+  const ui = read('ui.mjs')
+  const noticeCss = ui.match(/\/\* ---------- 状态通知卡[\s\S]*?\.dsh-chat-notice__bar \{/ )
+  assert.ok(noticeCss, '应能定位状态通知卡 CSS')
+  const css = noticeCss[0]
+  const root = css.match(/\.dsh-chat-notice \{[\s\S]*?\n\}/)[0]
+  assert.match(root, /background:\s*#ffffff;/, '卡片必须使用不透明底，隔离窗口和壁纸颜色')
+  assert.doesNotMatch(root, /(?:-webkit-)?backdrop-filter\s*:/, '不得采样桌面背景进行模糊')
+  assert.match(css, /border:\s*1px solid rgba\(226, 232, 240, 0\.9\)/, '基础边框应为参考 slate-200/90')
+  assert.ok(css.includes('linear-gradient(to right,\n    rgba(59, 130, 246, 0.24), rgba(34, 211, 238, 0.18), rgba(99, 102, 241, 0.20))'), '进行中应使用增强蓝色浓度的弥散渐变')
+  assert.match(css, /filter:\s*blur\(1\.5rem\)/, '进行中光晕应为参考 blur-xl (24px)')
+  assert.match(css, /background-color:\s*rgba\(16, 185, 129, 0\.14\)/, '完成光晕应提高绿色浓度以区分进行中')
+  assert.match(css, /background-color:\s*rgba\(245, 158, 11, 0\.05\)/, '等待光晕应为 amber-500/5')
+  assert.match(css, /background-color:\s*rgba\(244, 63, 94, 0\.05\)/, '失败光晕应为 rose-500/5')
+  assert.match(css, /dsh-chat-ambient-aura 6s ease-in-out infinite/, '动态光晕应使用参考 6 秒循环')
+  assert.match(css, /\.dsh-chat-notice__statusline \{ display: none; \}/, '按用户要求不显示底沿进度流丝')
+  assert.doesNotMatch(css, /#E4F2FA|#E7F4F1|#F5F0E8/, '不得使用自定义整卡状态染色')
+})
+
 test('小窗卡片：走 standalone 外壳，且宽度不超过宿主 22.5rem 卡槽', () => {
   const main = read('runtime/main.mjs')
   assert.match(

@@ -33,7 +33,7 @@ import {
 
 const WINDOW_DEDUPE_KEY = 'dsh-chat.window'
 const NOTICE_DEDUPE_PREFIX = 'dsh-chat.notice:'
-const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你审批' }
+const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你处理' }
 const DEFAULT_HTTP_PORT = 23457
 const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/window', '/gui', '/notice/view']
 
@@ -446,7 +446,7 @@ async function methodNoticeDemo(params = {}) {
       status === 'done'
         ? '测试卡：这一轮已完成，停留一段时间后会自动收掉。'
         : status === 'waiting'
-          ? '测试卡：DSH 在等你审批，卡片会自动展开官方界面。'
+          ? '测试卡：DSH 在等你处理，卡片会自动展开官方界面。'
           : '测试卡：DSH 正在处理任务，这一行会跟着最新输出刷新。',
   })
   return { ok: true, status }

@@ -302,7 +302,7 @@ const DshChatSettings = {
     async function sendNoticeDemo(status_) {
       try {
         await call('noticeDemo', { status: status_ })
-        message?.success?.(`已发送「${status_ === 'done' ? '已完成' : status_ === 'waiting' ? '等你审批' : '进行中'}」测试卡到右下角`)
+        message?.success?.(`已发送「${status_ === 'done' ? '已完成' : status_ === 'waiting' ? '等你处理' : '进行中'}」测试卡到右下角`)
       } catch (error) {
         message?.error?.(`发送测试卡失败：${error?.message || error}`)
       }
@@ -492,7 +492,7 @@ const DshChatSettings = {
                 [
                   button('进行中', () => void sendNoticeDemo('running')),
                   button('已完成', () => void sendNoticeDemo('done')),
-                  button('等你审批', () => void sendNoticeDemo('waiting')),
+                  button('等你处理', () => void sendNoticeDemo('waiting')),
                   button('刷新状态', () => void loadNoticeStatus(), { quaternary: true }),
                 ],
                 '发一张测试卡到右下角，看看折叠/展开的手感',
