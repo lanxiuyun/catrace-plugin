@@ -131,7 +131,7 @@ const CARD_CSS = `
 }
 .dsh-chat-notice.is-done::before { background-color: rgba(16, 185, 129, 0.14); } /* 增强绿色识别度，仍保持浅底 */
 .dsh-chat-notice.is-waiting::before { background-color: rgba(245, 158, 11, 0.05); } /* bg-amber-500/5 */
-.dsh-chat-notice.is-error::before { background-color: rgba(244, 63, 94, 0.05); } /* bg-rose-500/5 */
+.dsh-chat-notice.is-error::before { background-color: rgba(244, 63, 94, 0.14); } /* 明确红色错误底色，仍保持浅底可读 */
 .dsh-chat-notice__statusline { display: none; } /* 参考底部流丝按用户要求去掉 */
 .dsh-chat-notice > :not(.dsh-chat-notice__statusline) { position: relative; z-index: 1; }
 @keyframes dsh-chat-ambient-aura {
@@ -345,7 +345,9 @@ function noticeThemeStyle(theme) {
 function setupNoticeCard(props, { emit }) {
   const payload = computed(() => (props.event && props.event.payload) || {})
   const sessionId = computed(() => String(payload.value.sessionId || ''))
-  const status = computed(() => (NOTICE_STATUS_META[payload.value.status] ? payload.value.status : payload.value.status === 'error' ? 'error' : 'running'))
+  const status = computed(() => (
+    NOTICE_STATUS_META[payload.value.status] || payload.value.status === 'error' ? payload.value.status : 'running'
+  ))
   const statusMeta = computed(() => NOTICE_STATUS_META[status.value])
   // chip 文案以 sidecar 给的 statusLabel 为准（等你审批 / 等你回答 / 计划待审），
   // 旧版宿主或测试卡没带就用状态默认文案

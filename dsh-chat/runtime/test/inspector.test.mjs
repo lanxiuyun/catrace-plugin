@@ -77,6 +77,21 @@ test('新回合出「进行中」，预览节流刷新，turn/end 转「已完�
   assert.equal(actions[0].autoHideMs, 30000)
 })
 
+test('turn/end reason=error → 红色错误状态卡并按完成停留时间自动收起', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const events = [TURN_START(1, 1)]
+  tracker.ingest('s-error', events, { now: clock.now(), fresh: true })
+
+  events.push(ev('turn/end', { turn: 1, reason: { kind: 'error', message: 'provider failed' } }, 2))
+  const [action] = tracker.ingest('s-error', events, { now: clock.now() })
+
+  assert.equal(action.status, 'error')
+  assert.equal(action.label, null)
+  assert.equal(action.sticky, false)
+  assert.equal(action.autoHideMs, 30000)
+})
+
 test('完成后继续追问 → 下一轮循环；× 静默到新回合解除', () => {
   const clock = fixedClock()
   const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })

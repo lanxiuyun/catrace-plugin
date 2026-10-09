@@ -202,6 +202,12 @@ test('ui.mjs：真 GUI 窗口卡渲染 iframe，状态通知卡渲染折叠条',
   assert.match(text, /dsh-chat-notice__statusline/, '状态边框层应随通知卡渲染')
   assert.match(text, /最新的输出文本/, '要显示最新输出预览')
   assert.ok(!text.includes('发送'), '状态卡不该有对话输入框')
+
+  const errorEvent = { ...noticeEvent, payload: { ...noticeEvent.payload, status: 'error' } }
+  const errorSetup = component.setup({ event: errorEvent, isHovered: false }, { emit: () => {} })
+  const errorTree = errorSetup()
+  assert.match(flatten(errorTree), /is-error/, 'error 必须映射到红色错误状态类')
+  assert.match(flatten(errorTree), /处理失败/, 'error 状态应显示失败标签')
 })
 
 test('settings.mjs：点开关后保存对象必须带上这些键（防「设置没用」）', async () => {

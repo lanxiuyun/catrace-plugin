@@ -5,6 +5,7 @@
  * 产出「应该发布状态卡」的动作清单，由 main.mjs 转成 publish op：
  *  - running  进行中：sticky 常驻，随最新模型输出节流刷新
  *  - done     本轮完成：非 sticky，auto_hide_ms = 完成停留时长
+ *  - error    回合失败：非 sticky，红色状态卡并按完成停留时长自动收起
  *  - waiting  等你处理：sticky，并让卡片自动展开成真 GUI 去处理；chip 文案按原因分
  *              等你审批（approval/asked）/ 等你回答（ask_user_question）/ 计划待审（exit_plan_mode）
  *
@@ -46,7 +47,7 @@ const HUMAN_GATE_TOOLS = new Map([
   ['exit_plan_mode', { kind: 'plan', label: '计划待审' }],
 ])
 
-export const NOTICE_STATUSES = ['running', 'done', 'waiting']
+export const NOTICE_STATUSES = ['running', 'done', 'waiting', 'error']
 
 /** 取事件的 data 对象（缺失返回空对象） */
 function dataOf(event) {
@@ -114,7 +115,7 @@ function emptySessionState() {
     cwd: null, // 会话工作目录（session 头事件，卡片的项目行用）
     turnActive: false,
     turnNo: null,
-    phase: 'idle', // idle | running | done | waiting
+    phase: 'idle', // idle | running | done | waiting | error
     pendingAsks: new Set(), // 未决审批 id
     pendingGates: new Map(), // 未返回的人工闸门工具：callId -> { kind, label }
     preview: '',
@@ -208,7 +209,7 @@ export class NoticeTracker {
     // × 过的卡保持静默（审批/等人的卡除外）——force 也越不过去
     if (state.dismissed && !isWaiting) return null
     const expanded = state.expanded
-    const sticky = state.phase === 'done' ? expanded : true
+    const sticky = state.phase === 'done' || state.phase === 'error' ? expanded : true
     state.lastPublishAt = now
     state.lastPublishPreview = state.preview
     // 记住这次发布的「等的理由」：理由变了要重发一次换 chip
@@ -220,7 +221,7 @@ export class NoticeTracker {
       waitKind: wait ? wait.kind : null,
       sticky,
       // done 且未展开时交给宿主 auto-hide 计时（毫秒）；展开期间 sticky 持有
-      autoHideMs: state.phase === 'done' && !expanded ? this.doneHoldMs : null,
+      autoHideMs: (state.phase === 'done' || state.phase === 'error') && !expanded ? this.doneHoldMs : null,
       autoExpand: isWaiting && !expanded,
       title: state.title,
       cwd: state.cwd,
@@ -333,9 +334,9 @@ export class NoticeTracker {
     if (type === 'turn/end') {
       state.turnActive = false
       if (state.doneAt === 0) state.doneAt = now
-      // 有人在等你（审批/提问/计划待审）优先展示：turn/end 不把 waiting 翻成 done
+      // 有人在等你（审批/提问/计划待审）优先展示：turn/end 不把 waiting 翻成 done/error
       if (state.phase === 'waiting') return false
-      return this.#setPhase(state, 'done')
+      return this.#setPhase(state, data.reason?.kind === 'error' ? 'error' : 'done')
     }
     if (type === 'tool/call') {
       const gate = HUMAN_GATE_TOOLS.get(typeof data.name === 'string' ? data.name : '')

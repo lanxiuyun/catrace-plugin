@@ -33,7 +33,7 @@ import {
 
 const WINDOW_DEDUPE_KEY = 'dsh-chat.window'
 const NOTICE_DEDUPE_PREFIX = 'dsh-chat.notice:'
-const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你处理' }
+const NOTICE_STATUS_LABELS = { running: '进行中', done: '已完成', waiting: '等你处理', error: '处理失败' }
 const DEFAULT_HTTP_PORT = 23457
 const HTTP_ROUTES = ['/health', '/status', '/sessions', '/session', '/window', '/gui', '/notice/view']
 
@@ -329,7 +329,7 @@ function publishNotice(sessionId, action) {
       kind: 'dsh-chat',
       title: action.title || 'DSH 任务',
       body: preview || statusLabel,
-      level: action.status === 'waiting' ? 'warning' : 'info',
+      level: action.status === 'waiting' ? 'warning' : action.status === 'error' ? 'error' : 'info',
       sticky: !!action.sticky,
       dedupeKey: `${NOTICE_DEDUPE_PREFIX}${sessionId}`,
       payload: {
@@ -345,7 +345,7 @@ function publishNotice(sessionId, action) {
         autoExpand: action.autoExpand === true,
         doneHoldMs: config.noticeDoneHoldMs,
         // 宿主的 auto-hide 钳制 3s..10min；running/waiting 是 sticky，用不到这个值
-        auto_hide_ms: action.status === 'done' && !action.sticky ? config.noticeDoneHoldMs : undefined,
+        auto_hide_ms: (action.status === 'done' || action.status === 'error') && !action.sticky ? config.noticeDoneHoldMs : undefined,
         httpPort,
         httpToken,
         at: Date.now(),
@@ -434,20 +434,22 @@ async function methodNoticeStatus() {
 
 /** 设置页的「发一张测试卡」：不走巡检，直接按指定状态发布（sessionId 固定 notice-demo）。 */
 async function methodNoticeDemo(params = {}) {
-  const status = params.status === 'done' ? 'done' : params.status === 'waiting' ? 'waiting' : 'running'
+  const status = params.status === 'done' ? 'done' : params.status === 'waiting' ? 'waiting' : params.status === 'error' ? 'error' : 'running'
   // 注意：动作对象里不要用 kind 字段——plugin-contract 测试会把 main.mjs 里的 kind 字面量当事件 kind 扫描
   publishNotice('notice-demo', {
     status,
-    sticky: status !== 'done',
-    autoHideMs: status === 'done' ? config.noticeDoneHoldMs : null,
+    sticky: status !== 'done' && status !== 'error',
+    autoHideMs: status === 'done' || status === 'error' ? config.noticeDoneHoldMs : null,
     autoExpand: status === 'waiting',
     title: 'DSH 状态卡预览',
     preview:
       status === 'done'
         ? '测试卡：这一轮已完成，停留一段时间后会自动收掉。'
-        : status === 'waiting'
-          ? '测试卡：DSH 在等你处理，卡片会自动展开官方界面。'
-          : '测试卡：DSH 正在处理任务，这一行会跟着最新输出刷新。',
+        : status === 'error'
+          ? '测试卡：这一轮执行失败，卡片会显示红色错误状态。'
+          : status === 'waiting'
+            ? '测试卡：DSH 在等你处理，卡片会自动展开官方界面。'
+            : '测试卡：DSH 正在处理任务，这一行会跟着最新输出刷新。',
   })
   return { ok: true, status }
 }

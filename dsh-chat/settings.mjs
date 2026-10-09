@@ -302,7 +302,7 @@ const DshChatSettings = {
     async function sendNoticeDemo(status_) {
       try {
         await call('noticeDemo', { status: status_ })
-        message?.success?.(`已发送「${status_ === 'done' ? '已完成' : status_ === 'waiting' ? '等你处理' : '进行中'}」测试卡到右下角`)
+        message?.success?.(`已发送「${status_ === 'done' ? '已完成' : status_ === 'error' ? '处理失败' : status_ === 'waiting' ? '等你处理' : '进行中'}」测试卡到右下角`)
       } catch (error) {
         message?.error?.(`发送测试卡失败：${error?.message || error}`)
       }
@@ -482,7 +482,7 @@ const DshChatSettings = {
       const enabled = Boolean(text.value.noticeEnabled)
       return card(
         '状态通知',
-        'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点正文原地展开成官方界面；等你审批时会自动展开。',
+        'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点正文原地展开成官方界面；等你审批时会自动展开；回合失败显示红色状态。',
         enabled
           ? [
               field('检查间隔(ms)', numberInput('noticePollMs'), `多久看一眼 DSH 有没有新动静；500–30000，当前 ${nums.value.noticePollMs}`),
@@ -493,6 +493,7 @@ const DshChatSettings = {
                   button('进行中', () => void sendNoticeDemo('running')),
                   button('已完成', () => void sendNoticeDemo('done')),
                   button('等你处理', () => void sendNoticeDemo('waiting')),
+                  button('处理失败', () => void sendNoticeDemo('error')),
                   button('刷新状态', () => void loadNoticeStatus(), { quaternary: true }),
                 ],
                 '发一张测试卡到右下角，看看折叠/展开的手感',

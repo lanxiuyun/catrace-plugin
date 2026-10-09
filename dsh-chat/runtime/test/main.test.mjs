@@ -675,6 +675,16 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
   assert.equal(demoPublish.event.payload.status, 'done')
   assert.equal(demoPublish.event.payload.auto_hide_ms, 3000)
 
+  const errorDemo = await sidecar.call('noticeDemo', { status: 'error' })
+  assert.equal(errorDemo.ok, true, JSON.stringify(errorDemo))
+  const errorPublish = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:notice-demo' && op.event?.payload?.status === 'error',
+  )
+  assert.equal(errorPublish.event.payload.statusLabel, '处理失败')
+  assert.equal(errorPublish.event.level, 'error')
+  assert.equal(errorPublish.event.sticky, false)
+  assert.equal(errorPublish.event.payload.auto_hide_ms, 3000)
+
   const noticeStatus = await sidecar.call('noticeStatus')
   assert.equal(noticeStatus.ok, true, JSON.stringify(noticeStatus))
   assert.equal(noticeStatus.result.loopRunning, true)

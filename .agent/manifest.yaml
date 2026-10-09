@@ -54,5 +54,5 @@ devlog:
 
 current:
   plan: .agent/features/dsh-chat/README.md
-  phase: dsh-chat 状态卡补上「等你回答 / 计划待审」两种人工闸门（工作区未提交）
-  next: 用户真机确认（重装/重打包插件后找 DSH 提一次问）；确认后再合入插件 main，并在主仓 bump tools/plugin-demo 指针
+  phase: dsh-chat 状态通知支持 error 红色状态（工作区未提交）
+  next: 用户真机确认四种通知状态后再提交插件变更
