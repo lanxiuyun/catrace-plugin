@@ -396,6 +396,11 @@ export class NoticeTracker {
     return this.#actionFor(state)
   }
 
+  /** 跟踪中的会话 id（离开 DSH 时要把该显示的卡请回来） */
+  sessionIds() {
+    return [...this.sessions.keys()]
+  }
+
   /** 供设置页/排查用：当前跟踪中的会话摘要 */
   summary(limit = 8) {
     const rows = []

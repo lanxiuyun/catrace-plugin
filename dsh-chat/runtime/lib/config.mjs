@@ -13,6 +13,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   // 状态通知（通知巡检）：DSH 干活时右下角出可折叠状态卡，正文点击原地展开官方界面
   noticeEnabled: true, // 右下角状态卡总开关
   noticePollMs: 2000, // 巡检轮询会话日志的间隔
+  /**
+   * 「你在 DSH 里时不弹小窗」：前台窗口是 DSH（桌面版进程名，或窗口标题含 `DeepSeek Harness`
+   * ——这也覆盖"浏览器正开着 DSH 网页"）→ 收掉现有卡且期间不弹；你切走 → 把该显示的卡请回来。
+   * 判据见 lib/dsh-window.mjs；信号来自宿主 `activity.get` 的 app/title（读不到就静默不生效）。
+   */
+  autoHideWhenDshActive: true,
   // 注意：原先的 noticeDoneHoldMs（完成卡停留时长）已退场——四个状态一律常驻，无 auto-hide 可调
   httpPort: 23457, // 卡片访问 sidecar 的本机 HTTP 端口；0 = 交给系统分配
   guiPort: 23458, // 「真 GUI」同源反代的端口；固定端口是为了让 iframe 的 origin 稳定（localStorage 状态可复用）
@@ -106,7 +112,7 @@ export function guiSignature(cfg) {
 /** 可空字符串字段：允许空串 */
 const OPTIONAL_STRINGS = ['dshHome', 'customCss']
 /** 布尔字段：只接受真正的布尔值 */
-const BOOLEANS = ['noticeEnabled', 'compactSpacing', ...SHOW_KEYS]
+const BOOLEANS = ['noticeEnabled', 'autoHideWhenDshActive', 'compactSpacing', ...SHOW_KEYS]
 
 /** 读取并 trim 字符串；非字符串返回 null */
 function readString(raw, key) {

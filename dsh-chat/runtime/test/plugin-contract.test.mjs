@@ -242,6 +242,33 @@ test('文本容器一律禁用横向滚动 + 允许断词', () => {
   // settings 的长清单（class 速查）也随页面滚动，所以不再强制要求纵向滚动容器。
 })
 
+test('在 DSH 里时不弹小窗：信号来自宿主 activity.get、离开必须能请回来', () => {
+  const main = read('runtime/main.mjs')
+  // 这条链少一环都会"静默失效"（不报错，就是不收 / 不弹），所以静态锁死：
+  assert.match(main, /request\('activity\.get'/, '前台窗口信息来自宿主的 activity.get（带 app/title）')
+  assert.match(main, /dsh-window\.mjs/, '判据来自 lib/dsh-window.mjs（纯字符串、跨平台）')
+  assert.match(main, /function request\(/, '需要一个带 requestId 的请求/应答实现')
+  assert.match(main, /request\('publish'/, 'publish 必须走 request()，否则拿不到宿主回的 result.eventId')
+  assert.match(main, /result\?\.eventId/, '要把宿主回话里的 result.eventId 记账')
+  assert.match(main, /op:\s*'resolve'/, '收卡必须用宿主的 resolve op（宿主只允许解析本插件自己的事件）')
+  assert.match(main, /startDshWatch\(\)/, 'applyConfig 里要按配置重建前台探测')
+  // 关键：离开 DSH 必须把卡请回来 —— 少了这一步就是第一版那套"卡片再也不弹"
+  assert.match(
+    main,
+    /function syncDshForeground[\s\S]{0,1600}?republishTrackedCards\(\)/,
+    '离开 DSH 要 republishTrackedCards() 把该显示的卡请回来',
+  )
+  // 反面：收卡时不许 markDismissed（"本轮静默"要等下一个 turn/start 才解除，
+  // 用户切走 DSH 也回不来 —— 正是早期"再也不弹"的成因）
+  assert.ok(
+    !/function hideCardsForSession[\s\S]{0,900}?markDismissed/.test(main),
+    'hideCardsForSession 不许 markDismissed：切走 DSH 时要能把卡请回来',
+  )
+  assert.match(main, /autoHideWhenDshActive/, 'main.mjs 应受 autoHideWhenDshActive 开关控制')
+  const settings = read('settings.mjs')
+  assert.match(settings, /autoHideWhenDshActive/, '设置页必须能关掉它（启发式功能要有退路）')
+})
+
 test('真 GUI 模式：iframe 不许 sandbox，且只走 sidecar 的同源反代', () => {
   const ui = read('ui.mjs')
   assert.match(ui, /guiUrl/, 'ui.mjs 应支持 payload.guiUrl 的 iframe 模式')

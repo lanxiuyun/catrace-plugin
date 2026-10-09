@@ -18,6 +18,7 @@ import process from 'node:process'
 import { createInterface } from 'node:readline'
 
 import { cropFlagsFor, DEFAULT_CONFIG, forceLabelsFor, guiSignature, normalizeConfig } from './lib/config.mjs'
+import { isDshForeground } from './lib/dsh-window.mjs'
 import { GUI_CLASS_GROUPS, listGuiClasses } from './lib/gui-classes.mjs'
 import { describeDiscoveryFailure, discoverHost, mintAuthCookie, readBrowserSessionSecret } from './lib/dsh-gui.mjs'
 import { NoticeTracker } from './lib/inspector.mjs'
@@ -50,6 +51,16 @@ const httpToken = randomBytes(16).toString('hex')
 const noticeLoop = { timer: null, tracker: null, polling: false, lastPollAt: 0 }
 /** 正开着小窗卡的会话：状态卡让位（暂停发布），小窗关掉后再按当前状态弹回 */
 const openWindows = new Set()
+/** 每条会话最近一次发布拿到的 eventId（自动收卡要按 eventId 去 resolve） */
+const noticeEventIds = new Map()
+/** 真 GUI 小窗卡（`dsh-chat.window`）的 eventId 与它显示的会话 */
+let windowCard = null
+/**
+ * 我们自己 resolve 掉的会话：宿主在 bus.resolve 后会回推一条 `resolved`，
+ * 那条不是"用户按了 ×"，不能把本轮静默掉（否则用户离开会话就再也收不到它的卡）。
+ */
+const selfResolved = new Map()
+const SELF_RESOLVE_TTL_MS = 10000
 
 function send(payload) {
   process.stdout.write(`${JSON.stringify({ v: 1, ...payload })}\n`)
@@ -57,6 +68,36 @@ function send(payload) {
 
 function log(level, message, data) {
   send({ op: 'log', level, message, data })
+}
+
+let requestSeq = 0
+/**
+ * sidecar → 宿主的**带 requestId 请求**（宿主用 `op: response` 回话）。
+ * 目前只用来发 publish 好把 `result.eventId` 收回来 —— 自动收卡必须按 eventId 才能 resolve。
+ * 超时/无应答返回 null（宿主可能是还没支持这条路的旧版本），绝不让调用方挂在 promise 上。
+ */
+const pendingRequests = new Map()
+
+function request(op, payload = {}, timeoutMs = 5000) {
+  const requestId = `r${++requestSeq}`
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingRequests.delete(requestId)
+      resolve(null)
+    }, timeoutMs)
+    pendingRequests.set(requestId, { resolve, timer })
+    send({ op, requestId, ...payload })
+  })
+}
+
+/** 宿主回话：认领就返回 true（没认领说明是别的 op，交回给主流程判断） */
+function settlePending(msg) {
+  const entry = pendingRequests.get(msg.requestId)
+  if (!entry) return false
+  pendingRequests.delete(msg.requestId)
+  clearTimeout(entry.timer)
+  entry.resolve(msg)
+  return true
 }
 
 function respond(requestId, ok, result, error) {
@@ -284,8 +325,7 @@ async function methodOpenGui(params = {}) {
   const { guiUrl, title, sessionId } = await methodGuiUrl(params)
   // 小窗卡开了：该会话的状态卡让位（暂停发布），小窗关闭后再按当前状态弹回
   openWindows.add(sessionId)
-  send({
-    op: 'publish',
+  void request('publish', {
     event: {
       eventType: 'dsh-chat.window',
       kind: 'dsh-chat',
@@ -306,8 +346,141 @@ async function methodOpenGui(params = {}) {
         at: Date.now(),
       },
     },
+  }).then((res) => {
+    // 记住 eventId：切到这条会话时要把这张小窗卡收掉
+    const eventId = res?.result?.eventId
+    if (typeof eventId === 'string' && eventId.length > 0) windowCard = { sessionId, eventId }
   })
   return { opened: true, guiUrl, sessionId, target: gui.target }
+}
+
+// ---------------------------------------------------------------- 「你在 DSH 里时不弹小窗」
+//
+// 用户要求（一路演进到第四版）：**不去监控 DSH 在看哪条会话**，只看**当前前台窗口是不是 DSH**。
+//  - 判据：进程名 `DSH Desktop`，或窗口标题含 `DeepSeek Harness`（见 lib/dsh-window.mjs；纯字符串、跨平台）；
+//  - 信号：问宿主 `activity.get`（宿主**现查**一次前台窗口，亚毫秒级纯读；宿主侧 PR 给它加了 app/title）；
+//  - 语义：前台是 DSH → 收掉现有卡 + 期间不弹；**你切走 → 把该显示的卡请回来**。
+//  - 读不到前台窗口（Wayland / 无权限 / 老宿主没这两个字段）→ 静默不生效，绝不影响其它行为。
+//
+// 为什么不是"按会话屏蔽"（第一版的做法）：那种条件是"你正看着这条会话"，它**不会自己解除**，
+// 于是表现成"卡片再也不弹"（用户实测踩过）。前台窗口这条条件你一切走就解除 —— 这是关键区别。
+
+const dshWatch = { timer: null, active: false, reason: 'none', app: '', title: '', probing: false }
+/** 前台窗口是交互态：500ms 问一次足够跟手；每次只是一次 stdio 往返（宿主那边是纯读） */
+const DSH_POLL_MS = 500
+
+/** 问一次宿主"现在前台是谁" → `{dsh, reason, app, title}`；读不到返回 null */
+async function probeDshForeground() {
+  const res = await request('activity.get', {}, 3000)
+  const result = res?.result
+  if (!result || typeof result !== 'object') return null
+  return isDshForeground({ app: result.app, title: result.title })
+}
+
+/** 前台窗口变化：进 DSH 收卡，离开 DSH 把卡请回来 */
+async function syncDshForeground() {
+  if (dshWatch.probing) return
+  dshWatch.probing = true
+  try {
+    const verdict = await probeDshForeground()
+    if (!verdict) return // 读不到：保持现状（老宿主 / 无权限 / Wayland 都走这条）
+    dshWatch.app = verdict.app
+    dshWatch.title = verdict.title
+    dshWatch.reason = verdict.reason
+    if (verdict.dsh === dshWatch.active) return
+    dshWatch.active = verdict.dsh
+    if (verdict.dsh) {
+      const hidden = hideAllCards('dsh-foreground')
+      log('info', '前台是 DSH：暂时不弹小窗', {
+        reason: verdict.reason,
+        app: verdict.app,
+        title: verdict.title,
+        hidden,
+      })
+    } else {
+      log('info', '离开 DSH：把该显示的卡请回来', { app: verdict.app, title: verdict.title })
+      republishTrackedCards()
+    }
+  } finally {
+    dshWatch.probing = false
+  }
+}
+
+function startDshWatch() {
+  stopDshWatch()
+  if (!config.noticeEnabled || !config.autoHideWhenDshActive) return
+  dshWatch.timer = setInterval(() => void syncDshForeground(), DSH_POLL_MS)
+  void syncDshForeground()
+}
+
+function stopDshWatch() {
+  if (dshWatch.timer) {
+    clearInterval(dshWatch.timer)
+    dshWatch.timer = null
+  }
+  dshWatch.active = false
+}
+
+/** 主动收掉一张卡（宿主只允许插件解析自己发布的事件）。记账 selfResolved 以区分宿主回推的 resolved */
+function resolveCard({ sessionId, eventId, reason }) {
+  if (!sessionId || typeof eventId !== 'string' || eventId.length === 0) return false
+  const now = Date.now()
+  for (const [id, at] of selfResolved) if (now - at > SELF_RESOLVE_TTL_MS) selfResolved.delete(id)
+  selfResolved.set(sessionId, now)
+  send({ op: 'resolve', eventId })
+  log('info', '自动收掉一张卡', { sessionId, reason })
+  return true
+}
+
+/**
+ * 收掉某会话挂着的卡：状态卡 + （若正显示同一会话的）真 GUI 小窗卡。
+ *
+ * 注意**不动** `markDismissed`：那是"本轮静默"（要等下一个 turn/start 才解除），
+ * 而这里只是"你看 DSH 期间先收着"——你切走时 `republishTrackedCards()` 要把它请回来。
+ * 静默掉就再也回不来，这正是早期那版"卡片再也不弹"的成因。
+ */
+function hideCardsForSession(sessionId, reason) {
+  const hidden = []
+  const noticeEventId = noticeEventIds.get(sessionId)
+  if (noticeEventId && resolveCard({ sessionId, eventId: noticeEventId, reason })) {
+    noticeEventIds.delete(sessionId)
+    hidden.push('notice')
+  }
+  if (windowCard && windowCard.sessionId === sessionId && resolveCard({ sessionId, eventId: windowCard.eventId, reason })) {
+    openWindows.delete(sessionId)
+    windowCard = null
+    hidden.push('window')
+  }
+  return hidden
+}
+
+/** 进 DSH 时把所有挂着的卡收掉（状态卡 + 小窗卡） */
+function hideAllCards(reason) {
+  const sessions = new Set(noticeEventIds.keys())
+  if (windowCard) sessions.add(windowCard.sessionId)
+  const hidden = []
+  for (const sessionId of sessions) {
+    const kinds = hideCardsForSession(sessionId, reason)
+    if (kinds.length > 0) hidden.push({ sessionId, kinds })
+  }
+  return hidden
+}
+
+/** 离开 DSH 时按"当前状态"把卡请回来（× 过的不会回来；小窗卡占位中的让位） */
+function republishTrackedCards() {
+  const tracker = noticeLoop.tracker
+  if (!tracker) return 0
+  let count = 0
+  for (const sessionId of tracker.sessionIds()) {
+    if (windowCard && windowCard.sessionId === sessionId) continue
+    const action = tracker.currentAction(sessionId)
+    if (action) {
+      publishNotice(sessionId, action)
+      count++
+    }
+  }
+  if (count > 0) log('info', '已把状态卡请回来', { count })
+  return count
 }
 
 // ---------------------------------------------------------------- 状态通知巡检
@@ -319,11 +492,14 @@ function noticeTracker() {
 
 /** 把巡检产出的动作转成 publish op（dedupeKey 按会话，宿主原地刷新同一张卡）。 */
 function publishNotice(sessionId, action) {
+  // 你在 DSH 里（桌面版窗口 / 浏览器里的 DSH 网页）：这段时间先不弹。
+  // 注意这与早期那版"按会话整轮禁发"不同：条件是**前台窗口**，你切走就解除，
+  // 而且解除时 republishTrackedCards() 会把该显示的卡请回来 —— 不会出现"再也不弹"。
+  if (config.autoHideWhenDshActive && dshWatch.active) return false
   // 巡检按「在等什么」给文案（等你审批 / 等你回答 / 计划待审）；没有就用状态默认值
   const statusLabel = action.label || NOTICE_STATUS_LABELS[action.status] || action.status
   const preview = action.preview || ''
-  send({
-    op: 'publish',
+  void request('publish', {
     event: {
       eventType: 'dsh-chat.notice',
       kind: 'dsh-chat',
@@ -349,6 +525,10 @@ function publishNotice(sessionId, action) {
         at: Date.now(),
       },
     },
+  }).then((res) => {
+    // 记住这张卡的 eventId：用户在 DSH 里点开这条会话时要按它去 resolve
+    const eventId = res?.result?.eventId
+    if (typeof eventId === 'string' && eventId.length > 0) noticeEventIds.set(sessionId, eventId)
   })
 }
 
@@ -424,6 +604,12 @@ async function methodNoticeStatus() {
     loopRunning: Boolean(noticeLoop.timer),
     pollMs: config.noticePollMs,
     lastPollAt: noticeLoop.lastPollAt || null,
+    // 「你在 DSH 里时不弹小窗」的可观测状态：排查"为什么不收 / 不弹"时看这几个
+    dshActive: dshWatch.active,
+    dshReason: dshWatch.reason,
+    dshWatchRunning: Boolean(dshWatch.timer),
+    foregroundApp: dshWatch.app || null,
+    foregroundTitle: dshWatch.title || null,
     sessions: tracker ? tracker.summary(8) : [],
   }
 }
@@ -662,6 +848,8 @@ function applyConfig(raw) {
   } else if (!previousNoticeEnabled || !noticeLoop.timer || Number(config.noticePollMs) !== previousNoticePoll) {
     startNoticeLoop()
   }
+  // 「你在 DSH 里时不弹小窗」的探测也跟配置走（总开关 / 它自己的开关一变就重建）
+  startDshWatch()
 }
 
 function handleResolved(msg) {
@@ -670,13 +858,19 @@ function handleResolved(msg) {
   if (payload.open === true) {
     // 小窗卡被关掉/被另一会话的小窗替换：让位结束，按当前状态把状态卡请回来
     const sessionId = String(payload.sessionId ?? payload.guiSessionId ?? '')
+    windowCard = null // 不论什么原因，这张小窗卡已经不在了：记账清掉
     if (sessionId && (kind === 'dismissed' || kind === 'superseded') && openWindows.delete(sessionId)) {
       const action = noticeTracker().currentAction(sessionId)
       if (action) publishNotice(sessionId, action)
     }
   } else if (payload.notice === true || msg.eventType === 'dsh-chat.notice') {
     const sessionId = String(payload.sessionId ?? '')
-    if (sessionId && kind === 'dismissed' && noticeLoop.tracker) {
+    // 我们自己 resolve 掉的卡（点开会话自动收）宿主也会回推一条 resolved：
+    // 那不是"用户按了 ×"，不能把本轮静默掉，否则用户离开会话就再也收不到它的卡。
+    const selfAt = selfResolved.get(sessionId)
+    if (selfAt !== undefined && Date.now() - selfAt <= SELF_RESOLVE_TTL_MS) {
+      selfResolved.delete(sessionId)
+    } else if (sessionId && kind === 'dismissed' && noticeLoop.tracker) {
       // 状态卡上的 ×：本轮静默（下一个 turn/start 解除）。
       // 但如果该会话刚打开了小窗（正文点击 → 让位），这次关闭不是嫌吵，不能记 ×。
       if (!openWindows.has(sessionId)) noticeLoop.tracker.markDismissed(sessionId)
@@ -708,6 +902,11 @@ function handleLine(line) {
     handleResolved(msg)
     return
   }
+  // 宿主对我们 request() 出去的那条请求的回话（publish 的 result.eventId 就是这么拿到的）
+  if (msg.op === 'response') {
+    if (!settlePending(msg)) log('debug', '收到已超时的请求回话', { requestId: msg.requestId ?? null })
+    return
+  }
   if (msg.requestId && msg.method) {
     const handler = METHODS[msg.method]
     if (!handler) {
@@ -732,6 +931,7 @@ async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
   stopNoticeLoop()
+  stopDshWatch()
   stopHttp()
   try {
     if (gui.proxy) await gui.proxy.close()

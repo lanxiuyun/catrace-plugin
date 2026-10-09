@@ -108,6 +108,9 @@
 协议：**stdin/stdout UTF-8 JSON Lines**，字段 `v: 1`。
 
 - Sidecar → 宿主（stdout）：`ready` · `publish` · `log` · `response` · `error` · 请求-响应能力调用（带 `requestId`，宿主回 `response`）：`storage.get` · `storage.set` · `activity.get` · `clipboard.write_text` · `shell.open_url`（仅 http/https） · `config.get` · `config.set`
+  - `activity.get` 回 `{ active, at, app, title }`：`active` = 用户是否活跃（非空闲/非全屏提醒中）；
+    `app`/`title` = **前台窗口的进程名与标题**（宿主现查一次，亚毫秒纯读；`dsh-chat` 用它判断"你在不在 DSH 里"）。
+    老宿主只回 `{active, at}` —— 插件侧**必须 fail-open**（读不到就按"读不到"处理，别当 false）。
 - 宿主 → Sidecar（stdin）：`config`（启动/配置变更）· `resolved`（Toast 用户操作，**携带完整事件 payload + actionId**）· `shutdown`（禁用/退出，**必须结束进程**）· 带 `requestId`+`method` 的 RPC
 - 每个 RPC 必须 `op: 'response'` 且 `requestId` 一致；stderr 会进宿主日志。能力 op 超时（建议 2.5s）按失败处理并 fail-open。
 - 参考 `github-notify/runtime/main.mjs`（config/state 落盘、shutdown、RPC）与 `sidecar-echo/runtime/main.mjs`（端到端闭环）。
