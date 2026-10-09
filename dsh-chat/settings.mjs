@@ -34,6 +34,7 @@ const DEFAULTS = {
   // 状态通知（与 runtime/lib/config.mjs 的 DEFAULT_CONFIG 逐键一致）
   noticeEnabled: true,
   noticePollMs: 2000,
+  autoHideWhenDshActive: true,
   httpPort: 23457,
   guiPort: 23458,
   compactSpacing: false,
@@ -482,7 +483,12 @@ const DshChatSettings = {
         'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点正文原地展开成官方界面；等你审批时会自动展开；回合失败显示红色状态。四种状态都常驻，卡片只在你点 × 或下一轮开始时收场。',
         enabled
           ? [
-              field('检查间隔(ms)', numberInput('noticePollMs'), `多久看一眼 DSH 有没有新动静；500–30000，当前 ${nums.value.noticePollMs}`),
+              field('检查间隔(ms)', numberInput('noticePollMs'), `多久看一眼 DSH 有没有新动静；500–30000，当前 ${nums.value.noticePollMs}（也决定它多久发现一次"你在 DSH 里点开了哪条会话"）`),
+              field(
+                '在 DSH 里时不弹小窗',
+                switchInput('autoHideWhenDshActive'),
+                '当前台窗口是 DSH（桌面版窗口，或浏览器里正开着的 DSH 网页）时：收掉小窗现有的卡，并且这段时间不再弹；你切走之后，该显示的卡会自己回来。读不到前台窗口就静默不生效。',
+              ),
               field(
                 '测试卡',
                 [

@@ -123,6 +123,7 @@ description: >
 JSONL v1：stdout 输出、stdin 读入，均为 UTF-8 JSON Lines，字段 `v:1`。
 
 - Sidecar→宿主：`ready` · `publish` · `log` · `response` · `error` · 请求-响应能力调用（带 `requestId`，宿主回 `response`）：`storage.get` · `storage.set` · `activity.get` · `clipboard.write_text` · `shell.open_url`（仅 http/https） · `config.get` · `config.set`
+  - `activity.get` 回 `{ active, at, app, title }`（`app`/`title` = 前台窗口进程名与标题，宿主现查）；老宿主没这两个字段，插件侧要 fail-open。
 - 宿主→Sidecar：`config` · `resolved`（**携带完整事件 payload + actionId**，sidecar 可直接处理卡片动作）· `shutdown`（**必须结束进程**）· RPC（`requestId`+`method`+`params`）
 - 每个 RPC 必回 `op:'response'` 且 `requestId` 一致；stderr 进宿主日志。
 - 宿主能力 op（activity/clipboard/shell/config）在宿主侧按「插件已安装且启用」鉴权；超时 2.5s 内无 `response` 应按失败处理并 fail-open。

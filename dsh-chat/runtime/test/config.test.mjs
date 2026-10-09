@@ -13,6 +13,7 @@ test('默认值符合契约', () => {
     dshHome: '',
     noticeEnabled: true,
     noticePollMs: 2000,
+    autoHideWhenDshActive: true,
     httpPort: 23457,
     guiPort: 23458,
     compactSpacing: false,

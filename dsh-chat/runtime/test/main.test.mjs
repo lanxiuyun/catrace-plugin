@@ -185,8 +185,13 @@ async function startFakeHost() {
   return { server, port: server.address().port, seen }
 }
 
-/** 最小 sidecar 协议客户端。env 用于注入 DSH_GUI_PROBE_* 测试缝。 */
-function startSidecar({ env = {} } = {}) {
+/**
+ * 最小 sidecar 协议客户端。env 用于注入 DSH_GUI_PROBE_* 测试缝。
+ * replyPublish=true 时像真宿主那样回应 publish 的 requestId（`result.eventId`）——收卡要靠它 resolve。
+ * activity.get 一律按 `foreground` 回应（真宿主会现查前台窗口，返回 {app,title}）：
+ * 测试用 `sidecar.setForeground({app,title})` 模拟"用户切到 DSH / 切走"。
+ */
+function startSidecar({ env = {}, replyPublish = false, foreground = null } = {}) {
   const child = spawn(process.execPath, [MAIN], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
@@ -194,6 +199,11 @@ function startSidecar({ env = {} } = {}) {
   })
   const ops = []
   const waiters = []
+  /** dedupeKey → 最近一次 publish 拿到的 eventId（假宿主分配） */
+  const publishedIds = new Map()
+  let nextEventId = 0
+  /** 假宿主的"当前前台窗口" */
+  const fg = { app: foreground?.app ?? null, title: foreground?.title ?? null }
   let buffer = ''
   let stderr = ''
   child.stdout.on('data', (chunk) => {
@@ -206,6 +216,22 @@ function startSidecar({ env = {} } = {}) {
       if (!line) continue
       const op = JSON.parse(line)
       ops.push(op)
+      if (replyPublish && op.op === 'publish' && op.requestId) {
+        const eventId = `evt-${++nextEventId}`
+        if (op.event?.dedupeKey) publishedIds.set(op.event.dedupeKey, eventId)
+        child.stdin.write(`${JSON.stringify({ v: 1, op: 'response', requestId: op.requestId, ok: true, result: { eventId } })}\n`)
+      }
+      if (op.op === 'activity.get' && op.requestId) {
+        child.stdin.write(
+          `${JSON.stringify({
+            v: 1,
+            op: 'response',
+            requestId: op.requestId,
+            ok: true,
+            result: { active: true, at: Date.now(), app: fg.app, title: fg.title },
+          })}\n`,
+        )
+      }
       for (const waiter of [...waiters]) waiter()
     }
   })
@@ -241,8 +267,14 @@ function startSidecar({ env = {} } = {}) {
   return {
     child,
     ops,
+    publishedIds,
     waitFor,
     call,
+    /** 模拟用户切换前台窗口（真宿主会在下一次 activity.get 里现查到它） */
+    setForeground: (next) => {
+      fg.app = next?.app ?? null
+      fg.title = next?.title ?? null
+    },
     send: (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`),
     get stderr() {
       return stderr
@@ -690,6 +722,102 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
   assert.equal(noticeStatus.ok, true, JSON.stringify(noticeStatus))
   assert.equal(noticeStatus.result.loopRunning, true)
   assert.ok(noticeStatus.result.sessions.some((s) => s.id === 'session-bbb'), '巡检状态要列出跟踪中的会话')
+})
+
+/** 假 DSH 客户端 storage 的字节形状已经不需要了（第 4 版改成看"前台窗口"，见 dsh-window.test.mjs） */
+
+test('在 DSH 里时不弹小窗：前台是 DSH 就收卡且不再弹，切走后把卡请回来', async (t) => {
+  const home = makeHome()
+  // 前台一开始不是 DSH（浏览器别的标签页）→ 卡片正常弹
+  const sidecar = startSidecar({
+    replyPublish: true,
+    foreground: { app: 'chrome', title: 'P6_哔哩哔哩_bilibili - Google Chrome' },
+  })
+  t.after(() => {
+    sidecar.child.kill()
+    rmSync(home, { recursive: true, force: true })
+  })
+  await sidecar.waitFor((op) => op.op === 'ready', 20000)
+  sidecar.send({
+    op: 'config',
+    config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: true, noticePollMs: 500 },
+  })
+  await sidecar.waitFor((op) => op.op === 'log' && op.message === '状态通知巡检已启动')
+
+  const countPublishes = () =>
+    sidecar.ops.filter((op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb').length
+  const logB = join(home, 'sessions', '--D-workspace-Beta--', 'session-bbb', 'session.v4.jsonl.zstd')
+
+  // bbb 在跑 → 出一张卡（前台不是 DSH，所以该弹）
+  const published = await sidecar.waitFor(
+    (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb',
+    10000,
+  )
+  const cardEventId = sidecar.publishedIds.get('dsh-chat.notice:session-bbb')
+  assert.ok(cardEventId, '假宿主必须回过 eventId（真宿主也是这么给的）')
+  const outside = await sidecar.call('noticeStatus')
+  assert.equal(outside.result.dshActive, false, '前台不是 DSH')
+
+  // 你切到 DSH 桌面版 → 收掉现有的卡
+  sidecar.setForeground({ app: 'DSH Desktop', title: 'DeepSeek Harness Desktop' })
+  const resolved = await sidecar.waitFor((op) => op.op === 'resolve', 10000)
+  assert.equal(resolved.eventId, cardEventId, 'resolve 的必须正是那张卡的 eventId')
+
+  // 在 DSH 里期间：状态继续变也不弹（包括新回合）
+  const before = countPublishes()
+  appendFrame(logB, [
+    { type: 'turn/end', seq: 90, time: Date.now(), data: { turn: 2, reason: { kind: 'completed' } } },
+    { type: 'turn/start', seq: 91, time: Date.now(), data: { turn: 3 } },
+  ])
+  await new Promise((resolve) => setTimeout(resolve, 1800))
+  assert.equal(countPublishes(), before, '你在 DSH 里时不该弹新卡')
+  const inside = await sidecar.call('noticeStatus')
+  assert.equal(inside.result.dshActive, true)
+  assert.equal(inside.result.dshReason, 'app', '日志/排查要能看出是进程名命中')
+  assert.equal(inside.result.foregroundApp, 'DSH Desktop')
+
+  // 切走（浏览器里看别的）→ 该显示的卡请回来
+  sidecar.setForeground({ app: 'chrome', title: 'P6_哔哩哔哩_bilibili - Google Chrome' })
+  const back = await sidecar.waitFor(
+    (op) =>
+      op.op === 'publish' &&
+      op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' &&
+      op.event?.payload?.at > published.event.payload.at,
+    10000,
+  )
+  assert.equal(back.event.payload.sessionId, 'session-bbb')
+  const left = await sidecar.call('noticeStatus')
+  assert.equal(left.result.dshActive, false, '切走后应恢复')
+})
+
+test('浏览器里开着 DSH 网页也算"在 DSH 里"（标题命中），并且响应不等巡检间隔', async (t) => {
+  const home = makeHome()
+  const sidecar = startSidecar({
+    replyPublish: true,
+    foreground: { app: 'chrome', title: 'P6_哔哩哔哩_bilibili - Google Chrome' },
+  })
+  t.after(() => {
+    sidecar.child.kill()
+    rmSync(home, { recursive: true, force: true })
+  })
+  await sidecar.waitFor((op) => op.op === 'ready', 20000)
+  // 巡检间隔故意放到 30 秒：前台探测若挂在巡检上，下面这条必然超时
+  sidecar.send({
+    op: 'config',
+    config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: true, noticePollMs: 30000 },
+  })
+  await sidecar.waitFor((op) => op.op === 'log' && op.message === '状态通知巡检已启动')
+  await sidecar.waitFor((op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb', 10000)
+
+  const t0 = Date.now()
+  // DSH 网页自己的 <title> 是 "DeepSeek Harness"，开会话后还会变成 "<会话标题> — DeepSeek Harness"
+  sidecar.setForeground({ app: 'chrome', title: '整理三点结论 — DeepSeek Harness - Google Chrome' })
+  await sidecar.waitFor((op) => op.op === 'resolve', 5000)
+  const elapsed = Date.now() - t0
+  assert.ok(elapsed < 1800, `切到 DSH 网页应跟手收卡（实测 ${elapsed}ms）`)
+  const status = await sidecar.call('noticeStatus')
+  assert.equal(status.result.dshActive, true)
+  assert.equal(status.result.dshReason, 'title', '这条是标题命中（浏览器场景）')
 })
 
 test('sidecar 协议：shutdown 会退出进程', async (t) => {

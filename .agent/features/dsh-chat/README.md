@@ -14,6 +14,9 @@
 - [状态卡在等你的三种来源-审批事件与未返回的人工闸门工具.md](状态卡在等你的三种来源-审批事件与未返回的人工闸门工具.md)
   — 为什么只认 `approval/asked` 会永远停在「进行中」，`ask_user_question` / `exit_plan_mode`
   怎么靠「有 call 没 result」认出来，以及 allowlist 的边界
+- [点开会话自动收卡-读DSH客户端localStorage与host的resolve.md](点开会话自动收卡-读DSH客户端localStorage与host的resolve.md)
+  — 「在 DSH 里点开会话 → 收掉它的小窗」：当前会话信号藏在哪（renderer 的 LevelDB）、
+  host 的 `resolve` 只认 eventId、为什么必须区分"自己收的"和"用户按 ×"
 
 ## 需求边界
 
@@ -403,6 +406,20 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
 症状、根因（三次分别漏了 `show*` / `customCss` / `compactSpacing`）、结构性修法与护栏、以及顺带修掉的
 CRLF 解析测试 bug：**见 [设置改了没反应或插件重启还原-compose漏键踩了三次.md](设置改了没反应或插件重启还原-compose漏键踩了三次.md)**。
 一句话：**先查保存对象里有没有这个键**，别先去怀疑 CSS 或反代。
+
+### 「在 DSH 里时不弹小窗」：看**前台窗口**，不看会话（同一天四版才收敛）
+
+用户要的是「我在 DSH 里的时候，小窗就别重复提醒」。四版演进：**v1 按会话整轮禁发**（→ 用户实测"卡片再也不弹"）
+→ v2 收掉现有卡 + 本轮静默（→ "有点慢"）→ v3 `fs.watch` 存储目录（我们这段 140ms，但总延迟仍 ~5 秒，
+因为 **Chromium 提交 localStorage 有节流**）→ **v4 改问"前台窗口是不是 DSH"**。
+
+v4 的信号是宿主 `activity.get` 现查一次前台窗口（`app`/`title`），判据是纯字符串
+（进程名 `DSH Desktop`，或标题含 `DeepSeek Harness`——后者顺带覆盖浏览器里的 DSH 网页）。
+必须记住的三点：**条件要会自己解除**（切走时必须 `republishTrackedCards()` 把卡请回来，
+否则就是 v1 换壳）、**收卡不许 `markDismissed`**（那是"本轮静默"，会让卡回不来）、
+以及收卡仍按 `eventId`（`{op:'resolve'}`；宿主 `bus.resolve()` 后回推的 `resolved` 要按"自己造成的"吞掉）。
+完整机制、5 秒的完整证据链、平台边界与护栏见
+[在DSH里时不弹小窗-看前台窗口而不是会话.md](在DSH里时不弹小窗-看前台窗口而不是会话.md)。
 
 ## 已知边界 / 以后要接的话
 

@@ -244,11 +244,11 @@ test('settings.mjs：点开关后保存对象必须带上这些键（防「设�
   const mountedErrors = mountedResults.filter((r) => r.status === 'rejected')
   assert.equal(mountedErrors.length, 0, `onMounted 抛错：${mountedErrors.map((r) => String(r.reason)).join('; ')}`)
 
-  // 外观卡的顶层 4 个 chip（顶栏子项在父项点亮后才渲染）+ 2 个开关（状态通知卡头 / 紧凑留白）
+  // 外观卡的顶层 4 个 chip（顶栏子项在父项点亮后才渲染）+ 3 个开关（状态通知卡头 / 在 DSH 里时不弹 / 紧凑留白）
   const tags = collectTags(render())
   const switches = collectSwitches(render())
   assert.equal(tags.length, 4, `顶层应有 4 个 chip（实际 ${tags.length}）`)
-  assert.equal(switches.length, 2, `应有 2 个 NSwitch（实际 ${switches.length}）`)
+  assert.equal(switches.length, 3, `应有 3 个 NSwitch（实际 ${switches.length}）`)
   for (const tag of tags) {
     assert.equal(typeof tag.props['onUpdate:checked'], 'function', 'NTag 必须绑定 onUpdate:checked（否则点了不落盘）')
   }
@@ -293,6 +293,7 @@ test('settings.mjs：点开关后保存对象必须带上这些键（防「设�
     'showHeaderLabels',
     'compactSpacing',
     'noticeEnabled',
+    'autoHideWhenDshActive',
   ]
   for (const key of expected) {
     assert.equal(last[key], false, `保存对象必须包含 ${key}=false（否则 sidecar 会回退默认值 → 设置没用）`)
