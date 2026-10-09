@@ -494,7 +494,6 @@ const DshChatSettings = {
                   button('已完成', () => void sendNoticeDemo('done')),
                   button('等你处理', () => void sendNoticeDemo('waiting')),
                   button('处理失败', () => void sendNoticeDemo('error')),
-                  button('刷新状态', () => void loadNoticeStatus(), { quaternary: true }),
                 ],
                 '发一张测试卡到右下角，看看折叠/展开的手感',
               ),
