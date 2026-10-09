@@ -37,6 +37,7 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-10-09-dsh-chat状态卡四态常驻与删掉完成后停留.md
   - .agent/devlog/2026-10-08-dsh-chat状态卡在等你的三种来源.md
   - .agent/devlog/2026-10-05-紧凑留白开关与compose漏键与orb自绘外壳回退.md
   - .agent/devlog/2026-10-03-dsh-chat去装饰与grid轨道归零.md
@@ -54,5 +55,5 @@ devlog:
 
 current:
   plan: .agent/features/dsh-chat/README.md
-  phase: dsh-chat 状态通知支持 error 红色状态（工作区未提交）
-  next: 用户真机确认四种通知状态后再提交插件变更
+  phase: dsh-chat 状态卡四态一律常驻 + 删掉失效的「完成后停留」（工作区未提交）
+  next: 用户在 Catrace 里刷新插件、按「测试卡」四条验证常驻手感；确认后再提交

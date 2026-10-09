@@ -551,7 +551,7 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
   await sidecar.waitFor((op) => op.op === 'ready', 20000)
   sidecar.send({
     op: 'config',
-    config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: true, noticePollMs: 500, noticeDoneHoldMs: 3000 },
+    config: { dshHome: home, httpPort: 0, guiPort: 0, noticeEnabled: true, noticePollMs: 500 },
   })
   await sidecar.waitFor((op) => op.op === 'log' && op.message === '状态通知巡检已启动')
 
@@ -586,7 +586,7 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
   assert.equal(waiting.event.payload.autoExpand, true, '等你审批要带 autoExpand（卡片原地展开）')
   assert.equal(waiting.event.level, 'warning')
 
-  // 卡片展开上报 /notice/view：sidecar 原地补发同键卡；此后完成卡转 sticky（用户正在看，不自动收）
+  // 卡片展开上报 /notice/view：sidecar 原地补发同键卡；完成卡一律常驻（全状态 sticky）
   const bridgePort = waiting.event.payload.httpPort
   const bridgeToken = waiting.event.payload.httpToken
   assert.ok(Number.isInteger(bridgePort) && bridgePort > 0, 'waiting 卡要带 HTTP 桥端口（展开用）')
@@ -614,10 +614,10 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
     (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:session-bbb' && op.event?.payload?.status === 'done',
   )
   assert.equal(doneWhileExpanded.length, 1, '展开期间完成照常刷新（同键原地更新）')
-  assert.equal(doneWhileExpanded[0].event.sticky, true, '展开中完成卡是 sticky（用户正在看）')
-  assert.equal(doneWhileExpanded[0].event.payload.auto_hide_ms, undefined, '展开中完成不自动收')
+  assert.equal(doneWhileExpanded[0].event.sticky, true, '完成卡是常驻的')
+  assert.equal(doneWhileExpanded[0].event.payload.auto_hide_ms, undefined, '常驻卡不带 auto_hide')
 
-  // 收起 → 按当前状态补发，恢复 auto_hide 计时
+  // 收起 → 按当前状态补发一次；卡片依旧常驻（不再恢复 auto-hide 计时）
   const collapseRes = await view(false)
   assert.equal(collapseRes.status, 200)
   const backDone = await sidecar.waitFor(
@@ -627,8 +627,8 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
       op.event?.payload?.status === 'done' &&
       op.event?.payload?.at > doneWhileExpanded[0].event.payload.at,
   )
-  assert.equal(backDone.event.sticky, false)
-  assert.equal(backDone.event.payload.auto_hide_ms, 3000, '收起后恢复自动收计时')
+  assert.equal(backDone.event.sticky, true, '收起不改常驻：完成卡不会因为收起就变成会自动消失')
+  assert.equal(backDone.event.payload.auto_hide_ms, undefined)
 
   // × 关卡 → 本轮静默，不再发布
   const countBeforeX = sidecar.ops.filter(
@@ -673,7 +673,8 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
     (op) => op.op === 'publish' && op.event?.dedupeKey === 'dsh-chat.notice:notice-demo',
   )
   assert.equal(demoPublish.event.payload.status, 'done')
-  assert.equal(demoPublish.event.payload.auto_hide_ms, 3000)
+  assert.equal(demoPublish.event.sticky, true, '测试卡也要常驻（否则按按钮测不出真实手感）')
+  assert.equal(demoPublish.event.payload.auto_hide_ms, undefined)
 
   const errorDemo = await sidecar.call('noticeDemo', { status: 'error' })
   assert.equal(errorDemo.ok, true, JSON.stringify(errorDemo))
@@ -682,8 +683,8 @@ test('状态通知巡检：回合流转出卡 / 审批自动展开成真 GUI 小
   )
   assert.equal(errorPublish.event.payload.statusLabel, '处理失败')
   assert.equal(errorPublish.event.level, 'error')
-  assert.equal(errorPublish.event.sticky, false)
-  assert.equal(errorPublish.event.payload.auto_hide_ms, 3000)
+  assert.equal(errorPublish.event.sticky, true, '报错测试卡必须常驻')
+  assert.equal(errorPublish.event.payload.auto_hide_ms, undefined)
 
   const noticeStatus = await sidecar.call('noticeStatus')
   assert.equal(noticeStatus.ok, true, JSON.stringify(noticeStatus))

@@ -13,7 +13,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   // 状态通知（通知巡检）：DSH 干活时右下角出可折叠状态卡，正文点击原地展开官方界面
   noticeEnabled: true, // 右下角状态卡总开关
   noticePollMs: 2000, // 巡检轮询会话日志的间隔
-  noticeDoneHoldMs: 30000, // 「已完成」卡的停留时长
+  // 注意：原先的 noticeDoneHoldMs（完成卡停留时长）已退场——四个状态一律常驻，无 auto-hide 可调
   httpPort: 23457, // 卡片访问 sidecar 的本机 HTTP 端口；0 = 交给系统分配
   guiPort: 23458, // 「真 GUI」同源反代的端口；固定端口是为了让 iframe 的 origin 稳定（localStorage 状态可复用）
   /**
@@ -143,9 +143,8 @@ export function normalizeConfig(raw) {
     config[key] = typeof source[key] === 'boolean' ? source[key] : DEFAULT_CONFIG[key]
   }
 
-  // 状态通知：轮询间隔 / 完成卡停留时长（宿主 auto_hide 钳制是 3s..10min，这里对齐下限）
+  // 状态通知：只剩轮询间隔可调（卡片一律常驻，没有停留时长这回事了）
   config.noticePollMs = clampNumber(source, 'noticePollMs', 500, 30000, DEFAULT_CONFIG.noticePollMs)
-  config.noticeDoneHoldMs = clampNumber(source, 'noticeDoneHoldMs', 3000, 600000, DEFAULT_CONFIG.noticeDoneHoldMs)
   // httpPort：0 合法（系统分配），越界/非法回退默认端口
   config.httpPort = clampNumber(source, 'httpPort', 0, 65535, DEFAULT_CONFIG.httpPort)
   config.guiPort = clampNumber(source, 'guiPort', 0, 65535, DEFAULT_CONFIG.guiPort)

@@ -34,7 +34,6 @@ const DEFAULTS = {
   // 状态通知（与 runtime/lib/config.mjs 的 DEFAULT_CONFIG 逐键一致）
   noticeEnabled: true,
   noticePollMs: 2000,
-  noticeDoneHoldMs: 30000,
   httpPort: 23457,
   guiPort: 23458,
   compactSpacing: false,
@@ -55,7 +54,6 @@ const DEFAULTS = {
 
 const LIMITS = {
   noticePollMs: { min: 500, max: 30000 },
-  noticeDoneHoldMs: { min: 3000, max: 600000 },
   httpPort: { min: 0, max: 65535 },
   guiPort: { min: 0, max: 65535 },
 }
@@ -150,13 +148,12 @@ const DshChatSettings = {
     /** 数值字段（字符串，保存时钳制，避免打字中途被改写） */
     const nums = ref({
       noticePollMs: String(DEFAULTS.noticePollMs),
-      noticeDoneHoldMs: String(DEFAULTS.noticeDoneHoldMs),
       httpPort: String(DEFAULTS.httpPort),
       guiPort: String(DEFAULTS.guiPort),
     })
 
     const TEXT_KEYS = ['dshHome', 'customCss']
-    const NUM_KEYS = ['noticePollMs', 'noticeDoneHoldMs', 'httpPort', 'guiPort']
+    const NUM_KEYS = ['noticePollMs', 'httpPort', 'guiPort']
 
     function clamp(text_, key) {
       const { min, max } = LIMITS[key]
@@ -482,11 +479,10 @@ const DshChatSettings = {
       const enabled = Boolean(text.value.noticeEnabled)
       return card(
         '状态通知',
-        'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点正文原地展开成官方界面；等你审批时会自动展开；回合失败显示红色状态。',
+        'DSH 开始干活时在右下角弹一张可折叠状态卡：折叠 = 标题 + 最新输出，点正文原地展开成官方界面；等你审批时会自动展开；回合失败显示红色状态。四种状态都常驻，卡片只在你点 × 或下一轮开始时收场。',
         enabled
           ? [
               field('检查间隔(ms)', numberInput('noticePollMs'), `多久看一眼 DSH 有没有新动静；500–30000，当前 ${nums.value.noticePollMs}`),
-              field('完成后停留(ms)', numberInput('noticeDoneHoldMs'), `「已完成」的卡在右下角停留多久；3000–600000，当前 ${nums.value.noticeDoneHoldMs}`),
               field(
                 '测试卡',
                 [

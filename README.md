@@ -15,7 +15,7 @@ Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事
 ### 🐳 DSH 对话小窗（dsh-chat）
 DSH（DeepSeek Harness）干活时，右下角弹一张**可折叠状态卡**；点正文，同一张卡**原地展开成 DSH 官方界面**——对话流、`/` 指令、`@` 文件、审批全是原生的，插件一行 UI 都不重写。
 
-- **状态卡**：sidecar 读 DSH 会话日志（`$DSH_HOME/sessions/**/session.v4.jsonl.zstd`），「进行中 / 等你审批 / 已完成」自动流转；等你审批时自动展开，完成自动收。
+- **状态卡**：sidecar 读 DSH 会话日志（`$DSH_HOME/sessions/**/session.v4.jsonl.zstd`），「进行中 / 等你审批 / 已完成 / 回合失败」自动流转；等你审批时自动展开；四种状态都常驻，只在你点 × 或下一轮开始时收场。
 - **官方界面**：sidecar 用本机凭据自签 cookie、起同源反向代理，把 iframe 指过去；「小窗外观」可裁剪官方顶栏 / 左栏 / 状态条等元素，也能追加自定义 CSS。
 - 需要本机 Node.js ≥ 22.15；展开官方界面还要求 DSH Desktop 正在运行、并在 DSH 里打开「允许在浏览器中打开」。默认关闭。
 

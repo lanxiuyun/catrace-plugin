@@ -313,7 +313,7 @@ async function methodOpenGui(params = {}) {
 // ---------------------------------------------------------------- 状态通知巡检
 
 function noticeTracker() {
-  if (!noticeLoop.tracker) noticeLoop.tracker = new NoticeTracker({ doneHoldMs: config.noticeDoneHoldMs })
+  if (!noticeLoop.tracker) noticeLoop.tracker = new NoticeTracker()
   return noticeLoop.tracker
 }
 
@@ -343,9 +343,7 @@ function publishNotice(sessionId, action) {
         toastStyle: 'standalone',
         cwd: action.cwd || '',
         autoExpand: action.autoExpand === true,
-        doneHoldMs: config.noticeDoneHoldMs,
-        // 宿主的 auto-hide 钳制 3s..10min；running/waiting 是 sticky，用不到这个值
-        auto_hide_ms: (action.status === 'done' || action.status === 'error') && !action.sticky ? config.noticeDoneHoldMs : undefined,
+        // 卡片一律 sticky 常驻；不再下发 auto_hide_ms（宿主对 sticky 卡根本不挂自动关闭计时）
         httpPort,
         httpToken,
         at: Date.now(),
@@ -363,7 +361,6 @@ async function pollNotices() {
     const home = dshHome()
     const entries = safe(() => scanSessionLogs(home), [])
     const tracker = noticeTracker()
-    tracker.doneHoldMs = config.noticeDoneHoldMs
     for (const entry of entries) {
       const state = tracker.stateOf(entry.id)
       if (state.initialized && state.mtimeMs === entry.mtimeMs && state.sizeBytes === entry.sizeBytes) continue
@@ -399,7 +396,7 @@ function startNoticeLoop() {
   }
   const interval = Math.min(30000, Math.max(500, Number(config.noticePollMs) || 2000))
   noticeLoop.timer = setInterval(() => void pollNotices(), interval)
-  log('info', '状态通知巡检已启动', { interval, doneHoldMs: config.noticeDoneHoldMs })
+  log('info', '状态通知巡检已启动', { interval })
   void pollNotices()
 }
 
@@ -426,7 +423,6 @@ async function methodNoticeStatus() {
     enabled: Boolean(config.noticeEnabled),
     loopRunning: Boolean(noticeLoop.timer),
     pollMs: config.noticePollMs,
-    doneHoldMs: config.noticeDoneHoldMs,
     lastPollAt: noticeLoop.lastPollAt || null,
     sessions: tracker ? tracker.summary(8) : [],
   }
@@ -438,8 +434,8 @@ async function methodNoticeDemo(params = {}) {
   // 注意：动作对象里不要用 kind 字段——plugin-contract 测试会把 main.mjs 里的 kind 字面量当事件 kind 扫描
   publishNotice('notice-demo', {
     status,
-    sticky: status !== 'done' && status !== 'error',
-    autoHideMs: status === 'done' || status === 'error' ? config.noticeDoneHoldMs : null,
+    // 测试卡与正式行为一致：一律常驻（否则按「处理失败」测不出真实手感）
+    sticky: true,
     autoExpand: status === 'waiting',
     title: 'DSH 状态卡预览',
     preview:
@@ -660,13 +656,11 @@ function applyConfig(raw) {
   } else {
     startHttp()
   }
-  // 状态通知巡检：首次配置/开关切换/轮询间隔变化都要重启；其余只同步停留时长
+  // 状态通知巡检：首次配置/开关切换/轮询间隔变化都要重启（卡片一律常驻，没有别的参数要同步了）
   if (!config.noticeEnabled) {
     stopNoticeLoop()
   } else if (!previousNoticeEnabled || !noticeLoop.timer || Number(config.noticePollMs) !== previousNoticePoll) {
     startNoticeLoop()
-  } else if (noticeLoop.tracker) {
-    noticeLoop.tracker.doneHoldMs = config.noticeDoneHoldMs
   }
 }
 
@@ -687,7 +681,7 @@ function handleResolved(msg) {
       // 但如果该会话刚打开了小窗（正文点击 → 让位），这次关闭不是嫌吵，不能记 ×。
       if (!openWindows.has(sessionId)) noticeLoop.tracker.markDismissed(sessionId)
     }
-    // expired（完成卡到时自动收）无需处理
+    // expired（原来"完成卡到时自动收"会发这条）：卡片一律常驻后宿主不会再发它，真收到也无事可做
   }
   log('info', '小窗卡片已被处理', { actionId: msg.actionId ?? null, kind })
 }

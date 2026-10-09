@@ -13,7 +13,6 @@ test('默认值符合契约', () => {
     dshHome: '',
     noticeEnabled: true,
     noticePollMs: 2000,
-    noticeDoneHoldMs: 30000,
     httpPort: 23457,
     guiPort: 23458,
     compactSpacing: false,
@@ -33,7 +32,7 @@ test('默认值符合契约', () => {
   assert.ok(Object.isFrozen(DEFAULT_CONFIG))
 })
 
-test('0.2.x/0.3.0 退场键按未知字段丢弃', () => {
+test('0.2.x/0.3.x 退场键按未知字段丢弃', () => {
   const result = normalizeConfig({
     ...DEFAULT_CONFIG,
     dshCommand: 'dsh',
@@ -52,6 +51,8 @@ test('0.2.x/0.3.0 退场键按未知字段丢弃', () => {
     // 0.3.0 砍掉的「小窗」卡键
     cardTitle: '我的标题',
     autoOpenWindow: true,
+    // 0.3.x 砍掉的「完成卡停留时长」：卡片改为一律常驻后没有 auto-hide 可调
+    noticeDoneHoldMs: 3000,
     // 0.2.x 的短命键（0.2.0 就没了）
     noticeExpandModeBogus: 1,
   })
@@ -172,16 +173,11 @@ test('字符串 trim，可空字段保留空串', () => {
   assert.equal(wrongType.customCss, '')
 })
 
-test('状态通知配置：轮询/停留钳制，总开关只认真布尔', () => {
+test('状态通知配置：轮询间隔钳制，总开关只认真布尔', () => {
   assert.equal(normalizeConfig({ noticePollMs: 1 }).noticePollMs, 500)
   assert.equal(normalizeConfig({ noticePollMs: 500 }).noticePollMs, 500)
   assert.equal(normalizeConfig({ noticePollMs: 1e9 }).noticePollMs, 30000)
   assert.equal(normalizeConfig({ noticePollMs: null }).noticePollMs, 2000)
-  // 下限对齐宿主 auto-hide 的 MIN_AUTO_HIDE_MS：小于 3s 的停留没有意义
-  assert.equal(normalizeConfig({ noticeDoneHoldMs: 1 }).noticeDoneHoldMs, 3000)
-  assert.equal(normalizeConfig({ noticeDoneHoldMs: 600000 }).noticeDoneHoldMs, 600000)
-  assert.equal(normalizeConfig({ noticeDoneHoldMs: 600001 }).noticeDoneHoldMs, 600000)
-  assert.equal(normalizeConfig({ noticeDoneHoldMs: 'abc' }).noticeDoneHoldMs, 30000)
   assert.equal(normalizeConfig({ noticeEnabled: false }).noticeEnabled, false)
   assert.equal(normalizeConfig({ noticeEnabled: 'off' }).noticeEnabled, true)
 })

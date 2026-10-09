@@ -3,11 +3,15 @@
  *
  * 喂入某个会话的**增量事件流**（append-only 日志，配合 mtime+size 跳过未变化的文件），
  * 产出「应该发布状态卡」的动作清单，由 main.mjs 转成 publish op：
- *  - running  进行中：sticky 常驻，随最新模型输出节流刷新
- *  - done     本轮完成：非 sticky，auto_hide_ms = 完成停留时长
- *  - error    回合失败：非 sticky，红色状态卡并按完成停留时长自动收起
- *  - waiting  等你处理：sticky，并让卡片自动展开成真 GUI 去处理；chip 文案按原因分
+ *  - running  进行中：常驻，随最新模型输出节流刷新
+ *  - done     本轮完成：常驻，不自动收
+ *  - error    回合失败：常驻的红色状态卡
+ *  - waiting  等你处理：常驻，并让卡片自动展开成真 GUI 去处理；chip 文案按原因分
  *              等你审批（approval/asked）/ 等你回答（ask_user_question）/ 计划待审（exit_plan_mode）
+ *
+ * 生命周期（2026-10-09 起）：**四个状态一律常驻（sticky）**——卡片不会再随时间自动消失，
+ * 只会在「用户点 ×」（本轮静默）或「新回合/状态变化原地替换」时收场。
+ * 因此原先的 `doneHoldMs` / `auto_hide_ms` 停留计时整套退场，设置页的「完成后停留」也一并删掉。
  *
  * 设计约定（2026-10-06 grill 定稿，2026-10-08 补人工闸门）：
  *  - 只有活跃会话出卡：新回合（turn/start）才诞生卡片，静默的会话永远不出卡
@@ -18,7 +22,7 @@
  *    以及未返回的人工闸门工具调用（见 HUMAN_GATE_TOOLS）
  *  - 等你的卡优先级最高：哪怕卡片被用户 × 掉，waiting 也会重新弹出
  *  - × 关掉的卡在本轮内静默（dismissed），下一个 turn/start 解除
- *  - 卡片展开期间（用户在看真 GUI）一律 sticky：完成也不自动消失，收起时再按状态计时
+ *  - 卡片一律常驻（见上）；展开状态只用来决定「要不要自动展开」——用户手动收起过就不再自动弹开
  */
 
 import { cleanUserText } from './session-log.mjs'
@@ -133,12 +137,11 @@ function emptySessionState() {
 /**
  * 会话状态巡检器。
  *
- * @param {{doneHoldMs?:number, now?:() => number, previewRepublishMs?:number}} [options]
+ * @param {{now?:() => number, previewRepublishMs?:number}} [options]
  */
 export class NoticeTracker {
-  constructor({ doneHoldMs = 30000, now = Date.now, previewRepublishMs = PREVIEW_REPUBLISH_MS } = {}) {
+  constructor({ now = Date.now, previewRepublishMs = PREVIEW_REPUBLISH_MS } = {}) {
     this.sessions = new Map()
-    this.doneHoldMs = doneHoldMs
     this.now = now
     this.previewRepublishMs = previewRepublishMs
   }
@@ -209,7 +212,6 @@ export class NoticeTracker {
     // × 过的卡保持静默（审批/等人的卡除外）——force 也越不过去
     if (state.dismissed && !isWaiting) return null
     const expanded = state.expanded
-    const sticky = state.phase === 'done' || state.phase === 'error' ? expanded : true
     state.lastPublishAt = now
     state.lastPublishPreview = state.preview
     // 记住这次发布的「等的理由」：理由变了要重发一次换 chip
@@ -219,9 +221,8 @@ export class NoticeTracker {
       // 等什么决定 chip 文案：等你审批 / 等你回答 / 计划待审
       label: wait ? wait.label : null,
       waitKind: wait ? wait.kind : null,
-      sticky,
-      // done 且未展开时交给宿主 auto-hide 计时（毫秒）；展开期间 sticky 持有
-      autoHideMs: (state.phase === 'done' || state.phase === 'error') && !expanded ? this.doneHoldMs : null,
+      // 四个状态一律常驻：不下发 auto_hide_ms，卡片只能被 × 或被新状态原地替换
+      sticky: true,
       autoExpand: isWaiting && !expanded,
       title: state.title,
       cwd: state.cwd,

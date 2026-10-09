@@ -36,7 +36,7 @@ function fixedClock() {
 
 test('新回合出「进行中」，预览节流刷新，turn/end 转「已完成」', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [
     ev('session', { id: 's1' }, 0),
     TITLE('修登录页', 1),
@@ -45,12 +45,11 @@ test('新回合出「进行中」，预览节流刷新，turn/end 转「已完�
     ASSISTANT('我先看看代码。', 4),
   ]
 
-  // 第一拍：新回合 → 进行中（sticky，无 auto_hide）。首见快进要求 fresh（日志仍在写）
+  // 第一拍：新回合 → 进行中（常驻）。首见快进要求 fresh（日志仍在写）
   let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
   assert.equal(actions.length, 1)
   assert.equal(actions[0].status, 'running')
   assert.equal(actions[0].sticky, true)
-  assert.equal(actions[0].autoHideMs, null)
   assert.equal(actions[0].title, '修登录页')
   assert.equal(actions[0].preview, '我先看看代码。')
 
@@ -67,19 +66,19 @@ test('新回合出「进行中」，预览节流刷新，turn/end 转「已完�
   assert.equal(actions[0].status, 'running')
   assert.equal(actions[0].preview, '找到了，是 token 过期。')
 
-  // turn/end → 已完成：非 sticky + 停留时长交给宿主
+  // turn/end → 已完成：一样常驻（不再交给宿主计时）
   clock.advance(1000)
   events.push(TURN_END(1, 6))
   actions = tracker.ingest('s1', events, { now: clock.now() })
   assert.equal(actions.length, 1)
   assert.equal(actions[0].status, 'done')
-  assert.equal(actions[0].sticky, false)
-  assert.equal(actions[0].autoHideMs, 30000)
+  assert.equal(actions[0].sticky, true)
+  assert.equal(actions[0].autoHideMs, undefined, '一律常驻后不应再有 auto-hide 字段')
 })
 
-test('turn/end reason=error → 红色错误状态卡并按完成停留时间自动收起', () => {
+test('turn/end reason=error → 常驻的红色错误状态卡（不再自动收起）', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1)]
   tracker.ingest('s-error', events, { now: clock.now(), fresh: true })
 
@@ -88,13 +87,37 @@ test('turn/end reason=error → 红色错误状态卡并按完成停留时间自
 
   assert.equal(action.status, 'error')
   assert.equal(action.label, null)
-  assert.equal(action.sticky, false)
-  assert.equal(action.autoHideMs, 30000)
+  assert.equal(action.sticky, true, '报错卡必须常驻（用户要求：只有点 × 或新回合才收）')
+  assert.equal(action.autoHideMs, undefined)
+})
+
+test('四个状态一律常驻：running/done/error/waiting 都给 sticky 且不带 auto-hide', () => {
+  const clock = fixedClock()
+  const tracker = new NoticeTracker({ now: clock.now })
+
+  /** 每种状态各跑一遍，返回该状态发布出来的动作 */
+  const actionFor = (sessionId, events) => {
+    const found = tracker.ingest(sessionId, events, { now: clock.now(), fresh: true })
+    return found.at(-1) ?? tracker.currentAction(sessionId)
+  }
+
+  const phases = {
+    running: actionFor('s-run', [TURN_START(1, 1)]),
+    done: actionFor('s-done', [TURN_START(1, 1), TURN_END(1, 2)]),
+    error: actionFor('s-err', [TURN_START(1, 1), ev('turn/end', { turn: 1, reason: { kind: 'error' } }, 2)]),
+    waiting: actionFor('s-wait', [TURN_START(1, 1), ASKED('apm-1', 2)]),
+  }
+
+  for (const [phase, action] of Object.entries(phases)) {
+    assert.equal(action.status, phase, `${phase} 状态没走对`)
+    assert.equal(action.sticky, true, `${phase} 必须常驻（sticky=true）`)
+    assert.equal(action.autoHideMs, undefined, `${phase} 不得再下发 auto-hide 时长`)
+  }
 })
 
 test('完成后继续追问 → 下一轮循环；× 静默到新回合解除', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1), ASSISTANT('第一轮结论。', 2), TURN_END(1, 3)]
   tracker.ingest('s1', events, { now: clock.now(), fresh: true })
 
@@ -115,7 +138,7 @@ test('完成后继续追问 → 下一轮循环；× 静默到新回合解除', 
 
 test('审批：asked → waiting（自动展开），decided → 回 running；turn/end 不越过 waiting', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1)]
 
   let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
@@ -158,28 +181,31 @@ test('× 之后审批照样弹出（审批优先级最高）', () => {
   assert.equal(again[0].autoExpand, true)
 })
 
-test('展开持有：done + expanded 是 sticky，收起后重新带停留时长', () => {
+test('展开与收起都要补发一次；展开与否不再影响常驻', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1)]
 
   tracker.ingest('s1', events, { now: clock.now(), fresh: true })
-  assert.ok(tracker.setExpanded('s1', true), '展开要触发一次补发（sticky 持有）')
+  const expandAction = tracker.setExpanded('s1', true)
+  assert.ok(expandAction, '展开要补发一次（卡片要把展开态切对）')
+  assert.equal(expandAction.sticky, true)
+  assert.equal(expandAction.autoExpand, false, '已经在展开，不该再让卡片自己展开一次')
 
-  // 用户正在看时回合结束：完成也不自动收
+  // 用户正在看时回合结束：完成卡照样常驻
   events.push(ASSISTANT('答案。', 2), TURN_END(1, 3))
   const doneActions = tracker.ingest('s1', events, { now: clock.now() })
   assert.equal(doneActions.length, 1)
   assert.equal(doneActions[0].status, 'done')
-  assert.equal(doneActions[0].sticky, true, '用户正在看：完成也不自动收')
-  assert.equal(doneActions[0].autoHideMs, null)
+  assert.equal(doneActions[0].sticky, true, '用户正在看：完成卡保持常驻')
+  assert.equal(doneActions[0].autoHideMs, undefined)
 
-  // 收起 → 重新发布，带停留时长
+  // 收起 → 同样补发一次，而且依旧常驻（不再"恢复计时"等着自动收）
   const collapse = tracker.setExpanded('s1', false)
   assert.ok(collapse)
   assert.equal(collapse.status, 'done')
-  assert.equal(collapse.sticky, false)
-  assert.equal(collapse.autoHideMs, 30000)
+  assert.equal(collapse.sticky, true, '收起不该把常驻卡变回会自动消失')
+  assert.equal(collapse.autoHideMs, undefined)
 
   // 未知会话 / 重复收起：不炸、不发布
   assert.equal(tracker.setExpanded('nope', true), null)
@@ -256,7 +282,7 @@ test('cwd：session 头事件的工作目录进卡片 payload（agent-notify 同
 
 test('currentAction：按现状出牌（小窗关闭后把状态卡请回来），×静默照样生效', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   // 未跟踪 / 未初始化：null
   assert.equal(tracker.currentAction('nope'), null)
 
@@ -267,12 +293,12 @@ test('currentAction：按现状出牌（小窗关闭后把状态卡请回来）�
   assert.equal(running.status, 'running')
   assert.equal(running.sticky, true)
 
-  // 跑到 done 后：currentAction 给 done + 停留时长
+  // 跑到 done 后：currentAction 给 done，同样常驻
   events.push(ASSISTANT('答案。', 2), TURN_END(1, 3))
   tracker.ingest('s1', events, { now: clock.now() })
   const done = tracker.currentAction('s1')
   assert.equal(done.status, 'done')
-  assert.equal(done.autoHideMs, 30000)
+  assert.equal(done.sticky, true)
 
   // × 过的会话：currentAction 不出牌（审批例外）
   tracker.markDismissed('s1')
@@ -293,7 +319,7 @@ test('summary：跟踪状态可导出（设置页展示用）', () => {
 
 test('人工闸门：ask_user_question 有 call 没 result → waiting（chip「等你回答」）', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1)]
 
   let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
@@ -322,7 +348,7 @@ test('人工闸门：ask_user_question 有 call 没 result → waiting（chip「
 
 test('人工闸门：exit_plan_mode 未返回 → 计划待审；回合已结束时答完转 done', () => {
   const clock = fixedClock()
-  const tracker = new NoticeTracker({ doneHoldMs: 30000, now: clock.now })
+  const tracker = new NoticeTracker({ now: clock.now })
   const events = [TURN_START(1, 1), TOOL_CALL('exit_plan_mode', 'call-p1', 2)]
 
   let actions = tracker.ingest('s1', events, { now: clock.now(), fresh: true })
