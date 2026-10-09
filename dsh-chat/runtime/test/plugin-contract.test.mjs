@@ -13,7 +13,13 @@ import test from 'node:test'
 const here = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(here, '..', '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
-const read = (name) => readFileSync(join(ROOT, name), 'utf8')
+/**
+ * 读插件源码做静态断言。统一把 CRLF 折成 LF：
+ * 本仓库 blob 存的是 LF，而 Windows 上 `core.autocrlf=true`（本仓库无 .gitattributes）
+ * 会在 checkout 时转成 CRLF —— 否则断言里写死的多行字面量（含 \n）在本机恒不相等。
+ * 实测：HEAD 的 ui.mjs 是 571/571 LF，工作区是 571/571 CRLF。
+ */
+const read = (name) => readFileSync(join(ROOT, name), 'utf8').replace(/\r\n/g, '\n')
 
 /** 宿主注入的白名单（见 src/plugins/pluginRuntime.ts） */
 const VUE_WHITELIST = ['h', 'ref', 'computed', 'watch', 'markRaw', 'onMounted', 'onBeforeUnmount']
