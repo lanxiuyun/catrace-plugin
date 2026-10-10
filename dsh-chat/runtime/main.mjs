@@ -362,10 +362,13 @@ async function pollNotices() {
     const entries = safe(() => scanSessionLogs(home), [])
     const tracker = noticeTracker()
     for (const entry of entries) {
-      const state = tracker.stateOf(entry.id)
-      if (state.initialized && state.mtimeMs === entry.mtimeMs && state.sizeBytes === entry.sizeBytes) continue
+      // delegationDepth > 0 的会话是子智能体自己的会话日志；不单独弹状态 Toast。
+      // 初始状态与后续轮询都在这里过滤，避免子智能体卡片短暂出现或变成残留状态。
       const logEntry = safe(() => readParsedSessionLog(entry.logPath), null)
       if (!logEntry) continue
+      if (logEntry.parsed.header?.isSubagent === true) continue
+      const state = tracker.stateOf(entry.id)
+      if (state.initialized && state.mtimeMs === entry.mtimeMs && state.sizeBytes === entry.sizeBytes) continue
       const actions = tracker.ingest(entry.id, logEntry.parsed.events, {
         now: startedAt,
         // 30s 内还在写的日志才算"确实在跑"（首见快进时防止给陈旧会话补卡）

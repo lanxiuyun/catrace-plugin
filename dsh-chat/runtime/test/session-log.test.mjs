@@ -42,6 +42,8 @@ test('session-a：头部 / 标题 / 事件数 / 无坏行', () => {
     cwd: 'D:\\workspace\\Catrace',
     createdAt: 1791003000000,
     agentPreset: 'standard',
+    delegationDepth: 0,
+    isSubagent: false,
   })
   assert.equal(parsed.title, '给 dsh-chat 加上会话镜像')
   assert.equal(parsed.badLines, 0)
@@ -134,6 +136,13 @@ test('session-b：limit 保留最新 N 条并置 hasMore', () => {
   assert.equal(full.items.length, 8) // 2 user + 2 assistant + 3 tool + 1 system
   assert.equal(full.messageCount, 8)
   assert.equal(full.hasMore, false)
+  assert.equal(full.isSubagent, false)
+  assert.equal(full.delegationDepth, 0)
+
+  const subagent = parseSessionLog(JSON.stringify({ type: 'session', id: 'child', delegationDepth: 1 }))
+  const childTranscript = toTranscript(subagent, { limit: 10, now: FIXED_NOW })
+  assert.equal(childTranscript.isSubagent, true)
+  assert.equal(childTranscript.delegationDepth, 1)
 
   const tail = toTranscript(parsed, { limit: 3, now: FIXED_NOW })
   assert.equal(tail.items.length, 3)

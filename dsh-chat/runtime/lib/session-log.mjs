@@ -170,6 +170,8 @@ export function parseSessionLog(text) {
         cwd: typeof event.cwd === 'string' ? event.cwd : null,
         createdAt: Number.isFinite(event.createdAt) ? event.createdAt : null,
         agentPreset: typeof event.agentPreset === 'string' ? event.agentPreset : null,
+        delegationDepth: Number.isFinite(event.delegationDepth) ? event.delegationDepth : 0,
+        isSubagent: event.isSubagent === true || (Number.isFinite(event.delegationDepth) && event.delegationDepth > 0),
       }
     }
     if (event.type === 'session/title') {
@@ -306,6 +308,8 @@ export function toTranscript(parsed, options = {}) {
   const visible = limit > 0 && items.length > limit ? items.slice(items.length - limit) : items
   return {
     id: asString(header?.id) || null,
+    isSubagent: header?.isSubagent === true,
+    delegationDepth: Number.isFinite(header?.delegationDepth) ? header.delegationDepth : 0,
     title: title.length > 0 ? title : null,
     cwd: asString(header?.cwd) || null,
     createdAt,

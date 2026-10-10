@@ -309,6 +309,9 @@ export function readSession({ dshHome, id, limit = 60, maxText = 4000 } = {}) {
   if (transcript.createdAt === null && Number.isFinite(cache?.createdAt)) {
     transcript.createdAt = cache.createdAt
   }
+  // 子智能体会话仍可被显式读取/打开，但不应被状态通知轮询当作独立主会话。
+  transcript.isSubagent = entry.parsed.header?.isSubagent === true
+  transcript.delegationDepth = entry.parsed.header?.delegationDepth ?? 0
   // 日志尾部有半个帧（DSH 正在写）：UI 用它提示「显示的是已落盘部分」
   transcript.tailTruncated = Boolean(entry.tailTruncated)
   return transcript
