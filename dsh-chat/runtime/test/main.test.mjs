@@ -487,6 +487,14 @@ test('本机 HTTP 桥：鉴权 / health / 会话 / window / 移除的路由 / �
   assert.ok(typeof token === 'string' && token.length >= 16)
   assert.equal(published.event.payload.httpPort, port)
 
+  // 外链桥必须留下点击日志并向宿主输出 shell.open_url，且拒绝危险协议。
+  const external = await fetch(`http://127.0.0.1:${port}/external-link?token=${token}&url=${encodeURIComponent('https://example.com/path')}`)
+  assert.equal(external.status, 200)
+  assert.ok(sidecar.ops.some((op) => op.op === 'log' && op.message.includes('小窗外链点击')))
+  assert.ok(sidecar.ops.some((op) => op.op === 'shell.open_url' && op.url === 'https://example.com/path'))
+  const unsafeExternal = await fetch(`http://127.0.0.1:${port}/external-link?token=${token}&url=${encodeURIComponent('javascript:alert(1)')}`)
+  assert.equal(unsafeExternal.status, 400)
+
   const health = await fetch(`http://127.0.0.1:${port}/health?token=${token}`)
   assert.equal(health.status, 200)
   const healthBody = await health.json()

@@ -188,6 +188,7 @@ test('反代：改写 Host/Cookie/删 Origin、注入会话、透传字节、401
     authority: `127.0.0.1:${host.port}`,
     cookie,
     sessionId: 'session-abc',
+    externalLinkUrl: 'http://127.0.0.1:23457/external-link?token=test-token',
   })
   t.after(async () => {
     await proxy.close()
@@ -199,8 +200,13 @@ test('反代：改写 Host/Cookie/删 Origin、注入会话、透传字节、401
   const html = await home.text()
   assert.equal(home.status, 200)
   assert.match(html, /localStorage\.setItem\("dsh\.sessions\.current"/, '应注入会话预选脚本')
+  assert.match(html, /fetch\(endpoint\+\x27&url=\x27\+encodeURIComponent\(u\.href\)/, '外链点击应经 sidecar HTTP 桥转交宿主，而非依赖 window.open')
+  assert.match(html, /external-link\?token=test-token/, '注入的外链桥地址应携带 sidecar token')
   assert.match(html, /"session-abc"/)
   assert.match(html, /<base href="\.\/">/, '原 HTML 的 base 必须原样保留')
+  assert.match(html, /closest\('a\[href\]'\)/, '应捕获小窗 GUI 的链接点击')
+  assert.match(html, /u\.origin!==location\.origin/, '只把跨源链接移交外部浏览器')
+  assert.match(html, /mode:'no-cors'/, '侧车桥调用不依赖跨源 CORS 预检')
 
   const homeSeen = host.seen.filter((s) => s.path === '/' || s.path === '/?x').at(-1)
   assert.equal(homeSeen.host, `127.0.0.1:${host.port}`, 'Host 必须改写成目标 authority')

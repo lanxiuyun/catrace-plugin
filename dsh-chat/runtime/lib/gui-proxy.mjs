@@ -265,8 +265,14 @@ function injectionStyle(cssText) {
   return `<style id="catrace-dsh-gui-crop">${escapeStyleText(cssText)}</style>`
 }
 
-function injectIntoHtml(html, { sessionId, storageKey, cssText }) {
-  const markup = `${injectionStyle(cssText)}${injectionScript({ sessionId, storageKey })}`
+function externalLinksScript(externalLinkUrl) {
+  if (!externalLinkUrl) return ''
+  // WebView 的 window.open 不是系统默认行为；把点击 URL 送给 sidecar，由宿主 shell.open_url 调系统浏览器。
+  return `<script>(function(){var endpoint=${JSON.stringify(externalLinkUrl)};document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;var u;try{u=new URL(a.href,location.href)}catch(_){return}if((u.protocol==='http:'||u.protocol==='https:')&&u.origin!==location.origin){e.preventDefault();e.stopImmediatePropagation();fetch(endpoint+'&url='+encodeURIComponent(u.href),{method:'GET',mode:'no-cors',keepalive:true}).catch(function(){})}},true)})()</script>`
+}
+
+function injectIntoHtml(html, { sessionId, storageKey, cssText, externalLinkUrl }) {
+  const markup = `${injectionStyle(cssText)}${injectionScript({ sessionId, storageKey })}${externalLinksScript(externalLinkUrl)}`
   if (!markup) return html
   if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${markup}</head>`)
   return `${markup}${html}`
@@ -288,6 +294,7 @@ export async function startGuiProxy({
   storageKey = 'dsh.sessions.current',
   cssText = '',
   log = () => {},
+  externalLinkUrl = '',
   refreshCookie = null,
   maxAuthRetries = AUTH_RETRIES,
 } = {}) {
@@ -386,6 +393,7 @@ export async function startGuiProxy({
           sessionId: requestSessionId,
           storageKey,
           cssText,
+          externalLinkUrl,
         })
         const body = Buffer.from(html, 'utf8')
         delete responseHeaders['content-length']

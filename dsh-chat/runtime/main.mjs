@@ -217,6 +217,7 @@ async function ensureGui() {
     port: Number(config.guiPort) || 0,
     cssText,
     log,
+    externalLinkUrl: `http://127.0.0.1:${httpPort}/external-link?token=${encodeURIComponent(httpToken)}`,
     // 反代换票时**重读凭据**（票过期、密钥被 DSH 重置都能自愈），寿命仍是写死的那 7 天
     refreshCookie: () => {
       const fresh = readSecret()
@@ -411,6 +412,17 @@ function stopNoticeLoop() {
 }
 
 /** 卡片展开/收起上报：展开期间 sticky 持有（完成也不自动收），收起时按状态重新计时。 */
+async function methodOpenExternalLink(params = {}) {
+  const raw = String(params.url || '')
+  let url
+  try { url = new URL(raw) } catch { throw new Error('外链 URL 无效') }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`不允许打开协议：${url.protocol}`)
+  log('info', '收到小窗外链点击，正在请求系统默认浏览器打开', { url: url.href })
+  // 协议桥只需派发宿主 RPC，HTTP 不等待 UI 结果。
+  send({ op: 'shell.open_url', requestId: `dsh-chat-external-${Date.now()}-${randomBytes(4).toString('hex')}`, url: url.href })
+  return { ok: true }
+}
+
 async function methodNoticeView(params = {}) {
   const sessionId = String(params.sessionId ?? '')
   if (!sessionId) throw new Error('需要 sessionId')
@@ -535,6 +547,7 @@ const HTTP_ROUTES_TABLE = {
   // 状态卡原地展开用：只准备反代并返回 iframe 地址，不发小窗卡
   '/gui': { method: 'POST', call: (params) => methodGuiUrl(params) },
   '/notice/view': { method: 'POST', call: (params) => methodNoticeView(params) },
+  '/external-link': { method: 'GET', call: (params) => methodOpenExternalLink(params) },
 }
 
 /** 端口约定：未配置/非法 → 默认 23457；显式 0 → 交给系统分配（测试用）。 */
@@ -564,6 +577,21 @@ function bindHttp(port, allowFallback) {
       return
     }
     const path = parsed.pathname
+    if (req.method === 'GET' && path === '/external-link') {
+      if (parsed.searchParams.get('token') !== httpToken) {
+        httpReply(res, 403, { ok: false, error: 'token 不匹配' })
+        return
+      }
+      try {
+        const result = await methodOpenExternalLink({ url: parsed.searchParams.get('url') })
+        httpReply(res, 200, result)
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+        log('warn', '小窗外链处理失败', { error: lastError })
+        httpReply(res, 400, { ok: false, error: lastError })
+      }
+      return
+    }
     if (req.headers['x-dsh-chat-token'] !== httpToken && parsed.searchParams.get('token') !== httpToken) {
       httpReply(res, 403, { ok: false, error: 'token 不匹配' })
       return
