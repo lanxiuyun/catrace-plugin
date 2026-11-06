@@ -6,6 +6,7 @@ import { installGemini, isGeminiInstalled, uninstallGemini } from './hooks/gemin
 import { installKimi, isKimiInstalled, kimiPresent, uninstallKimi } from './hooks/kimi.mjs'
 import { installZcode, isZcodeInstalled, uninstallZcode } from './hooks/zcode.mjs'
 import { home } from './hooks/shared.mjs'
+import { installPi, uninstallPi, piStatus } from './pi-config.mjs'
 
 export { installClaude, installCodex, installGemini, installKimi, installZcode }
 
@@ -16,7 +17,8 @@ const AGENT_CONFIG_DIRS = {
   zcode: () => path.join(home(), '.zcode', 'cli'),
 }
 
-export function installAgent(agent, scriptPath) {
+export function installAgent(agent, scriptPath, options = {}) {
+  if (agent === 'pi') return installPi(options)
   if (agent === 'claude') return installClaude(scriptPath)
   if (agent === 'codex') return installCodex(scriptPath)
   if (agent === 'gemini') return installGemini(scriptPath)
@@ -26,6 +28,7 @@ export function installAgent(agent, scriptPath) {
 }
 
 export function uninstallAgent(agent) {
+  if (agent === 'pi') return uninstallPi()
   if (agent === 'claude') return uninstallClaude()
   if (agent === 'codex') return uninstallCodex()
   if (agent === 'gemini') return uninstallGemini()
@@ -35,6 +38,7 @@ export function uninstallAgent(agent) {
 }
 
 export function isInstalled(agent) {
+  if (agent === 'pi') return piStatus().installed
   if (agent === 'claude') return isClaudeInstalled()
   if (agent === 'codex') return isCodexInstalled()
   if (agent === 'gemini') return isGeminiInstalled()
@@ -44,9 +48,10 @@ export function isInstalled(agent) {
 }
 
 export function isAgentPresent(agent) {
+  if (agent === 'pi') return piStatus().detected
   if (agent === 'kimi') return kimiPresent()
   const dir = AGENT_CONFIG_DIRS[agent]
   return dir ? fs.existsSync(dir()) : false
 }
 
-export const AGENTS = ['claude', 'zcode', 'codex', 'gemini', 'kimi']
+export const AGENTS = ['claude', 'zcode', 'codex', 'gemini', 'kimi', 'pi']

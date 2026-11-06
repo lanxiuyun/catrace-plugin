@@ -10,6 +10,9 @@ import { cacheKey, cardBody, cardTitle, createTitleCache, normalizeHookData } fr
 import { createPidChainCache } from './pid-chain.mjs'
 import { createPermissionStore, elicitationQuestions } from './permission.mjs'
 import { normalizeSoundConfig } from './sound.mjs'
+import { createPiReceiver } from './pi-webhook.mjs'
+import { loadPiToken, piStatus, installPi, PI_PORT } from './pi-config.mjs'
+import { ensurePiNpm } from './pi-package.mjs'
 
 // stdout 是 JSONL 协议通道：裸 console.* 会污染协议（宿主报 invalid stdout JSONL）。
 // 统一改道为结构化 log op——debug 级别默认被宿主日志门槛滤掉（CATRACE_LOG_LEVEL=debug 还原）。
@@ -68,6 +71,52 @@ let publishSeq = 0
 const publishRequests = new Map()
 const sessionEventIds = new Map()
 let server = null
+let piReceiver = null
+let piToken = ''
+let piReceiverReady = false
+let piLastEventAt = null
+let piInstallTask = { running: false }
+
+function clearSession(sessionId) {
+  stickyEntries.delete(sessionId)
+  dismissSessionCard(sessionId)
+}
+
+async function startPiReceiver() {
+  try {
+    piToken = loadPiToken(path.join(__dirname, 'cache', 'pi-webhook.token'))
+    piReceiver = createPiReceiver({
+      token: piToken,
+      log,
+      onEvent: async (type, entry) => {
+        piLastEventAt = new Date().toISOString()
+        if (['started', 'resumed', 'session_closed', 'cancelled'].includes(type)) clearSession(entry.sessionId)
+        // User-initiated cancellation is silent: only dismiss stale cards.
+        if (['resumed', 'session_closed', 'cancelled'].includes(type)) return
+        await handleState(entry.raw, entry)
+      },
+    })
+    await piReceiver.start()
+    piReceiverReady = true
+    log('Pi webhook listening', { port: PI_PORT })
+  } catch (error) {
+    piToken = ''
+    log('Pi webhook unavailable; existing agents remain enabled', { error: String(error), port: PI_PORT }, 'error')
+  }
+}
+
+function startPiInstall() {
+  if (!piReceiverReady) throw new Error('Pi receiver 未就绪，请检查端口占用并重启插件')
+  if (piInstallTask.running) return { running: true }
+  piInstallTask = { running: true }
+  ensurePiNpm().then(() => {
+    const result = installPi({ token: piToken })
+    piInstallTask = { running: false, result }
+  }).catch((error) => {
+    piInstallTask = { running: false, error: error.message }
+  })
+  return { running: true }
+}
 
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
@@ -207,9 +256,9 @@ function dismissSessionCard(sessionId) {
   sessionEventIds.delete(sessionId)
 }
 
-async function handleState(payload) {
+async function handleState(payload, normalized = null) {
   if (!config.enabled) return
-  const data = normalizeHookData(payload, payload.agentId, deriveSessionTitle)
+  const data = normalized || normalizeHookData(payload, payload.agentId, deriveSessionTitle)
   const { event, sessionId } = data
   // HTTP response 等待首次进程链捕获完成，保证短命 hook 父进程在快照期间仍存活。
   if (data.hookPpid && sessionId && sessionId !== 'unknown') {
@@ -235,7 +284,7 @@ async function handleState(payload) {
   }
   const mode = modeOf(event)
   if (mode === 'off') return
-  if (mode !== 'sticky') {
+  if (mode !== 'sticky' && data.agentId !== 'pi') {
     const key = `${sessionId}:${event}`
     const now = Date.now()
     const prev = dedup.get(key)
@@ -369,6 +418,8 @@ function startHttp() {
 }
 
 function stopHttp() {
+  piReceiverReady = false
+  piReceiver?.close()
   if (!server) return
   server.close()
   server = null
@@ -410,9 +461,16 @@ function handleRequest(message) {
         )
         break
       case 'install':
-        respond(requestId, true, installAgent(String(params.agent || ''), scriptPath))
+        respond(requestId, true, params.agent === 'pi' ? startPiInstall() : installAgent(String(params.agent || ''), scriptPath))
+        break
+      case 'piStatus':
+        respond(requestId, true, { ...piStatus(), receiverReady: piReceiverReady, lastEventAt: piLastEventAt })
+        break
+      case 'piInstallStatus':
+        respond(requestId, true, piInstallTask)
         break
       case 'uninstall':
+        if (params.agent === 'pi' && piInstallTask.running) throw new Error('Pi Hook 安装中，请稍后再卸载')
         respond(requestId, true, uninstallAgent(String(params.agent || '')))
         break
       case 'testCard':
@@ -443,6 +501,7 @@ function shutdown() {
 
 loadTitleCache()
 startHttp()
+startPiReceiver()
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message
@@ -468,7 +527,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     if (pending) {
       publishRequests.delete(message.requestId)
       const eventId = message.result && message.result.eventId
-      if (message.ok && eventId) sessionEventIds.set(pending.sessionId, eventId)
+      if (message.ok && eventId) {
+        if (stickyEntries.get(pending.sessionId) === pending.entry) sessionEventIds.set(pending.sessionId, eventId)
+        else send({ v: 1, op: 'resolve', eventId })
+      }
     }
     return
   }
