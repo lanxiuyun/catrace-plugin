@@ -1,6 +1,5 @@
-import http from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
-import { PI_EVENTS, PI_PORT } from './pi-config.mjs'
+import { PI_EVENTS } from './pi-config.mjs'
 import { cleanTitle, projectName } from './hook-data.mjs'
 import { piNavigation } from './pi-navigation.mjs'
 
@@ -47,43 +46,48 @@ function authorized(req, token) {
 }
 
 async function readEvent(req) {
-  return new Promise((resolve, reject) => {
-    let bytes = 0
-    let finished = false
-    const chunks = []
-    req.on('data', (chunk) => {
-      if (finished) return
-      bytes += chunk.length
-      if (bytes > BODY_LIMIT) {
+  let timer
+  try {
+    return await new Promise((resolve, reject) => {
+      let bytes = 0
+      let finished = false
+      const chunks = []
+      timer = setTimeout(() => {
         finished = true
         chunks.length = 0
-        reject(Object.assign(new Error('Payload too large'), { status: 413 }))
-      } else chunks.push(chunk)
+        reject(Object.assign(new Error('Request body timed out'), { status: 408 }))
+      }, 5000)
+      req.on('data', (chunk) => {
+        if (finished) return
+        bytes += chunk.length
+        if (bytes > BODY_LIMIT) {
+          finished = true
+          chunks.length = 0
+          reject(Object.assign(new Error('Payload too large'), { status: 413 }))
+        } else chunks.push(chunk)
+      })
+      req.on('end', () => {
+        if (finished) return
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch {
+          reject(Object.assign(new Error('Invalid JSON'), { status: 400 }))
+        }
+      })
+      req.on('aborted', () => reject(new Error('Request aborted')))
+      req.on('error', reject)
     })
-    req.on('end', () => {
-      if (finished) return
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch {
-        reject(Object.assign(new Error('Invalid JSON'), { status: 400 }))
-      }
-    })
-    req.on('aborted', () => reject(new Error('Request aborted')))
-    req.on('error', reject)
-  })
+  } finally { clearTimeout(timer) }
 }
 
-// Transport only: validation, authorization, retry deduplication and HTTP lifecycle.
-export function createPiReceiver({ token, port = PI_PORT, onEvent, log = () => {} }) {
+// Route handler only. The existing Agent HTTP server owns the listener and lifecycle.
+export function createPiHandler({ token, onEvent, log = () => {} }) {
   if (!/^[a-f0-9]{64}$/.test(token || '')) throw new Error('Invalid Pi receiver token')
   const seen = new Map()
   const inFlight = new Map()
-  const server = http.createServer(async (req, res) => {
-    req.setTimeout(5000, () => req.destroy())
+  let active = 0
+  const handle = async (req, res) => {
+    let counted = false
     try {
-      if (req.method === 'GET' && req.url === '/health') {
-        reply(res, 200, { ok: true, source: 'pi', schemaVersion: 1 })
-        return
-      }
-      if (req.method !== 'POST' || !['/pi', '/'].includes(req.url)) {
+      if (req.method !== 'POST' || req.url !== '/pi') {
         reply(res, 404, { error: 'Not found' })
         req.resume()
         return
@@ -99,6 +103,14 @@ export function createPiReceiver({ token, port = PI_PORT, onEvent, log = () => {
         req.resume()
         return
       }
+      // Limit only Pi requests; never impose a global connection cap on legacy approvals.
+      if (active >= 32) {
+        reply(res, 503, { error: 'Pi receiver busy' })
+        req.resume()
+        return
+      }
+      active++
+      counted = true
       const raw = await readEvent(req)
       let entry
       try { entry = normalizePiEvent(raw) } catch (error) {
@@ -123,25 +135,14 @@ export function createPiReceiver({ token, port = PI_PORT, onEvent, log = () => {
       reply(res, 200, { ok: true })
     } catch (error) {
       log('Pi webhook request failed', { error: error.status ? error.message : 'event handler failed' }, 'warn')
+      if ([408, 413].includes(error.status)) {
+        res.setHeader('Connection', 'close')
+        res.once('finish', () => req.destroy())
+      }
       reply(res, error.status || 500, { error: error.status ? error.message : 'Event handling failed' })
+    } finally {
+      if (counted) active--
     }
-  })
-  server.requestTimeout = 5000
-  server.headersTimeout = 5000
-  server.maxConnections = 32
-  return {
-    server,
-    start: () => new Promise((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(port, '127.0.0.1', () => {
-        server.off('error', reject)
-        resolve(server.address())
-      })
-    }),
-    close: () => new Promise((resolve) => {
-      server.close(resolve)
-      server.closeAllConnections()
-      seen.clear()
-    }),
   }
+  return { handle, clear: () => seen.clear() }
 }

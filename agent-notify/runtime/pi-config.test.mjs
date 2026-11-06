@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { HTTP_PORT } from './constants.mjs'
 import { installPi, uninstallPi, piStatus, piAgentDir, loadPiToken, PI_TARGET, PI_CONTROL_EVENTS, PI_EVENTS } from './pi-config.mjs'
 
 const token = 'a'.repeat(64)
@@ -27,6 +28,12 @@ test('Pi install is idempotent, preserves other config, defaults to private payl
   assert.deepEqual(config.webhooks[0], other)
   const target = config.webhooks[1]
   assert.equal(target.name, PI_TARGET)
+  assert.equal(target.url, `http://127.0.0.1:${HTTP_PORT}/pi`)
+  target.url = 'http://127.0.0.1:24527/pi'
+  write('webhook.json', config)
+  installPi({ dir, token })
+  assert.equal(read('webhook.json').webhooks[1].url, `http://127.0.0.1:${HTTP_PORT}/pi`)
+  assert.deepEqual(read('webhook.json').webhooks[0], other)
   assert.equal(target.headers.Authorization, `Bearer ${token}`)
   assert.equal(target.includeMessage, false)
   assert.equal(target.includeCwd, false)

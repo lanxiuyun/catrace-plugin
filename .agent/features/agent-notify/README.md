@@ -1,6 +1,6 @@
 # Agent 通知插件（agent-notify）
 
-接收 AI agent（Claude Code / Codex / ZCode / Gemini / Kimi）hook 推送的状态事件，经本地 HTTP(23456) 归一化后按事件策略弹 Catrace toast 卡；新增 Pi / pi-web 的独立鉴权 Webhook 接收端(24527)，仅做状态提醒；Claude/ZCode 的 **PermissionRequest** 走阻塞 `/permission`。普通工具是允许/拒绝；`AskUserQuestion` 必须收集答案后带 `updatedInput` 回包，对照 clawd 的两条路见子文档。
+接收 AI agent（Claude Code / Codex / ZCode / Gemini / Kimi）hook 推送的状态事件，经本地 HTTP(23456) 归一化后按事件策略弹 Catrace toast 卡；Pi / pi-web 复用同一个 HTTP(23456) 服务的 `/pi` 路由，独立鉴权且仅做状态提醒，不新增监听端口；Claude/ZCode 的 **PermissionRequest** 走阻塞 `/permission`。普通工具是允许/拒绝；`AskUserQuestion` 必须收集答案后带 `updatedInput` 回包，对照 clawd 的两条路见子文档。
 
 界面中的 Agent 名称统一显示为 **Pi**（设置列表、通知卡和安装提示），仍同时支持 Pi CLI 与 pi-web，不改变接入协议。
 

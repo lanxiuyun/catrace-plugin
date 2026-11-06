@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 import { focusExternalWindow } from './focus-windows.mjs'
 import { publishTestCard } from './preview-cards.mjs'
-import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS } from './constants.mjs'
+import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS, HTTP_PORT } from './constants.mjs'
 import { cacheKey, cardBody, cardTitle, createTitleCache, normalizeHookData } from './hook-data.mjs'
 import { createPidChainCache } from './pid-chain.mjs'
 import { createPermissionStore, elicitationQuestions } from './permission.mjs'
 import { normalizeSoundConfig } from './sound.mjs'
-import { createPiReceiver } from './pi-webhook.mjs'
-import { loadPiToken, piStatus, installPi, PI_PORT } from './pi-config.mjs'
+import { createPiHandler } from './pi-webhook.mjs'
+import { loadPiToken, piStatus, installPi } from './pi-config.mjs'
 import { ensurePiNpm } from './pi-package.mjs'
 
 // stdout 是 JSONL 协议通道：裸 console.* 会污染协议（宿主报 invalid stdout JSONL）。
@@ -46,7 +46,7 @@ for (const [method, level] of [
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = Number(process.env.CATRACE_AGENT_NOTIFY_PORT) || 23456
+const PORT = HTTP_PORT
 const TITLE_CACHE_PATH = path.join(__dirname, 'cache', 'session-titles.json')
 
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -71,7 +71,7 @@ let publishSeq = 0
 const publishRequests = new Map()
 const sessionEventIds = new Map()
 let server = null
-let piReceiver = null
+let piHandler = null
 let piToken = ''
 let piReceiverReady = false
 let piLastEventAt = null
@@ -82,10 +82,10 @@ function clearSession(sessionId) {
   dismissSessionCard(sessionId)
 }
 
-async function startPiReceiver() {
+function preparePiHandler() {
   try {
     piToken = loadPiToken(path.join(__dirname, 'cache', 'pi-webhook.token'))
-    piReceiver = createPiReceiver({
+    piHandler = createPiHandler({
       token: piToken,
       log,
       onEvent: async (type, entry) => {
@@ -96,12 +96,10 @@ async function startPiReceiver() {
         await handleState(entry.raw, entry)
       },
     })
-    await piReceiver.start()
-    piReceiverReady = true
-    log('Pi webhook listening', { port: PI_PORT })
+
   } catch (error) {
     piToken = ''
-    log('Pi webhook unavailable; existing agents remain enabled', { error: String(error), port: PI_PORT }, 'error')
+    log('Pi webhook unavailable; existing agents remain enabled', { error: String(error), port: PORT }, 'error')
   }
 }
 
@@ -356,6 +354,12 @@ function startHttp() {
     const requestUrl = new URL(req.url || '/', `http://127.0.0.1:${PORT}`)
     const url = requestUrl.pathname
     const agentId = requestUrl.searchParams.get('agent') || ''
+    // Dispatch before the legacy CORS/body handling; Pi remains an authenticated non-browser API.
+    if (url === '/pi') {
+      if (piHandler) await piHandler.handle(req, res)
+      else { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Pi receiver unavailable' })); req.resume() }
+      return
+    }
     if (req.method === 'OPTIONS') {
       cors(res, 204)
       return
@@ -390,7 +394,7 @@ function startHttp() {
       }
     }
     if (req.method === 'GET' && url === '/health') {
-      cors(res, 200, JSON.stringify({ ok: true, routes: ['/state', '/permission', '/focus', '/permission-decide'] }))
+      cors(res, 200, JSON.stringify({ ok: true, routes: ['/state', '/permission', '/focus', '/permission-decide', '/pi'] }))
       return
     }
     if (req.method !== 'POST' || (url !== '/state' && url !== '/permission')) {
@@ -409,9 +413,14 @@ function startHttp() {
     await handleState(payload)
     cors(res, 200)
   })
-  server.on('error', (err) => log('http bind failed', { error: String(err), hint: 'port 23456 is still held by an old sidecar; refresh the plugin to kill it' }, 'error'))
+  server.on('error', (err) => {
+    piReceiverReady = false
+    log('http bind failed', { error: String(err), port: PORT, hint: 'port is still held by an old sidecar; restart the plugin' }, 'error')
+  })
   server.listen(PORT, '127.0.0.1', () => {
-    log('listening', { port: PORT, routes: ['/state', '/permission', '/focus', '/permission-decide'] })
+    piReceiverReady = !!piHandler
+    if (piReceiverReady) log('Pi webhook route ready', { port: PORT, route: '/pi' })
+    log('listening', { port: PORT, routes: ['/state', '/permission', '/focus', '/permission-decide', '/pi'] })
     send({ v: 1, op: 'ready' })
     log('agent-notify ready', { pluginId, pid: process.pid })
   })
@@ -419,7 +428,7 @@ function startHttp() {
 
 function stopHttp() {
   piReceiverReady = false
-  piReceiver?.close()
+  piHandler?.clear()
   if (!server) return
   server.close()
   server = null
@@ -500,8 +509,8 @@ function shutdown() {
 }
 
 loadTitleCache()
+preparePiHandler()
 startHttp()
-startPiReceiver()
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message

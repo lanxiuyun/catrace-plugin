@@ -2,10 +2,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { HTTP_PORT } from './constants.mjs'
 
 export const PI_TARGET = 'catrace-agent-notify'
 export const PI_SOURCE = 'npm:pi-webhook'
-export const PI_PORT = Number(process.env.CATRACE_PI_WEBHOOK_PORT) || 24527
 export const PI_EVENTS = ['started', 'completed', 'error', 'waiting', 'resumed', 'cancelled', 'tool_error', 'session_started', 'session_closed']
 // Subscribe to every supported event; Catrace's shared event policy decides display.
 export const PI_DEFAULT_EVENTS = [...PI_EVENTS]
@@ -116,7 +116,7 @@ function snapshots(dir) {
   return { settings, webhook }
 }
 
-export function piStatus({ dir = piAgentDir(), port = PI_PORT } = {}) {
+export function piStatus({ dir = piAgentDir(), port = HTTP_PORT } = {}) {
   const base = { dir, url: `http://127.0.0.1:${port}/pi`, detected: fs.existsSync(dir) }
   try {
     const { settings, webhook } = snapshots(dir)
@@ -128,7 +128,7 @@ export function piStatus({ dir = piAgentDir(), port = PI_PORT } = {}) {
   }
 }
 
-export function installPi({ dir = piAgentDir(), port = PI_PORT, token, events = PI_DEFAULT_EVENTS, includeMessage = false, includeCwd = false } = {}) {
+export function installPi({ dir = piAgentDir(), port = HTTP_PORT, token, events = PI_DEFAULT_EVENTS, includeMessage = false, includeCwd = false } = {}) {
   if (!/^[a-f0-9]{64}$/.test(token || '')) throw new Error('Pi receiver 未就绪，无法安装')
   if (!Array.isArray(events) || !events.every((event) => PI_EVENTS.includes(event))) throw new Error('无效的 Pi 事件列表')
   const { settings, webhook } = snapshots(dir)
@@ -165,7 +165,7 @@ export function installPi({ dir = piAgentDir(), port = PI_PORT, token, events = 
   return { ...piStatus({ dir, port }), reloadRequired: true }
 }
 
-export function uninstallPi({ dir = piAgentDir(), port = PI_PORT } = {}) {
+export function uninstallPi({ dir = piAgentDir(), port = HTTP_PORT } = {}) {
   const { webhook } = snapshots(dir)
   const next = webhook.value.webhooks.filter((target) => target.name !== PI_TARGET)
   const removed = webhook.value.webhooks.length - next.length

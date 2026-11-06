@@ -6,7 +6,7 @@
 - 通用扩展独立发布于 `YHQY-Dev/pi-webhook`、npm `pi-webhook`；不要将 Catrace 专用协议写进通用项目。
 - `runtime/pi-config.mjs`：全局 Pi 设置合并、目标订阅、私密凭据、原子写入与备份。
 - `runtime/pi-package.mjs`：只检测 npm，不可用时明确报错；不下载 GitHub 备用包，不在 Catrace 中执行 npm install。
-- `runtime/pi-webhook.mjs`：独立 HTTP 生命周期、鉴权、64 KiB 请求限制、v1 校验、重试 ID 去重；不掺 UI、磁盘配置或 sticky 状态。
+- `runtime/pi-webhook.mjs`：纯 `/pi` 路由处理、鉴权、64 KiB 请求限制、v1 校验、重试 ID 去重；不创建服务器，不掺 UI、磁盘配置或 sticky 状态。HTTP 生命周期由 main.mjs 的现有服务统一管理，端口通过 constants.mjs 的 HTTP_PORT 共享。
 - `runtime/pi-navigation.mjs`：跳转字段与会话链接校验。
 - `runtime/main.mjs`：JSONL RPC、后台安装任务、现有 `handleState` 复用和卡片清理。npm 检测通过任务状态轮询，不能阻塞设置页单次 RPC。
 - `settings.mjs` / `ui.mjs` 仍为单文件 Blob，无兄弟模块 import。Pi 放入同一「Agent 联动」列表，仅有安装/卸载 Hook 按钮，与其他 Agent 共用「事件通知策略」；无独立 Pi 面板、订阅或隐私开关。后台异步安装仍需轮询，但不改变 UI 布局。
@@ -23,7 +23,9 @@
 
 ## 协议、隐私与卡片
 
-- 独立端口 24527，`POST /pi`（也接受 `/`），`GET /health`。只绑定 127.0.0.1。可设置 `CATRACE_PI_WEBHOOK_PORT`，改端口后重新安装同步 URL。
+- 复用现有 `127.0.0.1:23456` 服务，仅 `POST /pi` 接收 Pi 事件；`GET /health` 仍是原服务的健康检查，包含 `/pi` 路由。不提供 Pi 的 `/` 别名，不新增监听端口。`CATRACE_AGENT_NOTIFY_PORT` 是唯一共用端口配置，改端口后重新安装同步 URL，停用 `CATRACE_PI_WEBHOOK_PORT`。
+- `/pi` 在原有 OPTIONS/CORS 和通用 readBody 之前分派，拒绝浏览器 Origin，不添加 CORS 响应头；Pi 的 64 KiB、5 秒读体及 32 个并发处理限制仅作用于该路由，不改变 `/state`、`/permission`、`/focus` 的处理或权限审批长等待。监听成功后才标记 Pi receiverReady，绑定失败不可安装。
+- 此前试用版本的 24527 URL 需重新安装 Hook 或手动只更新专用目标 URL，并在每个 Pi 会话 `/webhook reload`；不保留第二端口兼容监听。通用 pi-webhook 包的默认配置不在本次修改范围。
 - 随机 Bearer token 保存在插件 `runtime/cache/pi-webhook.token`，安装写入目标 Authorization。常量时间比较、不开放 CORS，拒绝 Origin 请求；token 不进入日志、状态 RPC 或卡片 raw。缓存丢失后必须重新安装同步凭据。
 - 默认关闭 includeMessage/includeCwd；安装 UI 不提供此开关，仅可由用户手动编辑 Pi 配置。`sessionId = pi:<Pi session id>`，徽章为 Pi，标题为 `Pi · <会话名称>`，未命名显示 `Pi · 未命名会话`；不再用 ID 前缀当名字。会话名称由发送端当前读取，自动生成的标题可能晚于完成通知。
 - 发送端新版本默认携带会话名称和 navigation 元数据：匹配 pi-web 官方运行记录 nextPid → `web` URL；未匹配按用户要求视为 `terminal` 尝试，提供 Pi PID。接收端 web 路径从不捕获进程链，terminal 路径复用现有 ensurePidChain，不能保证终端分屏/标签页级别定位；旧发送端无 metadata 时仍只能通知。

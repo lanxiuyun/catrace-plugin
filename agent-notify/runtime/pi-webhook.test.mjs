@@ -1,16 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { createPiReceiver, normalizePiEvent } from './pi-webhook.mjs'
+import http from 'node:http'
+import { createPiHandler, normalizePiEvent } from './pi-webhook.mjs'
 
 const token = 'b'.repeat(64)
 export function event(type = 'completed', session = 'shared-process-session-a') {
   return { schemaVersion: 1, id: randomUUID(), type, timestamp: new Date().toISOString(), source: 'pi', session: { id: session, name: '会话 A' }, data: {} }
 }
 async function fixture(t, onEvent) {
-  const receiver = createPiReceiver({ token, port: 0, onEvent })
-  const address = await receiver.start()
-  t.after(() => receiver.close())
+  const handler = createPiHandler({ token, onEvent })
+  const server = http.createServer(handler.handle)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  t.after(() => new Promise(resolve => { handler.clear(); server.close(resolve); server.closeAllConnections() }))
   const url = `http://127.0.0.1:${address.port}`
   const post = (payload, headers = {}, route = '/pi') => fetch(`${url}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...headers }, body: typeof payload === 'string' ? payload : JSON.stringify(payload) })
   return { url, post }
@@ -41,7 +44,12 @@ test('Pi schema maps final errors/cancellation/waiting without remote approval; 
 test('Pi receiver enforces auth, JSON, routes, schema and rejects browser origin', async (t) => {
   let calls = 0
   const { post, url } = await fixture(t, () => { calls++ })
-  assert.equal((await fetch(`${url}/health`)).status, 200)
+  assert.equal((await fetch(`${url}/health`)).status, 404)
+  assert.equal((await post(event(), {}, '/')).status, 404)
+  assert.equal((await post(event(), {}, '/pi?x=1')).status, 404)
+  const preflight = await fetch(`${url}/pi`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } })
+  assert.equal(preflight.status, 404)
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), null)
   assert.equal((await post(event(), { Authorization: '' })).status, 401)
   assert.equal((await post(event(), { Origin: 'https://evil.example' })).status, 401)
   assert.equal((await post(event(), { 'Content-Type': 'text/plain' })).status, 415)
@@ -72,6 +80,42 @@ test('Pi receiver deduplicates concurrent retries, not separate sessions or new 
   await post({ ...payload, session: { id: 'other-session' } })
   await post(event())
   assert.equal(calls, 3)
+})
+
+test('Pi concurrency is capped per route and capacity recovers after delivery', async (t) => {
+  let release
+  const barrier = new Promise(resolve => { release = resolve })
+  let entered = 0
+  const { post } = await fixture(t, async () => { entered++; await barrier })
+  const pending = Array.from({ length: 32 }, () => post(event()))
+  try {
+    for (let i = 0; entered < 32 && i < 200; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(entered, 32)
+    assert.equal((await post(event())).status, 503)
+  } finally { release() }
+  assert.ok((await Promise.all(pending)).every(res => res.status === 200))
+  assert.equal((await post(event())).status, 200)
+})
+
+test('Pi read timeout is route-local and does not shorten shared legacy requests', { timeout: 15000 }, async (t) => {
+  const handler = createPiHandler({ token, onEvent: () => assert.fail('incomplete body processed') })
+  const server = http.createServer((req, res) => {
+    if (req.url === '/pi') return handler.handle(req, res)
+    setTimeout(() => res.end('legacy finished'), 5300)
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections() }))
+  const port = server.address().port
+  const legacy = fetch(`http://127.0.0.1:${port}/permission`).then(res => res.text())
+  const status = await new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path: '/pi', method: 'POST', headers: {
+      'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'Content-Length': 100,
+    } }, res => { res.resume(); resolve(res.statusCode) })
+    req.on('error', reject)
+    req.write('{') // Never finish the Pi body; the legacy request must still complete.
+  })
+  assert.equal(status, 408)
+  assert.equal(await legacy, 'legacy finished')
 })
 
 test('Pi receiver retries handler failures instead of remembering failed delivery', async (t) => {
