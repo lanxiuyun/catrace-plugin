@@ -2,7 +2,9 @@
 
 Toast 卡片跑在 `reminder-toast` 窗。宿主 `plugin_sidecar_request` **只允许 `window.label() === "main"`**，设置页可以 `plugin.sidecar.request`，卡片里调用会直接失败。
 
-卡片要调 sidecar，走本机 HTTP：
+网页链接不需要 sidecar：直接 `await plugin.shell.openExternal(url)` 即可，宿主 `plugin_api_shell_open_external` 使用 `require_plugin_api`，允许 `main` / `reminder-toast` 两窗。不要为打开 URL 从卡片调用 sidecar.request；这会报 `sidecar request is only available in the main plugin settings window`。单元测试不能把 Toast 的 sidecar.request 模拟成无条件成功。
+
+卡片确实需要调 sidecar（窗口聚焦/权限审批）时，走本机 HTTP：
 
 ```text
 GET  http://127.0.0.1:23456/focus?pids=
