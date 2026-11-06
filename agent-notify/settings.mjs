@@ -1,10 +1,10 @@
 const vue = globalThis.__CATRACE_VUE__ || {}
 const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted } = vue
-const { NButton, NInput, NInputNumber, NRadioButton, NRadioGroup, NSlider, NSwitch, NTag, useMessage } = naive
+const { h, ref, computed, onMounted, onBeforeUnmount } = vue
+const { NButton, NInput, NInputNumber, NRadioButton, NRadioGroup, NSlider, NTag, useMessage } = naive
 
 if (typeof h !== 'function') throw new Error('Vue runtime missing')
-if (!NButton || !NInput || !NInputNumber || !NRadioGroup || !NSlider || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
+if (!NButton || !NInput || !NInputNumber || !NRadioGroup || !NSlider || !NTag || !useMessage) throw new Error('naive runtime missing')
 if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
@@ -46,7 +46,7 @@ const EVENTS = [
   { id: 'Notification', label: '等待交互' },
   { id: 'PermissionRequest', label: '权限请求' },
 ]
-const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
+const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi', pi: 'Pi' }
 
 function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return
@@ -75,6 +75,27 @@ export default {
     const detectedAgents = computed(() => agents.value.filter((a) => a.detected !== false))
     const undetectedAgents = computed(() => agents.value.filter((a) => a.detected === false))
     const busy = ref('')
+    let disposed = false
+
+    async function piRequest(method, params = {}) {
+      const reply = await plugin.sidecar.request(method, params)
+      if (reply?.ok === false) throw new Error(reply.error || 'Pi 操作失败')
+      return reply?.result ?? reply
+    }
+
+    async function installPiHook() {
+      await piRequest('install', { agent: 'pi' })
+      const deadline = Date.now() + 120000
+      let task
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        if (disposed) return false
+        task = await piRequest('piInstallStatus')
+      } while (task.running && Date.now() < deadline)
+      if (task.running) throw new Error('安装仍在后台进行，请稍后重新打开设置')
+      if (task.error) throw new Error(task.error)
+      return true
+    }
     const modes = ref({
       SessionStart: 'auto',
       UserPromptSubmit: 'auto',
@@ -191,19 +212,23 @@ export default {
       busy.value = agent.id
       const installing = !agent.installed
       try {
-        if (installing) await plugin.sidecar.request('install', { agent: agent.id })
-        else await plugin.sidecar.request('uninstall', { agent: agent.id })
+        if (installing && agent.id === 'pi') {
+          if (!await installPiHook()) return
+        } else await piRequest(installing ? 'install' : 'uninstall', { agent: agent.id })
+        if (disposed) return
         await load()
         const now = agents.value.find((x) => x.id === agent.id)
         if (installing && !now?.installed) {
           message.error('没有写入成功（该 Agent 的配置目录可能不存在）')
         } else {
-          message.success(installing ? 'Hook 已安装' : 'Hook 已卸载')
+          message.success(agent.id === 'pi'
+            ? (installing ? 'Hook 配置已写入，请重启 Pi 生效' : 'Hook 已卸载，请在 Pi 中执行 /webhook reload')
+            : (installing ? 'Hook 已安装' : 'Hook 已卸载'))
         }
       } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
+        if (!disposed) message.error(e instanceof Error ? e.message : String(e))
       } finally {
-        busy.value = ''
+        if (!disposed) busy.value = ''
       }
     }
 
@@ -272,6 +297,7 @@ export default {
     }
 
     onMounted(load)
+    onBeforeUnmount(() => { disposed = true; if (soundVolumeTimer) clearTimeout(soundVolumeTimer) })
 
     return () =>
       h('div', { class: 'an-set' }, [
@@ -288,7 +314,7 @@ export default {
                     h('div', { class: 'agent-label' }, [
                       h('span', { class: 'event-name' }, NAMES[a.id] || a.id),
                       h(NTag, { size: 'small', type: a.installed ? 'success' : 'default' }, {
-                        default: () => (a.installed ? '已安装' : '未安装'),
+                        default: () => (a.installed ? (a.id === 'pi' ? '已配置' : '已安装') : '未安装'),
                       }),
                     ]),
                     h(
@@ -307,7 +333,7 @@ export default {
                 )
               : [
                   h('p', { class: 'section-desc', style: 'margin: 0' },
-                    '未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。'),
+                    '未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini、~/.kimi 或 ~/.pi/agent 其中一个配置目录。'),
                 ]),
             ...undetectedAgents.value.length
               ? [

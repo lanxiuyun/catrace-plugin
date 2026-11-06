@@ -1,3 +1,5 @@
+export const HTTP_PORT = Number(process.env.CATRACE_AGENT_NOTIFY_PORT) || 23456
+
 export const KNOWN = [
   'SessionStart',
   'UserPromptSubmit',

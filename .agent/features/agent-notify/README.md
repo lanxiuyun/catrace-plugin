@@ -1,6 +1,8 @@
 # Agent 通知插件（agent-notify）
 
-接收 AI agent（Claude Code / Codex / ZCode / Gemini / Kimi）hook 推送的状态事件，经本地 HTTP(23456) 归一化后按事件策略弹 Catrace toast 卡；Claude/ZCode 的 **PermissionRequest** 走阻塞 `/permission`。普通工具是允许/拒绝；`AskUserQuestion` 必须收集答案后带 `updatedInput` 回包，对照 clawd 的两条路见子文档。
+接收 AI agent（Claude Code / Codex / ZCode / Gemini / Kimi）hook 推送的状态事件，经本地 HTTP(23456) 归一化后按事件策略弹 Catrace toast 卡；Pi / pi-web 复用同一个 HTTP(23456) 服务的 `/pi` 路由，独立鉴权且仅做状态提醒，不新增监听端口；Claude/ZCode 的 **PermissionRequest** 走阻塞 `/permission`。普通工具是允许/拒绝；`AskUserQuestion` 必须收集答案后带 `updatedInput` 回包，对照 clawd 的两条路见子文档。
+
+界面中的 Agent 名称统一显示为 **Pi**（设置列表、通知卡和安装提示），仍同时支持 Pi CLI 与 pi-web，不改变接入协议。
 
 ## 涉及文件
 
@@ -21,6 +23,8 @@
 宿主侧（junction 挂载、插件目录约定、toast 窗口机制）见 Catrace 主仓 `.agent/`（features/agent-notification、architecture/desktop-event-os）。
 
 ## 子文档
+
+- [Pi联动-npm安装与Webhook接收.md](Pi联动-npm安装与Webhook接收.md) — **仅 npm 安装、隐私/凭据、协议适配、多会话及验证边界**
 
 - [会话标题-三级来源与为什么不读transcript不回写.md](会话标题-三级来源与为什么不读transcript不回写.md) — **标题策略与只读不回写的取舍**
 - [toast卡观感-agent徽章品牌图标与body展开滚动.md](toast卡观感-agent徽章品牌图标与body展开滚动.md) — **徽章图标资产来源与换法、body 3行折叠/10行滚动**

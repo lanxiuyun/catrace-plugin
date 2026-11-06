@@ -9,6 +9,7 @@
 
 | 包 | 角色 | 参考价值 |
 |----|------|----------|
+| `agent-notify/` | Agent Hook / Pi Webhook → 多会话通知 | 本地鉴权 HTTP、Pi npm 包配置与可用性检测、事件订阅、sticky 清理与权限回传 |
 | `bt-music/` | 蓝牙耳机连接 Toast → 打开音乐程序（OS 设备变更事件） | sidecar + settings 三卡 UI + RPC 的范本 |
 | `github-notify/` | 轮询 GitHub Notifications（Node sidecar） | sidecar 轮询 + 去重状态落盘 |
 | `linuxdo-notify/` | 轮询 linux.do 通知（Node sidecar） | 同 github-notify |

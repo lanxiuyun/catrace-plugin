@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url'
 import { AGENTS, installAgent, isAgentPresent, isInstalled, uninstallAgent } from './hooks.mjs'
 import { focusExternalWindow } from './focus-windows.mjs'
 import { publishTestCard } from './preview-cards.mjs'
-import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS } from './constants.mjs'
+import { DEFAULT_MODE, DEDUP_MS, EVENT_BODY, PERM_WAIT_MS, HTTP_PORT } from './constants.mjs'
 import { cacheKey, cardBody, cardTitle, createTitleCache, normalizeHookData } from './hook-data.mjs'
 import { createPidChainCache } from './pid-chain.mjs'
 import { createPermissionStore, elicitationQuestions } from './permission.mjs'
 import { normalizeSoundConfig } from './sound.mjs'
+import { createPiHandler } from './pi-webhook.mjs'
+import { loadPiToken, piStatus, installPi } from './pi-config.mjs'
+import { ensurePiNpm } from './pi-package.mjs'
 
 // stdout 是 JSONL 协议通道：裸 console.* 会污染协议（宿主报 invalid stdout JSONL）。
 // 统一改道为结构化 log op——debug 级别默认被宿主日志门槛滤掉（CATRACE_LOG_LEVEL=debug 还原）。
@@ -43,7 +46,7 @@ for (const [method, level] of [
 
 const pluginId = process.env.CATRACE_PLUGIN_ID || 'agent-notify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = Number(process.env.CATRACE_AGENT_NOTIFY_PORT) || 23456
+const PORT = HTTP_PORT
 const TITLE_CACHE_PATH = path.join(__dirname, 'cache', 'session-titles.json')
 
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -68,6 +71,50 @@ let publishSeq = 0
 const publishRequests = new Map()
 const sessionEventIds = new Map()
 let server = null
+let piHandler = null
+let piToken = ''
+let piReceiverReady = false
+let piLastEventAt = null
+let piInstallTask = { running: false }
+
+function clearSession(sessionId) {
+  stickyEntries.delete(sessionId)
+  dismissSessionCard(sessionId)
+}
+
+function preparePiHandler() {
+  try {
+    piToken = loadPiToken(path.join(__dirname, 'cache', 'pi-webhook.token'))
+    piHandler = createPiHandler({
+      token: piToken,
+      log,
+      onEvent: async (type, entry) => {
+        piLastEventAt = new Date().toISOString()
+        if (['started', 'resumed', 'session_closed', 'cancelled'].includes(type)) clearSession(entry.sessionId)
+        // User-initiated cancellation is silent: only dismiss stale cards.
+        if (['resumed', 'session_closed', 'cancelled'].includes(type)) return
+        await handleState(entry.raw, entry)
+      },
+    })
+
+  } catch (error) {
+    piToken = ''
+    log('Pi webhook unavailable; existing agents remain enabled', { error: String(error), port: PORT }, 'error')
+  }
+}
+
+function startPiInstall() {
+  if (!piReceiverReady) throw new Error('Pi receiver 未就绪，请检查端口占用并重启插件')
+  if (piInstallTask.running) return { running: true }
+  piInstallTask = { running: true }
+  ensurePiNpm().then(() => {
+    const result = installPi({ token: piToken })
+    piInstallTask = { running: false, result }
+  }).catch((error) => {
+    piInstallTask = { running: false, error: error.message }
+  })
+  return { running: true }
+}
 
 function respond(requestId, ok, result, error) {
   const message = { v: 1, op: 'response', requestId, ok }
@@ -207,9 +254,9 @@ function dismissSessionCard(sessionId) {
   sessionEventIds.delete(sessionId)
 }
 
-async function handleState(payload) {
+async function handleState(payload, normalized = null) {
   if (!config.enabled) return
-  const data = normalizeHookData(payload, payload.agentId, deriveSessionTitle)
+  const data = normalized || normalizeHookData(payload, payload.agentId, deriveSessionTitle)
   const { event, sessionId } = data
   // HTTP response 等待首次进程链捕获完成，保证短命 hook 父进程在快照期间仍存活。
   if (data.hookPpid && sessionId && sessionId !== 'unknown') {
@@ -235,7 +282,7 @@ async function handleState(payload) {
   }
   const mode = modeOf(event)
   if (mode === 'off') return
-  if (mode !== 'sticky') {
+  if (mode !== 'sticky' && data.agentId !== 'pi') {
     const key = `${sessionId}:${event}`
     const now = Date.now()
     const prev = dedup.get(key)
@@ -307,6 +354,12 @@ function startHttp() {
     const requestUrl = new URL(req.url || '/', `http://127.0.0.1:${PORT}`)
     const url = requestUrl.pathname
     const agentId = requestUrl.searchParams.get('agent') || ''
+    // Dispatch before the legacy CORS/body handling; Pi remains an authenticated non-browser API.
+    if (url === '/pi') {
+      if (piHandler) await piHandler.handle(req, res)
+      else { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Pi receiver unavailable' })); req.resume() }
+      return
+    }
     if (req.method === 'OPTIONS') {
       cors(res, 204)
       return
@@ -341,7 +394,7 @@ function startHttp() {
       }
     }
     if (req.method === 'GET' && url === '/health') {
-      cors(res, 200, JSON.stringify({ ok: true, routes: ['/state', '/permission', '/focus', '/permission-decide'] }))
+      cors(res, 200, JSON.stringify({ ok: true, routes: ['/state', '/permission', '/focus', '/permission-decide', '/pi'] }))
       return
     }
     if (req.method !== 'POST' || (url !== '/state' && url !== '/permission')) {
@@ -360,15 +413,22 @@ function startHttp() {
     await handleState(payload)
     cors(res, 200)
   })
-  server.on('error', (err) => log('http bind failed', { error: String(err), hint: 'port 23456 is still held by an old sidecar; refresh the plugin to kill it' }, 'error'))
+  server.on('error', (err) => {
+    piReceiverReady = false
+    log('http bind failed', { error: String(err), port: PORT, hint: 'port is still held by an old sidecar; restart the plugin' }, 'error')
+  })
   server.listen(PORT, '127.0.0.1', () => {
-    log('listening', { port: PORT, routes: ['/state', '/permission', '/focus', '/permission-decide'] })
+    piReceiverReady = !!piHandler
+    if (piReceiverReady) log('Pi webhook route ready', { port: PORT, route: '/pi' })
+    log('listening', { port: PORT, routes: ['/state', '/permission', '/focus', '/permission-decide', '/pi'] })
     send({ v: 1, op: 'ready' })
     log('agent-notify ready', { pluginId, pid: process.pid })
   })
 }
 
 function stopHttp() {
+  piReceiverReady = false
+  piHandler?.clear()
   if (!server) return
   server.close()
   server = null
@@ -410,9 +470,16 @@ function handleRequest(message) {
         )
         break
       case 'install':
-        respond(requestId, true, installAgent(String(params.agent || ''), scriptPath))
+        respond(requestId, true, params.agent === 'pi' ? startPiInstall() : installAgent(String(params.agent || ''), scriptPath))
+        break
+      case 'piStatus':
+        respond(requestId, true, { ...piStatus(), receiverReady: piReceiverReady, lastEventAt: piLastEventAt })
+        break
+      case 'piInstallStatus':
+        respond(requestId, true, piInstallTask)
         break
       case 'uninstall':
+        if (params.agent === 'pi' && piInstallTask.running) throw new Error('Pi Hook 安装中，请稍后再卸载')
         respond(requestId, true, uninstallAgent(String(params.agent || '')))
         break
       case 'testCard':
@@ -442,6 +509,7 @@ function shutdown() {
 }
 
 loadTitleCache()
+preparePiHandler()
 startHttp()
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
@@ -468,7 +536,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     if (pending) {
       publishRequests.delete(message.requestId)
       const eventId = message.result && message.result.eventId
-      if (message.ok && eventId) sessionEventIds.set(pending.sessionId, eventId)
+      if (message.ok && eventId) {
+        if (stickyEntries.get(pending.sessionId) === pending.entry) sessionEventIds.set(pending.sessionId, eventId)
+        else send({ v: 1, op: 'resolve', eventId })
+      }
     }
     return
   }
