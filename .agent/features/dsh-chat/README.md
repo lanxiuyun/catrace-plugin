@@ -299,9 +299,9 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
    之后的结果），因为本地存盘里很可能缺键；只读存盘会把开关显示成「关」而实际生效的是默认「开」。
 
 另外：`plugin` 是**宿主注入的模块级变量**（宿主在源码前插
-`const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__('<id>')`，见 `tools/plugin-demo/develop.md`），
+`const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__('<id>')`，见 [develop.md](../../../develop.md)），
 插件里不能自己定义、也不要 import 宿主模块。测试要验证配置读写，必须照宿主的方式注入这行前奏
-（`loadWithHostPrelude`），否则模块里 `plugin` 未定义，测出来的只是假象。
+（React 测试中的源码加载器），否则模块里 `plugin` 未定义，测出来的只是假象。
 
 去装饰开关改完是**自动重开小窗**的（CSS 在反代启动时注入），不用用户手动再点一次。
 
@@ -334,17 +334,17 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
 | 点 | 约定 | 依据 |
 |---|---|---|
 | 分组 | 主组 4 项 + 「**顶栏内部：**」+ 「**顶栏右侧图标内部：**」两个分组小标题；**不用 `└` 前缀**（显丑） | 用户明确否掉前缀符号 |
-| 依赖 | 父项未点亮时子组**直接不渲染**（不是置灰、也不是禁用） | Naive 的 `disabled` NTag **不触发** `onUpdate:checked`；不渲染最省事且没有"点了没反应" |
-| chip 描边 | 未选中 = 自绘紫调描边 + 淡紫底（`:not(.is-on)`），选中 = 主题色实底 | `NTag` 在 `checkable` 时**忽略 `bordered`**（边框层条件 `!checkable`），底层 `--n-color-checkable` 就是 `#0000` |
-| 说明 | 卡片顶部一句总说明；每项细节进 `NTooltip`（机制：Popover 把 hover handler 直接挂 trigger VNode，disabled 也能弹） | 行里只放 chip，避免"标签+后缀说明"糊成一片 |
-| 全宽块 | 「自定义样式（CSS）」自造 `.dsh-chat-settings__block`（标题 + 说明 + 全宽等宽 textarea + 插入示例/清空 + **class 速查表**） | 宿主 `SettingRow` 只有 `title`/`desc`+默认 slot，slot 在**右列**、**无整行模式** |
+| 依赖 | 父项未点亮时子组直接不渲染，控件使用 React 受控状态与原生事件 | 防止无效子项操作 |
+| chip 描边 | 未选中为描边淡底，选中为主题实底，使用原生 button 与 aria-pressed | 保持可见选中与键盘操作 |
+| 说明 | 卡片顶部一句总说明，选项细节放 Tooltip 或原生 title | 行里只保留紧凑选项 |
+| 全宽块 | 自定义 CSS 使用独立标题、说明、全宽 textarea 与示例 / 清空按钮 | 避免挤到窄控件列 |
 | class 速查 | `runtime/lib/gui-classes.mjs` 里 5 组 35 个选择器（布局/顶栏/左栏/对话区/消息与费用），每行「插入」按钮写入规则骨架；由 sidecar `guiClasses` RPC 供给 | 用户原话：「应该将所有的样式 class 都列出来一下，否则改的人都不知道应该怎么改」 |
 | 速查表不许漂移 | 测试从 `gui-proxy.mjs` 里抽出所有 `[class*="_x"]` 语义名，逐个断言在速查表里能查到（含 `[class*="_titleRow"] [class*="_label"]` 这种两段式，要 matchAll 全收） | 这条测试当场抓出漏掉的 `_label` |
 | 取不到数据要说话 | 速查表 RPC 失败时**把原因显示出来**（"多半是插件在跑旧代码"），不要静默不渲染 | 第一次上线时就踩了：sidecar 是旧的、`guiClasses` 不存在，界面什么都不显示，用户以为没做 |
 | 契约版本自检 | `runtime/main.mjs` 与 `settings.mjs` 各有一个 `CONTRACT_VERSION`（**改/加 RPC 方法时两边一起 +1**）；`status` 报出该值，不一致就在设置页顶部显示「侧车在跑旧代码，关掉再打开」 | 这是本插件最高频的困惑源（改代码后不重开插件） |
 | chip 间距 | `.dsh-chat-settings__tags` **只允许一条规则**（`gap: .5rem`）。曾经写了两条，后面那条 `gap: 0 0` 把前面盖掉 → chip 挤成一坨、看着像句子 | 用户反馈"你不来点 gap 之类的？" |
-| 多行输入 | 必须 `NInput + type:'textarea'`；**naive-ui 里没有 `NInput.Textarea`**（只有 NInput/NInputGroup/NInputGroupLabel），写错会静默掉进兜底分支（连 placeholder 都丢，显示成"请输入"） | 实测 node_modules/naive-ui/es/input/index.mjs |
-| 断言 | 查"源码里不许出现某写法的"这类断言，**先剥注释**或匹配实际调用（`h(NInput.Textarea`），否则会被自己的注释命中（踩过三次） | — |
+| 多行输入 | 使用 React TextArea / 原生 textarea，value 与 onChange 受控 | 保持完整 CSS 文本和可调整高度 |
+| 断言 | 源码断言先剥注释，功能断言用 React 元素 / hook 回归 | 避免断言命中说明文字 |
 | 快捷操作 | 卡头右侧「全部显示」「恢复推荐」（`恢复推荐` = 回到 `DEFAULTS`） | 11 项手点太累 |
 | 文案 | 描述里**不写 markdown**（宿主 `card()` 不渲染 md，`**x**` 会原样显示成星号） | 上一版就是这么丑的 |
 

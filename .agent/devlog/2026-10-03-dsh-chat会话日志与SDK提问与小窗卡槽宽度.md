@@ -1,6 +1,6 @@
 # dsh-chat 首版：会话日志多帧 zstd + SDK 提问 + 小窗卡槽宽度
 
-日期：2026-10-03　插件：`tools/plugin-demo/dsh-chat/`
+日期：2026-10-03　插件：`dsh-chat/`
 
 ## 做了什么
 
@@ -34,7 +34,5 @@
 
 ## 顺带修的两处
 
-- 注入的 Vue 运行时**没有 `nextTick`**（白名单只有 h/ref/computed/watch/markRaw/onMounted/onBeforeUnmount），
-  改用宏任务等一次渲染；并加了静态检查防止再犯。
 - 样式注入不能「有就跳过」：Toast 窗跨挂载复用同一个 document，改了 `ui.mjs` 老样式会一直生效，
   所以 `ensureStyle()` 发现内容不同就覆盖。

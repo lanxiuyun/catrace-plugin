@@ -16,9 +16,9 @@
 - `agent-notify/settings.mjs` — 安装、事件策略、提示音、底部「调试卡片」
 - `agent-notify/runtime/sound.mjs` — 内置/自定义/静音解析
 - `agent-notify/assets/agent-notify.wav` — 内置提示音
-- 协议与字段差异的完整说明：[../agent-notify/AGENT_HOOK_EVENTS.md](../../agent-notify/AGENT_HOOK_EVENTS.md)、[../agent-notify/HOOK_DATA_NORMALIZATION.md](../../agent-notify/HOOK_DATA_NORMALIZATION.md)
+- 协议与字段差异的完整说明：[../agent-notify/AGENT_HOOK_EVENTS.md](../../../agent-notify/AGENT_HOOK_EVENTS.md)、[../agent-notify/HOOK_DATA_NORMALIZATION.md](../../../agent-notify/HOOK_DATA_NORMALIZATION.md)
 
-宿主侧（junction 挂载、插件目录约定、toast 窗口机制）见 Catrace 主仓 `.agent/`（features/agent-notification、architecture/desktop-event-os）。
+宿主侧（仓库快照安装、插件目录约定、Toast 窗口机制）见 Catrace 主仓 `.agent/`（features/agent-notification、architecture/desktop-event-os）。
 
 ## 子文档
 
@@ -38,4 +38,4 @@
 
 ## 开发流程
 
-改代码 → 用户重载插件实际验证 → 确认后 commit（本仓库）→ 主仓更新 submodule 指针（分开提交，默认不 push）。
+修改 React 卡片与设置 → 语法与 Node 回归 → 用户要求时做实机验证 → 用户确认后在本仓库按功能提交。发布后通过插件中心安装仓库快照。

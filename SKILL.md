@@ -1,190 +1,35 @@
 ---
 name: develop-catrace-plugin
 description: >
-  Develop a plugin in the catrace-plugin repository (catrace-plugin). Use when asked to
-  create/add a new Catrace external plugin, implement a Toast card, settings panel,
-  background scheduler, or Node sidecar in this repo, fix plugin contract bugs, or walk
-  through the full plugin development flow. Repo-specific workflow on top of the public
-  contract; real implementations live in this repo (timer/bt-music/sidecar-echo).
+  Develop or review Catrace external plugins: React Toast cards and settings,
+  background modules, sidecar RPC, configuration, event actions and packaging.
+  Use for plugin implementation, runtime contract bugs, testing or release guidance
+  in the catrace-plugin repository.
 ---
 
-# Catrace 插件开发（catrace-plugin 仓库）
+# Catrace 插件开发
 
-面向：在本仓库里新增/修改 Catrace 外部插件的开发者与 AI。宿主与插件契约细节以本仓库现有插件为第一参考（它们都是被宿主验证过的）。
+## 操作顺序
 
-**信任模型：启用插件 = 信任其全部本地代码（含 sidecar 子进程）。默认 `enabledByDefault: false`。**
+1. 读 [AGENTS.md](AGENTS.md)，确认本次插件目录与已有工作区改动；插件源码、知识与提交留在本仓库。
+2. 读 [develop.md](develop.md) 对应入口分支：React 卡片 / 设置、background 或 sidecar。清单只声明实际入口，业务能力优先在插件实现。
+3. 先读目标插件现有实现、清单和 `.agent/features/<id>/`；修改保持配置字段、动作 id、RPC 与持久化数据合同。按功能做最小改动。
+4. UI 导出真正 React 函数组件，使用宿主 `__CATRACE_REACT__` / `__CATRACE_RADIX__` 与注入的 `plugin`。Blob 入口必须单文件自包含；Card 动作为 `onClose` / `onAction`。
+5. effects 清理所有监听 / 定时器；异步操作检查当前请求与卸载状态。普通配置保存不写顶层 enabled，启停走 `plugin.setEnabled`。
+6. 插件版本使用改动当天 `YYYY.MM.DD`，同日再次发布增加第四段。自检清单 JSON、入口、语法与 React 导出，再跑目标插件 Node 回归。
+7. 更新本插件现行知识，确认差异中无个人路径、密钥、运行数据和未要求的后台业务改动。实机验证、提交、push 均按用户授权执行。
 
----
+## 按任务查阅
 
-## 0. 先读这些
+- 插件入口、React / Blob 合同、配置与 sidecar 协议：[develop.md](develop.md)。
+- 可用插件与用户操作：[README.md](README.md)。
+- Agent 状态、审批、Hook、会话聚焦：[Agent 通知知识](.agent/features/agent-notify/README.md)。
+- DSH 状态卡、iframe、会话日志与外观：[DSH 小窗知识](.agent/features/dsh-chat/README.md)。
+- 宿主窗口、安装和权限边界：Catrace 主仓的 `.agent/architecture/desktop-event-os/`。
 
-动手前，至少扫一遍（作为范本）：
+## 必须保持
 
-- `timer/` — background 调度 + settings CRUD + sticky 动作回传
-- `heatmap/` — 仅 settings：`plugin.activity.getRecords` 翻日作息回顾
-- `bt-music/` — sidecar（OS 设备事件）+ settings 三卡 + `plugin.sidecar.request` RPC
-- `sidecar-echo/` — sidecar JSONL 端到端最小闭环
-- `github-notify/runtime/main.mjs` — sidecar 轮询、去重状态落盘、shutdown
-- `wecom-todo/` — sidecar 调 `wecom-cli todo list` / `finish`
-- 本仓库 `develop.md`「契约速查」与「常见问题」；完整通用合同在宿主 `.agent/architecture/desktop-event-os/m10-external-plugins.md`
-
----
-
-## 1. 收集需求 → 选架构
-
-四问：触发条件？要自定义卡？要设置项？要本机进程？
-
-| 需求 | 表面 | 本仓库例子 |
-|------|------|-----------|
-| 自定义 Toast 外观 | `main` → `ui.mjs` | 全部 |
-| 定时 / 读活跃 / 纯 JS | `background.mjs` | `timer`, `notify-demo` |
-| 开关 / 路径 / 表单 | `settings.mjs` + `plugin.config` | `timer`, `bt-music` |
-| 蓝牙 / PnP / PowerShell / 起程序 / 本地 HTTP | `sidecar`（Node + JSONL） | `bt-music`, `smsforwarder-notify` |
-| 只简单通知 | `plugin.notification` 或 publish，可不写 `main` | — |
-
-合法组合：仅 ui；ui+settings；ui+background+settings；ui+sidecar+settings；background 与 sidecar 可共存。
-
-> 业务能力写在插件里，不要要求宿主开专用 API。本机能力一律 sidecar。
-
-## 2. 定 id 与目录
-
-- id：kebab-case `[a-z0-9-]+`；**目录名 = `manifest.id`**。
-- 保留 kind（禁用）：`rest` `water` `agent` `permission` `update` `rest-timer` `sdk`。
-- 在 `catrace-plugin/` 根下新建 `<id>/` 目录。
-
-## 3. 写 manifest.json（一次写全）
-
-```json
-{
-  "id": "my-plugin",
-  "name": "我的插件",
-  "version": "2026.10.08",
-  "description": "一句话说明",
-  "main": "ui.mjs",
-  "background": "background.mjs",
-  "settings": "settings.mjs",
-  "events": ["my-plugin", "kind:my-plugin", "my-plugin.tick"],
-  "enabledByDefault": false,
-  "sidecar": { "command": "node", "args": ["runtime/main.mjs"], "cwd": "." }
-}
-```
-
-- `events` 是 publish 白名单：把以后要发的 `eventType`、裸 `kind`、`kind:<id>` 都列全。漏了 → 不发 Toast。
-- **`version` 用「年月日」**（本仓库约定，例 `2026.10.08`）：改了这个插件就把版本号改成**改动当天**的日期；
-  同一天再改一次就加第 4 位（`2026.10.08.1`）。这样一看版本号就知道"是不是我这次改的那份"，
-  也不会再出现两个分支各写 `0.3.1` / `0.3.4` 撞车。宿主按 `.` 切数字逐段比较（`2026.10.08 > 0.3.4`、`2026.10.09 > 2026.10.08`），
-  日期式完全兼容；**相等不覆盖**（用户手改过的那份会留着），所以"改了必须把它改成新日期"。
-- `sidecar.env` 可选；宿主最后注入 `CATRACE_PLUGIN_ID`、`CATRACE_PROTOCOL_VERSION=1`（覆盖同名）。
-- 宿主不跑 `npm install`。`command:"node"`：系统 Node 优先；没有则宿主插件页整页引导一键装便携 Node（Windows x64，写入应用数据目录，不必重启应用）。
-- **文件必须是 UTF-8、合法 JSON**（宿主 `serde_json` 严格解析）。
-
-## 4. 写各文件
-
-注入：宿主加载前插 `const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__('<id>')` → 模块级直接用 `plugin`，禁止 import 宿主模块、禁止重新 create。
-
-### agent-notify 调试卡经验
-
-`agent-notify` 的调试区用于观察 Agent hook 实际传来的 stdin：
-
-- `runtime/hook.cjs` 必须把 stdin 原文 POST 给 sidecar；不要在 hook 层清洗 key、去空值、合并 `camelCase` / `snake_case` 或补 `event` / `state`。
-- 设置提供「关闭 / 常用 / 原始」三档。常用只做展示层过滤和排序；原始直接显示 hook body，用于核对对方实际发送的数据。
-- 调试卡按字段行展示，重要字段置顶，长文本 `white-space: pre-wrap` + `word-break: break-word`，不要把整份 JSON 挤成一块连续 `<pre>`。
-- 宿主全局样式默认禁止文本选择；调试容器和所有子元素必须使用 `user-select: text !important`、`-webkit-user-select: text !important`、`pointer-events: auto !important`，否则鼠标拖选和 `Ctrl+C` 不生效。
-- 复制按钮放在独立 toolbar，不要绝对定位压住 JSON；滚动区使用稳定的细滚动条。
-- 外置 `ui.mjs` 通过 Blob URL 加载，不能 bare import 第三方 JSON viewer；除非依赖已打包进插件，否则用插件内 `h` + CSS 实现。
-
-### ui.mjs
-
-- 仅 `globalThis.__CATRACE_VUE__.h`（可加 `ref/computed/watch/markRaw/onMounted/onBeforeUnmount`）。
-- props：`event`、`isHovered`；emits：`close`、`action`；`export default` 或 `export const Card`。
-- `<style id="<前缀>-css">` 自插样式，class 带插件前缀；尺寸用 rem（1rem=16px，1px 边框/blur/SVG viewBox 例外）。
-- 范本：`timer/ui.mjs`。
-
-### settings.mjs
-
-- Naive 白名单：`NAlert NButton NDatePicker NDivider NInput NInputNumber NModal NPopconfirm NProgress NRadioButton NRadioGroup NSelect NSlider NSpace NSwitch NTag NTooltip useDialog useMessage`。数字设置优先使用 `NInputNumber`；需要文本兼容时再用 `NInput` + `Number()` 钳制。
-- `useMessage/useDialog` 必须在 `setup()` 内。
-- 根节点**零外 padding / 零 max-width**（宿主 `.plugin-detail` 管边距）；内部间距可以有。
-- 用户配置 `plugin.config.get/set`（整包）；需要 sidecar 同步时：`await plugin.config.set(cfg); await plugin.sidecar.request('setConfig', cfg)`（`bt-music/settings.mjs:194`）。
-- 范本：`timer/settings.mjs`（内联编辑）、`bt-music/settings.mjs`（三卡）。
-
-### background.mjs
-
-- 注入同 ui；优先只用 `plugin.*`，少做 DOM。
-- Toast 按钮/缺省标题语言：`plugin.i18n.getLocale()`（`zh-CN` | `en-US`）。**禁止**读 `document.documentElement.lang`（宿主 `index.html` 默认 `lang="en"`，中文界面会出英文按钮）。
-- 调度：`setInterval` 或分钟对齐（`timer/background.mjs:417`）。
-- 活跃门控：`plugin.activity.get()`；休息锚点：`plugin.activity.getLastRealRest()`。
-- 配置 → `plugin.config`；上次触发/计数器 → `plugin.storage`（`timer/background.mjs:214`）。
-- 按钮/关闭回传：`window.addEventListener('catrace:plugin-event-resolved', ...)` 读 `detail.actionId` / `detail.resolutionKind`（`timer/background.mjs:432`）。
-- publish 必带 `dedupeKey`。
-
-### runtime/main.mjs（sidecar）
-
-JSONL v1：stdout 输出、stdin 读入，均为 UTF-8 JSON Lines，字段 `v:1`。
-
-- Sidecar→宿主：`ready` · `publish` · `log` · `response` · `error` · 请求-响应能力调用（带 `requestId`，宿主回 `response`）：`storage.get` · `storage.set` · `activity.get` · `clipboard.write_text` · `shell.open_url`（仅 http/https） · `config.get` · `config.set`
-- 宿主→Sidecar：`config` · `resolved`（**携带完整事件 payload + actionId**，sidecar 可直接处理卡片动作）· `shutdown`（**必须结束进程**）· RPC（`requestId`+`method`+`params`）
-- 每个 RPC 必回 `op:'response'` 且 `requestId` 一致；stderr 进宿主日志。
-- 宿主能力 op（activity/clipboard/shell/config）在宿主侧按「插件已安装且启用」鉴权；超时 2.5s 内无 `response` 应按失败处理并 fail-open。
-- 落盘状态写 `runtime/state.json`（已在 `.gitignore`，勿提交个人数据）。
-- 范本：`github-notify/runtime/main.mjs`、`smsforwarder-notify/runtime/main.mjs`（storage/activity/动作处理）、`sidecar-echo/runtime/main.mjs`。
-
-**新插件建议用 sidecar 承载后台逻辑，不再新增 `background` 字段**：background.mjs 跑在宿主隐藏 WebView 里，每个启用插件多一个 renderer 进程（~60MB 私有内存）；sidecar 已具备等价能力（定时器 + activity/clipboard/config/storage/shell）。存量 background 插件仍被支持，迁移范本见 github-notify / smsforwarder-notify v0.2.0 / v0.1.8（背景：轻量模式，宿主 issue #82）。
-
-**publish 字段**：
-
-```js
-await plugin.events.publish({
-  eventType: 'my-plugin.tick', // 白名单内
-  kind: 'my-plugin',           // 白名单内，非保留
-  title: '标题',
-  body: '正文',
-  level: 'info',               // info|warning|error|success
-  sticky: false,               // true=不自动消失
-  actions: [{ id: 'ack', label: '知道了' }],
-  payload: { auto_hide_ms: 8000 },
-  dedupeKey: 'my-plugin:tick',
-})
-```
-
-**sticky 语义**：更新类动作（echo/再 publish 同 sticky）→ 保留卡片刷新；完成/关闭/dismiss → 卸卡，**禁止再发同 sticky**。
-
-## 5. 验证（本地联动）
-
-1. 语法：`node --check ui.mjs settings.mjs background.mjs runtime/main.mjs`
-2. manifest 可解析：`node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"`
-3. 宿主 dev 运行：`pnpm tauri dev`（debug 自动把 `<id>/` junction 到 `app_data/plugins/<id>`；新包需重启一次）
-4. `Plugins` 页启用 → 触发场景 → 验 Toast/按钮/关闭/禁用退进程
-5. 用 `node --check` 再验 settings 修改；确认日志不打印密钥
-
-## 6. 自检清单
-
-- [ ] `manifest.id` = 目录名 = `[a-z0-9-]+`
-- [ ] `events` 覆盖所有 publish 的 type/kind；无保留 kind
-- [ ] UTF-8、合法 JSON
-- [ ] 仅白名单 Vue/Naive；无 `NInputNumber`；无 bare import；无模板 SFC
-- [ ] settings 根无外 padding/max-width
-- [ ] 配置走 `plugin.config`；运行时走 `plugin.storage`
-- [ ] sidecar 处理 `shutdown`、回 `response`；sticky dismiss 不再 publish
-- [ ] `enabledByDefault: false`；README 写明启用即信任
-- [ ] 未提交 `runtime/state.json`
-
-## 7. 提交
-
-1. 把 `manifest.version` 改成**改动当天的年月日**（例 `2026.10.08`；同一天第二次改就写 `2026.10.08.1`）。宿主 release 只在 bundled version **严格大于** `app_data/plugins/<id>` 时覆盖，**相等不覆盖**；不 bump 则老用户永远拿不到这次修复（#81：timer locale 改了代码仍停在 `0.1.0`）。
-2. 插件**全都会随宿主 release 打包**：构建时 `scripts/sync-plugins.mjs` 把 `tools/plugin-demo/*`（= submodule 指针那个提交）整体拷进 `src-tauri/.bundled-plugins/`，再由 `tauri.conf.json` 的 `bundle.resources` 打进安装包。**不需要**再往 resources 里补行。
-3. commit 推本仓库 `main`；宿主 `git add tools/plugin-demo` 更新 submodule 指针。
-4. 更新 `README.md` 插件列表与 `develop.md` 插件索引。
-
----
-
-## 反模式
-
-- 用 `NInputNumber` 或白名单外组件
-- settings 根写大 padding / max-width（双倍缩进）
-- `import 'vue'` / `import 'naive-ui'` / 模板 SFC
-- publish 不落白名单 / 不带 dedupeKey
-- dismiss 后仍 publish 同 sticky
-- sidecar 不处理 `shutdown`（禁用后进程残留）
-- 把「配对」当「已连接」（蓝牙）
-- 把个人路径 / 密钥写进插件或文档
+- 安装默认停用，启用即信任本地代码；不触碰用户已安装的应用数据目录。
+- 用户配置走 plugin.config，机器运行数据走 plugin.storage；sidecar 必须处理 shutdown 并匹配 RPC requestId。
+- Toast 自动隐藏进度与 hover 使用宿主同一时间源；关闭 / dismiss 后不要重新发布同一 sticky 事件。
+- 样式有插件前缀，settings 根不重复宿主边距，尺寸使用 rem。

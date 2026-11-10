@@ -52,8 +52,3 @@ devlog:
   - .agent/devlog/2026-09-18-对照clawd沉淀权限审批两种流程.md
   - .agent/devlog/2026-09-13-agent-notify-正文交互设置页检测与分支清理.md
   - .agent/devlog/2026-09-13-agent-notify-标题链路与品牌徽章观感.md
-
-current:
-  plan: .agent/features/dsh-chat/README.md
-  phase: dsh-chat 状态卡四态一律常驻 + 删掉失效的「完成后停留」（工作区未提交）
-  next: 用户在 Catrace 里刷新插件、按「测试卡」四条验证常驻手感；确认后再提交

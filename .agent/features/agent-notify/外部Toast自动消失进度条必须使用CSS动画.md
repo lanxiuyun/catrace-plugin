@@ -1,6 +1,6 @@
 # 外部 Toast 自动消失进度条通用写法
 
-所有外部插件 Toast 的自动消失进度条统一使用 **CSS animation + `--toast-auto-hide-ms`**，不要依赖 Vue/React props 的高频刷新去手动计算宽度。
+所有外部插件 Toast 的自动消失进度条统一使用 **CSS animation + `--toast-auto-hide-ms`**，不要依赖 React props 的高频刷新去手动计算宽度。
 
 ## 发布侧约定
 
@@ -55,9 +55,8 @@ Catrace 宿主会读取 `auto_hide_ms`，并把当前 Toast 的完整时长注�
 渲染时只根据宿主传入的 hover 状态切换暂停 class：
 
 ```js
-h('div', {
-  class: ['progress-bar', this.isHovered ? 'is-paused' : ''],
-})
+const { createElement: h } = globalThis.__CATRACE_REACT__
+h('div', { className: `progress-bar${isHovered ? ' is-paused' : ''}` })
 ```
 
 ## 为什么必须用 CSS animation

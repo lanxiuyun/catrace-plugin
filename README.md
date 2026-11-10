@@ -3,8 +3,8 @@
 Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事——大多数是「往桌面弹一张提醒卡片」的本事。
 
 - 宿主仓库：https://github.com/lanxiuyun/Catrace
-- 挂载点：`tools/plugin-demo/`（git submodule 指针锁版本）
-- 插件怎么装：Catrace 里打开 **插件** 页 → 点「打开插件目录」→ 把插件目录拷进去 → 点插件的 **启用**。
+- UI 合同：React 函数组件，使用宿主注入的 React / Radix；开发说明见 [develop.md](develop.md)。
+- 安装：Catrace **插件中心 → 发现插件 → 安装**，按仓库固定 commit 下载到 AppData，安装后默认停用，按需启用。
 
 > **启用 = 信任**：启用一个插件，等于信任它目录里的全部本地代码（有些插件还会跑一个 Node 小子进程来干活）。所以别从网上乱拷插件，使用前请先用 Ai 检查一遍安全性。
 
@@ -33,7 +33,7 @@ Claude / Codex / Gemini / Kimi 的 hook 通知和权限审批，落在桌面小�
 - 无 Toast、无 sidecar。默认关闭，启用后才能查。
 
 ### ⏰ 定时提醒（timer）
-Catrace 自带的基础插件，开箱即用。
+基础外部插件，在插件中心安装后按需启用。
 
 - 自定义 **间隔提醒**：每 N 分钟弹一次（比如护眼 20 分钟、喝水 40 分钟），你不在电脑前就不弹。
 - 自定义 **定点提醒**：每天固定几点钟弹（比如 10:00 站桩，15:30 邮件）。
@@ -109,7 +109,7 @@ LinuxDO 论坛（linux.do）有新的回复 / @我 / 点赞时，弹卡片提醒
 ## 仓库结构
 
 ```
-plugin-demo/
+catrace-plugin/
   <plugin-id>/          # 每个插件一个目录，须含 manifest.json
     manifest.json       # 插件信息：id / name / main / settings / events / sidecar
     ui.mjs              # 提醒卡片长啥样（可选）

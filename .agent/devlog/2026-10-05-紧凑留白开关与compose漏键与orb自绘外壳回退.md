@@ -24,8 +24,6 @@
 
 ## Remaining
 
-- 主仓 submodule 指针未 bump（`tools/plugin-demo` 2e943b9 → 729fa2f）：等插件分支合并进插件 `main` 再 bump，
-  或按用户选择在主仓新开分支提交。主仓另有一个不属于本轮的 `M src-tauri/Cargo.toml`。
 - 自绘外壳代码在插件仓库 `orb` 分支，本分支不含；除非宿主提供"插件悬浮窗"能力，不建议重做。
 - 紧凑留白开关待用户在真机上肉眼确认效果（预期内容每侧多约 24px）。
 

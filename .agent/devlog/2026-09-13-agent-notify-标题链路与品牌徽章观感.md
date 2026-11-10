@@ -8,7 +8,6 @@
 
 - 标题链路重写：`session_title`(pinned) > 缓存 > UserPromptSubmit 首条 prompt 填空 > 项目名兜底；`titleFromTranscript`/`titleReadAttempts` 整段删除；chip 去重、body 防复读（3b0c8fe）
 - Toast 观感：呼吸点移除（权限卡保留）、agent 徽章 2rem 圆角方块 + 品牌图标（simple-icons SVG × 4 + ZCode 桌面真图标 PNG data URL）、body 首段 + stripMarkdown、徽章与标题垂直居中（4e0aa72、e5617ec）
-- 宿主 submodule 指针同步：bbaa3fd → 03d5f51 → caabd8b（全部未 push）
 - Claude Code hook 官方文档关键事实核查：session_title 时机、async 输出限制、HTTP hook 失败噪声、transcript 滞后警告、SessionEnd 定位 → 结论「只读不回写」
 
 ## 待开发
