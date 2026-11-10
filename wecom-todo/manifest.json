@@ -1,7 +1,8 @@
 {
   "id": "wecom-todo",
   "name": "企业微信待办",
-  "version": "2026.10.08",
+  "version": "2026.11.09",
+  "uiFramework": "react",
   "description": "用本机 wecom-cli 轮询企业微信待办，新待办弹桌面小窗",
   "main": "ui.mjs",
   "background": "background.mjs",

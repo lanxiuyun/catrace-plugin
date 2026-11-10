@@ -1,10 +1,9 @@
-/** Timer plugin toast card — Vue options API ESM via __CATRACE_VUE__.
- * Contract: props.event (BusEvent), props.isHovered?; emits close / action(actionId)
+/** Timer plugin toast card — React function component via __CATRACE_REACT__.
+ * Contract: props.event (BusEvent), props.isHovered?; callbacks onClose / onAction(actionId)
  */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
+const React = globalThis.__CATRACE_REACT__
+if (!React?.createElement) throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
+const { createElement: h, useEffect } = React
 
 const STYLE_ID = 'catrace-plugin-timer-css'
 const CSS = `
@@ -57,7 +56,7 @@ function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = plugin.theme.css(CSS)
   document.head.appendChild(el)
 }
 
@@ -91,90 +90,32 @@ function clockIcon() {
   return h(
     'svg',
     {
-      class: 'icon',
+      className: 'icon',
       width: 16,
       height: 16,
       viewBox: '0 0 24 24',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': 2,
-      'stroke-linecap': 'round',
-      'stroke-linejoin': 'round',
+      strokeWidth: 2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
     },
     [
-      h('circle', { cx: 12, cy: 12, r: 10 }),
-      h('polyline', { points: '12 6 12 12 16 14' }),
+      h('circle', { key: 'face', cx: 12, cy: 12, r: 10 }),
+      h('polyline', { key: 'hands', points: '12 6 12 12 16 14' }),
     ],
   )
 }
 
-export default {
-  name: 'TimerCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const actions = event.actions || []
-    const theme = resolveTheme(event)
-
-    const children = [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          clockIcon(),
-          h('h2', { class: 'title' }, event.title || ''),
-        ]),
-        h(
-          'button',
-          {
-            class: 'x',
-            type: 'button',
-            'aria-label': 'Close',
-            onClick: () => this.$emit('close'),
-          },
-          '×',
-        ),
-      ]),
-    ]
-
-    if (!event.sticky) {
-      children.push(
-        h('div', {
-          class: ['bar', this.isHovered ? 'paused' : ''],
-        }),
-      )
-    }
-
-    if (event.body) {
-      children.push(h('p', { class: 'body' }, event.body))
-    }
-
-    if (actions.length) {
-      children.push(
-        h(
-          'div',
-          { class: 'acts' },
-          actions.map((a, i) =>
-            h(
-              'button',
-              {
-                key: a.id,
-                type: 'button',
-                class: ['btn', i === actions.length - 1 ? 'primary' : 'ghost'],
-                onClick: () => this.$emit('action', a.id),
-              },
-              a.label,
-            ),
-          ),
-        ),
-      )
-    }
-
-    return h('div', { class: 'timer-card', style: theme || {} }, children)
-  },
+export default function TimerCard({ event = {}, isHovered = false, onClose, onAction }) {
+  useEffect(ensureStyles, [])
+  const actions = Array.isArray(event.actions) ? event.actions : []
+  return h('div', { className: 'timer-card', style: resolveTheme(event) || {} },
+    h('div', { className: 'hdr' },
+      h('div', { className: 'left' }, clockIcon(), h('h2', { className: 'title' }, event.title || '')),
+      h('button', { className: 'x', type: 'button', 'aria-label': 'Close', onClick: () => onClose?.() }, '×')),
+    !event.sticky ? h('div', { className: `bar${isHovered ? ' paused' : ''}` }) : null,
+    event.body ? h('p', { className: 'body' }, event.body) : null,
+    actions.length ? h('div', { className: 'acts' }, actions.map((action, index) =>
+      h('button', { key: action.id, type: 'button', className: `btn ${index === actions.length - 1 ? 'primary' : 'ghost'}`, onClick: () => onAction?.(action.id) }, action.label))) : null)
 }

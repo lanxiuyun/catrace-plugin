@@ -1,7 +1,8 @@
 {
   "id": "napcat-qq",
   "name": "NapCat QQ",
-  "version": "2026.10.08",
+  "version": "2026.11.09",
+  "uiFramework": "react",
   "description": "经 NapCat OneBot 收发 QQ 消息，在 Catrace 弹窗并快捷回复",
   "main": "ui.mjs",
   "background": "background.mjs",

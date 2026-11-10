@@ -1,480 +1,202 @@
-const vue = globalThis.__CATRACE_VUE__ || {}
-const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted } = vue
-const { NButton, NInput, NInputNumber, NRadioButton, NRadioGroup, NSlider, NSwitch, NTag, useMessage } = naive
-
-if (typeof h !== 'function') throw new Error('Vue runtime missing')
-if (!NButton || !NInput || !NInputNumber || !NRadioGroup || !NSlider || !NTag || !NSwitch || !useMessage) throw new Error('naive runtime missing')
-if (!plugin || !plugin.config || !plugin.sidecar) throw new Error('plugin API missing')
+const { createElement: h, useEffect, useRef, useState } = globalThis.__CATRACE_REACT__ || {}
+const { Button, Badge, SegmentedControl, Slider, Switch, TextField } = globalThis.__CATRACE_RADIX__ || {}
+if (typeof h !== 'function' || !Button) throw new Error('Catrace React/Radix runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
 const CSS = `
-.an-set { width: 100%; display: flex; flex-direction: column; gap: 1.25rem; }
-.an-set .plugin-section { display: flex; flex-direction: column; gap: 0.75rem; }
-.an-set .section-title {
-  margin: 0; font-size: 0.8125rem; font-weight: 700; color: #475569; letter-spacing: 0.02rem;
-}
-.an-set .section-card {
-  background: #fff; border: 0.0625rem solid #e2e8f0; border-radius: 0.875rem;
-  padding: 0.75rem 1rem; box-shadow: 0 0.0625rem 0.125rem rgba(15, 23, 42, 0.03);
-}
-.an-set .section-desc {
-  margin: 0 0 0.5rem; font-size: 0.75rem; color: #94a3b8; line-height: 1.4;
-}
-.an-set .event-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 0.75rem; padding: 0.5rem 0;
-}
-.an-set .event-row + .event-row { border-top: 0.0625rem solid #f1f5f9; }
-.an-set .event-name { font-size: 0.8125rem; font-weight: 400; color: #334155; }
-.an-set .agent-label { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-.an-set .install-btn { transition: color 0.2s, border-color 0.2s; }
-.an-set .preview-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.an-set .sound-path { display: flex; align-items: center; gap: 0.5rem; max-width: 18rem; justify-content: flex-end; }
-.an-set .sound-path .sound-input { max-width: 12rem; }
-.an-set .sound-volume { display: flex; align-items: center; gap: 0.5rem; }
-.an-set .sound-volume .ed-unit { font-size: 0.75rem; color: #94a3b8; min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.an-set { width:100%; display:flex; flex-direction:column; gap:1.25rem; }
+.an-set .plugin-section { display:flex; flex-direction:column; gap:.75rem; }
+.an-set .section-title { margin:0; font-size:.8125rem; font-weight:700; color:var(--ct-text-muted,#475569); letter-spacing:.02rem; }
+.an-set .section-card { background:var(--ct-surface,#fff); border:1px solid var(--ct-border,#e2e8f0); border-radius:.875rem; padding:.75rem 1rem; box-shadow:0 .0625rem .125rem rgba(15,23,42,.03); }
+.an-set .section-desc { margin:0 0 .5rem; font-size:.75rem; color:var(--ct-text-muted,#94a3b8); line-height:1.4; }
+.an-set .event-row { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.5rem 0; flex-wrap:wrap; }
+.an-set .event-row + .event-row { border-top:1px solid var(--ct-border,#f1f5f9); }
+.an-set .event-name { font-size:.8125rem; font-weight:400; color:var(--ct-text,#334155); }
+.an-set .agent-label { display:flex; align-items:center; gap:.5rem; min-width:0; }
+.an-set .preview-row { display:flex; flex-wrap:wrap; gap:.5rem; }
+.an-set .sound-path { display:flex; align-items:center; gap:.5rem; max-width:100%; justify-content:flex-end; }
+.an-set .sound-input { width:12rem; max-width:100%; }
+.an-set .sound-volume { display:flex; align-items:center; gap:.5rem; }
+.an-set .ed-unit { font-size:.75rem; color:var(--ct-text-muted,#94a3b8); min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
+.an-set .an-feedback { padding:.5rem .75rem; border-radius:.5rem; background:var(--ct-surface-2,#f1f5f9); font-size:.75rem; overflow-wrap:anywhere; }
+.an-set .an-feedback.is-error { color:#b91c1c; }
 `
 const EVENTS = [
-  { id: 'SessionStart', label: '会话开始' },
-  { id: 'UserPromptSubmit', label: '开始思考' },
-  { id: 'PreToolUse', label: '调用工具中' },
-  { id: 'PostToolUse', label: '工具调用完成' },
-  { id: 'PostToolUseFailure', label: '工具调用失败' },
-  { id: 'Stop', label: '任务完成' },
-  { id: 'StopFailure', label: '任务出错 / 异常' },
-  { id: 'Notification', label: '等待交互' },
-  { id: 'PermissionRequest', label: '权限请求' },
+  ['SessionStart', '会话开始'], ['UserPromptSubmit', '开始思考'], ['PreToolUse', '调用工具中'],
+  ['PostToolUse', '工具调用完成'], ['PostToolUseFailure', '工具调用失败'], ['Stop', '任务完成'],
+  ['StopFailure', '任务出错 / 异常'], ['Notification', '等待交互'], ['PermissionRequest', '权限请求'],
 ]
-const NAMES = { claude: 'Claude Code', zcode: 'ZCode', codex: 'Codex', gemini: 'Gemini CLI', kimi: 'Kimi' }
-
+const NAMES = { claude:'Claude Code', zcode:'ZCode', codex:'Codex', gemini:'Gemini CLI', kimi:'Kimi' }
+const DEFAULTS = {
+  showDebug:false, debugView:'off', debugExpanded:false, autoHideSeconds:8,
+  eventModes:{ SessionStart:'auto', UserPromptSubmit:'auto', PreToolUse:'off', PostToolUse:'off', PostToolUseFailure:'off', Stop:'sticky', StopFailure:'sticky', Notification:'sticky', PermissionRequest:'sticky' },
+  soundMode:'builtin', soundPath:'', soundVolume:1,
+}
 function ensureStyles() {
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
-  el.textContent = CSS
-  document.head.appendChild(el)
+  let el = document.getElementById(STYLE_ID)
+  if (!el) { el = document.createElement('style'); el.id = STYLE_ID; document.head.appendChild(el) }
+  if (el.textContent !== CSS) el.textContent = plugin.theme.css(CSS)
 }
-
 function section(title, desc, children) {
-  return h('section', { class: 'plugin-section' }, [
-    h('h3', { class: 'section-title' }, title),
-    h('div', { class: 'section-card' }, [
-      desc ? h('p', { class: 'section-desc' }, desc) : null,
-      ...children,
-    ]),
-  ])
+  return h('section', { className:'plugin-section', key:title }, h('h3',{className:'section-title'},title),
+    h('div',{className:'section-card'},desc ? h('p',{className:'section-desc'},desc) : null,...children))
+}
+function row(label, control) {
+  return h('div',{className:'event-row',key:label},h('span',{className:'event-name'},label),control)
+}
+function segments(value, options, onValueChange, disabled) {
+  return h(SegmentedControl.Root,{value,onValueChange,size:'1',disabled},...options.map(([id,label]) =>
+    h(SegmentedControl.Item,{value:id,key:id},label)))
 }
 
-export default {
-  name: 'AgentNotifySettings',
-  setup() {
-    ensureStyles()
-    const message = useMessage()
-    const agents = ref([])
-    const detectedAgents = computed(() => agents.value.filter((a) => a.detected !== false))
-    const undetectedAgents = computed(() => agents.value.filter((a) => a.detected === false))
-    const busy = ref('')
-    const modes = ref({
-      SessionStart: 'auto',
-      UserPromptSubmit: 'auto',
-      PreToolUse: 'off',
-      PostToolUse: 'off',
-      PostToolUseFailure: 'off',
-      Stop: 'sticky',
-      StopFailure: 'sticky',
-      Notification: 'sticky',
-      PermissionRequest: 'sticky',
+export default function AgentNotifySettings() {
+  const [config,setConfig] = useState(() => ({...DEFAULTS,eventModes:{...DEFAULTS.eventModes}}))
+  const configRef = useRef(config)
+  const [agents,setAgents] = useState([])
+  const [busy,setBusy] = useState('')
+  const [previewBusy,setPreviewBusy] = useState('')
+  const [sidecarStale,setSidecarStale] = useState(false)
+  const [ready,setReady] = useState(false)
+  const [loadAttempt,setLoadAttempt] = useState(0)
+  const [feedback,setFeedback] = useState(null)
+  const alive = useRef(true)
+  const saveTimer = useRef(null)
+  const dirty = useRef(false)
+  const saveQueue = useRef(Promise.resolve())
+  const hookOperation = useRef(false)
+  const notify = (text,error=false) => { if (alive.current) setFeedback({text,error}) }
+  const errorText = error => error instanceof Error ? error.message : String(error)
+
+  async function loadAgents() {
+    try {
+      const list = await plugin.sidecar.request('listAgents',{})
+      const result = list?.result ?? list
+      const rows = Array.isArray(result) ? result : []
+      if (alive.current) { setAgents(rows); setSidecarStale(rows.some(a => a.detected === undefined)) }
+      return rows
+    } catch {
+      const rows = Object.keys(NAMES).map(id => ({id,installed:false,detected:true}))
+      if (alive.current) setAgents(rows)
+      return rows
+    }
+  }
+  function persist() {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    dirty.current = false
+    const snapshot = {...configRef.current,eventModes:{...configRef.current.eventModes}}
+    const next = saveQueue.current.catch(() => {}).then(async () => {
+      await plugin.config.set(snapshot)
+      try { await plugin.sidecar.request('setConfig',snapshot) }
+      catch (error) { notify(`配置已保存，但后台同步失败：${errorText(error)}`,true) }
     })
-    const showDebug = ref(false)
-    const debugView = ref('off')
-    const debugExpanded = ref(false)
-    const autoHideSeconds = ref(8)
-    const sidecarStale = ref(false)
-    const soundMode = ref('builtin')
-    const soundPath = ref('')
-    const soundVolume = ref(1)
-    let soundVolumeTimer = null
-
-    async function load() {
+    saveQueue.current = next
+    return next.catch(error => notify(errorText(error),true))
+  }
+  function update(patch,debounce=0) {
+    const next = {...configRef.current,...patch}
+    configRef.current = next
+    setConfig(next)
+    dirty.current = true
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    if (debounce) saveTimer.current = setTimeout(() => void persist(),debounce)
+    else void persist()
+  }
+  useEffect(() => {
+    alive.current = true
+    ensureStyles()
+    void (async () => {
       try {
-        const raw = await plugin.config.get()
-        if (raw && raw.eventModes) modes.value = { ...modes.value, ...raw.eventModes }
-        showDebug.value = !!(raw && raw.showDebug)
-        if (raw && (raw.debugView === 'off' || raw.debugView === 'common' || raw.debugView === 'raw')) {
-          debugView.value = raw.debugView
-        } else {
-          debugView.value = showDebug.value ? 'raw' : 'off'
+        const raw = await plugin.config.get() || {}
+        const debugView = ['off','common','raw'].includes(raw.debugView) ? raw.debugView : raw.showDebug ? 'raw' : 'off'
+        const seconds = Number(raw.autoHideSeconds)
+        const volume = Number(raw.soundVolume)
+        const loaded = {...DEFAULTS,...raw,
+          eventModes:{...DEFAULTS.eventModes,...raw.eventModes},
+          debugView,showDebug:debugView !== 'off',debugExpanded:raw.debugExpanded === true,
+          autoHideSeconds:Number.isFinite(seconds) && seconds >= 3 && seconds <= 600 ? Math.round(seconds) : 8,
+          soundMode:['builtin','custom','muted'].includes(raw.soundMode) ? raw.soundMode : 'builtin',
+          soundPath:String(raw.soundPath || ''),soundVolume:Number.isFinite(volume) ? Math.min(1,Math.max(0,volume)) : 1,
         }
-        debugExpanded.value = raw && raw.debugExpanded === true
-        const seconds = Number(raw && raw.autoHideSeconds)
-        if (Number.isFinite(seconds) && seconds >= 3 && seconds <= 600) {
-          autoHideSeconds.value = Math.round(seconds)
-        }
-        if (raw && (raw.soundMode === 'builtin' || raw.soundMode === 'custom' || raw.soundMode === 'muted')) {
-          soundMode.value = raw.soundMode
-        }
-        soundPath.value = raw && raw.soundPath ? String(raw.soundPath) : ''
-        const volume = Number(raw && raw.soundVolume)
-        if (Number.isFinite(volume)) soundVolume.value = Math.min(1, Math.max(0, volume))
-      } catch {
-        /* ignore */
-      }
-      try {
-        const list = await plugin.sidecar.request('listAgents', {})
-        const result = list && list.result ? list.result : list
-        const rows = Array.isArray(result) ? result : []
-        agents.value = rows
-        sidecarStale.value = rows.length > 0 && rows.some((a) => a.detected === undefined)
-      } catch {
-        // sidecar 不可达时退回全量展示，至少让用户看到有哪些 agent
-        agents.value = ['claude', 'zcode', 'codex', 'gemini', 'kimi'].map((id) => ({ id, installed: false, detected: true }))
-      }
+        if (!alive.current) return
+        configRef.current = loaded
+        setConfig(loaded)
+      } catch (error) { notify(`读取配置失败：${errorText(error)}`,true); return }
+      if (alive.current) setReady(true)
+      await loadAgents()
+    })()
+    return () => {
+      alive.current = false
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      if (dirty.current) void persist()
     }
-
-    async function persistModes() {
-      const cfg = {
-        enabled: true,
-        showDebug: debugView.value !== 'off',
-        debugView: debugView.value,
-        debugExpanded: debugExpanded.value,
-        autoHideSeconds: autoHideSeconds.value,
-        eventModes: { ...modes.value },
-        soundMode: soundMode.value,
-        soundPath: soundPath.value,
-        soundVolume: soundVolume.value,
-      }
-      await plugin.config.set(cfg)
-      try {
-        await plugin.sidecar.request('setConfig', cfg)
-      } catch {
-        /* ignore */
-      }
-    }
-
-    function setAutoHideSeconds(value) {
-      const seconds = Number(value)
-      if (!Number.isFinite(seconds) || seconds < 3 || seconds > 600) return
-      autoHideSeconds.value = Math.round(seconds)
-      persistModes().catch((e) => message.error(e instanceof Error ? e.message : String(e)))
-    }
-
-    async function setDebugView(v) {
-      debugView.value = v
-      showDebug.value = v !== 'off'
-      try {
-        await persistModes()
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function setDebugExpanded(v) {
-      debugExpanded.value = !!v
-      try {
-        await persistModes()
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function setMode(event, mode) {
-      modes.value = { ...modes.value, [event]: mode }
-      try {
-        await persistModes()
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function toggle(agent) {
-      busy.value = agent.id
-      const installing = !agent.installed
-      try {
-        if (installing) await plugin.sidecar.request('install', { agent: agent.id })
-        else await plugin.sidecar.request('uninstall', { agent: agent.id })
-        await load()
-        const now = agents.value.find((x) => x.id === agent.id)
-        if (installing && !now?.installed) {
-          message.error('没有写入成功（该 Agent 的配置目录可能不存在）')
-        } else {
-          message.success(installing ? 'Hook 已安装' : 'Hook 已卸载')
-        }
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      } finally {
-        busy.value = ''
-      }
-    }
-
-    const previewBusy = ref('')
-
-    function persistSoundSoon() {
-      if (soundVolumeTimer) clearTimeout(soundVolumeTimer)
-      soundVolumeTimer = setTimeout(() => {
-        persistModes().catch((e) => message.error(e instanceof Error ? e.message : String(e)))
-      }, 200)
-    }
-
-    async function setSoundMode(mode) {
-      soundMode.value = mode
-      try {
-        await persistModes()
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function pickSoundFile() {
-      try {
-        const path = await plugin.dialog.showOpenDialog({
-          filters: [
-            { name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'flac'] },
-            { name: 'All', extensions: ['*'] },
-          ],
-        })
-        if (path) {
-          soundPath.value = path
-          await persistModes()
-        }
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function playPreview() {
-      try {
-        if (soundMode.value === 'muted') return
-        const pluginDir = await plugin.path.getPluginDir()
-        const path = soundMode.value === 'custom'
-          ? (soundPath.value || '').trim()
-          : `${String(pluginDir || '').replace(/[\\/]+$/, '')}/assets/agent-notify.wav`
-        if (!path) {
-          message.error('请先选择音频文件')
-          return
-        }
-        await plugin.audio.play(path, { volume: soundVolume.value })
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    async function preview(kind) {
-      previewBusy.value = kind
-      try {
-        await plugin.sidecar.request('testCard', { kind })
-        message.success('已弹出测试卡片')
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e))
-      } finally {
-        previewBusy.value = ''
-      }
-    }
-
-    onMounted(load)
-
-    return () =>
-      h('div', { class: 'an-set' }, [
-        section(
-          'Agent 联动',
-          '检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',
-          [
-            sidecarStale.value
-              ? h('p', { class: 'section-desc' }, '插件进程是旧版本：请关闭再开启本插件（或点刷新）以启用「只显示检测到的 Agent」。')
-              : null,
-            ...(detectedAgents.value.length
-              ? detectedAgents.value.map((a) =>
-                  h('div', { class: 'event-row', key: a.id }, [
-                    h('div', { class: 'agent-label' }, [
-                      h('span', { class: 'event-name' }, NAMES[a.id] || a.id),
-                      h(NTag, { size: 'small', type: a.installed ? 'success' : 'default' }, {
-                        default: () => (a.installed ? '已安装' : '未安装'),
-                      }),
-                    ]),
-                    h(
-                      NButton,
-                      {
-                        size: 'small',
-                        type: a.installed ? 'error' : 'default',
-                        secondary: !!a.installed,
-                        class: a.installed ? undefined : 'install-btn',
-                        loading: busy.value === a.id,
-                        onClick: () => toggle(a),
-                      },
-                      { default: () => (a.installed ? '卸载 Hook' : '安装 Hook') },
-                    ),
-                  ]),
-                )
-              : [
-                  h('p', { class: 'section-desc', style: 'margin: 0' },
-                    '未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。'),
-                ]),
-            ...undetectedAgents.value.length
-              ? [
-                  h('div', { class: 'event-row' }, [
-                    h('span', { class: 'event-name', style: 'color: #94a3b8' }, '未检测到'),
-                    h(
-                      'div',
-                      { style: 'display: flex; gap: 0.375rem; flex-wrap: wrap; justify-content: flex-end' },
-                      undetectedAgents.value.map((a) =>
-                        h(NTag, { size: 'small', type: 'warning', title: '未检测到配置目录，无法写入 hook' }, {
-                          default: () => NAMES[a.id] || a.id,
-                        }),
-                      ),
-                    ),
-                  ]),
-                ]
-              : [],
-          ],
-        ),
-        section(
-          '调试',
-          '卡片底部可看 hook stdin。常用=去重后的可读 JSON；原始=对方传来的全文。',
-          [
-            h('div', { class: 'event-row' }, [
-              h('span', { class: 'event-name' }, '调试显示'),
-              h(
-                NRadioGroup,
-                { value: debugView.value, size: 'small', onUpdateValue: setDebugView },
-                {
-                  default: () => [
-                    h(NRadioButton, { value: 'off' }, { default: () => '关闭' }),
-                    h(NRadioButton, { value: 'common' }, { default: () => '常用' }),
-                    h(NRadioButton, { value: 'raw' }, { default: () => '原始' }),
-                  ],
-                },
-              ),
-            ]),
-            h('div', { class: 'event-row' }, [
-              h('span', { class: 'event-name' }, '默认状态'),
-              h(
-                NRadioGroup,
-                { value: debugExpanded.value ? 'expanded' : 'collapsed', size: 'small', onUpdateValue: (v) => setDebugExpanded(v === 'expanded') },
-                {
-                  default: () => [
-                    h(NRadioButton, { value: 'collapsed' }, { default: () => '折叠' }),
-                    h(NRadioButton, { value: 'expanded' }, { default: () => '展开' }),
-                  ],
-                },
-              ),
-            ]),
-
-          ],
-        ),
-        section(
-          '事件通知策略',
-          '默认只对「需要你回来」的事件常驻；可按事件改成不通知 / 自动消失 / 常驻。',
-          [
-            h('div', { class: 'event-row' }, [
-              h('span', { class: 'event-name' }, '自动消失时间（秒）'),
-              h(NInputNumber, {
-                value: autoHideSeconds.value,
-                min: 3,
-                max: 600,
-                step: 1,
-                precision: 0,
-                style: 'width: 7.5rem',
-                onUpdateValue: setAutoHideSeconds,
-              }),
-            ]),
-            ...EVENTS.map((ev) => (
-              h('div', { class: 'event-row', key: ev.id }, [
-                h('span', { class: 'event-name' }, ev.label),
-                h(
-                  NRadioGroup,
-                  {
-                    value: modes.value[ev.id],
-                    size: 'small',
-                    onUpdateValue: (v) => setMode(ev.id, v),
-                  },
-                  {
-                    default: () => [
-                      h(NRadioButton, { value: 'off' }, { default: () => '不通知' }),
-                      h(NRadioButton, { value: 'auto' }, { default: () => '自动消失' }),
-                      h(NRadioButton, { value: 'sticky' }, { default: () => '常驻' }),
-                    ],
-                  },
-                ),
-              ])
-            )),
-          ],
-        ),
-        section(
-          '提示音',
-          'Agent 通知弹出时播放。内置为迁移前的 agent-notify.wav；自定义需本地 wav / mp3 / ogg / flac。',
-          [
-            h('div', { class: 'event-row' }, [
-              h('span', { class: 'event-name' }, '提示音模式'),
-              h(
-                NRadioGroup,
-                { value: soundMode.value, size: 'small', onUpdateValue: setSoundMode },
-                {
-                  default: () => [
-                    h(NRadioButton, { value: 'builtin' }, { default: () => '内置' }),
-                    h(NRadioButton, { value: 'custom' }, { default: () => '自定义' }),
-                    h(NRadioButton, { value: 'muted' }, { default: () => '静音' }),
-                  ],
-                },
-              ),
-            ]),
-            soundMode.value !== 'muted'
-              ? h('div', { class: 'event-row' }, [
-                  h('span', { class: 'event-name' }, '提示音音量'),
-                  h('div', { class: 'sound-volume' }, [
-                    h(NSlider, {
-                      value: soundVolume.value,
-                      min: 0,
-                      max: 1,
-                      step: 0.05,
-                      style: 'width: 8rem',
-                      onUpdateValue: (v) => {
-                        soundVolume.value = v
-                        persistSoundSoon()
-                      },
-                    }),
-                    h('span', { class: 'ed-unit' }, `${Math.round(soundVolume.value * 100)}%`),
-                  ]),
-                ])
-              : null,
-            soundMode.value === 'custom'
-              ? h('div', { class: 'event-row' }, [
-                  h('span', { class: 'event-name' }, '音频文件路径'),
-                  h('div', { class: 'sound-path' }, [
-                    h(NInput, {
-                      value: soundPath.value,
-                      size: 'small',
-                      class: 'sound-input',
-                      placeholder: '选择或输入本地音频文件',
-                      onUpdateValue: (v) => {
-                        soundPath.value = v
-                      },
-                      onBlur: persistModes,
-                    }),
-                    h(NButton, { size: 'small', onClick: pickSoundFile }, { default: () => '选择文件' }),
-                  ]),
-                ])
-              : null,
-            soundMode.value !== 'muted'
-              ? h('div', { class: 'event-row' }, [
-                  h('span', { class: 'event-name' }, '试听'),
-                  h(NButton, { size: 'small', onClick: playPreview }, { default: () => '预览' }),
-                ])
-              : null,
-          ],
-        ),
-        section(
-          '调试卡片',
-          '弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',
-          [
-            h('div', { class: 'preview-row' }, [
-              h(NButton, { size: 'small', loading: previewBusy.value === 'stop', onClick: () => void preview('stop') }, { default: () => '任务完成' }),
-              h(NButton, { size: 'small', loading: previewBusy.value === 'working', onClick: () => void preview('working') }, { default: () => '调用工具中' }),
-              h(NButton, { size: 'small', loading: previewBusy.value === 'tool', onClick: () => void preview('tool') }, { default: () => '批准工具' }),
-              h(NButton, { size: 'small', loading: previewBusy.value === 'ask', onClick: () => void preview('ask') }, { default: () => '回答问题' }),
-              h(NButton, { size: 'small', loading: previewBusy.value === 'ask-multi', onClick: () => void preview('ask-multi') }, { default: () => '多题问答' }),
-            ]),
-          ],
-        ),
-      ])
-  },
+  },[loadAttempt])
+  async function toggle(agent) {
+    if (hookOperation.current) return
+    hookOperation.current = true
+    setBusy(agent.id)
+    const installing = !agent.installed
+    try {
+      await plugin.sidecar.request(installing ? 'install' : 'uninstall',{agent:agent.id})
+      const rows = await loadAgents()
+      if (installing && !rows.find(a => a.id === agent.id)?.installed) notify('没有写入成功（该 Agent 的配置目录可能不存在）',true)
+      else notify(installing ? 'Hook 已安装' : 'Hook 已卸载')
+    } catch (error) { notify(errorText(error),true) }
+    finally { hookOperation.current = false; if (alive.current) setBusy('') }
+  }
+  async function preview(kind) {
+    setPreviewBusy(kind)
+    try { await plugin.sidecar.request('testCard',{kind}); notify('已弹出测试卡片') }
+    catch (error) { notify(errorText(error),true) }
+    finally { if (alive.current) setPreviewBusy('') }
+  }
+  async function pickSoundFile() {
+    try {
+      const path = await plugin.dialog.showOpenDialog({filters:[{name:'Audio',extensions:['wav','mp3','ogg','flac']},{name:'All',extensions:['*']}]})
+      if (path && alive.current) update({soundPath:Array.isArray(path) ? path[0] : path})
+    } catch (error) { notify(errorText(error),true) }
+  }
+  async function playPreview() {
+    try {
+      const cfg = configRef.current
+      if (cfg.soundMode === 'muted') return
+      const dir = await plugin.path.getPluginDir()
+      const path = cfg.soundMode === 'custom' ? cfg.soundPath.trim() : `${String(dir || '').replace(/[\\/]+$/,'')}/assets/agent-notify.wav`
+      if (!path) { notify('请先选择音频文件',true); return }
+      await plugin.audio.play(path,{volume:cfg.soundVolume})
+    } catch (error) { notify(errorText(error),true) }
+  }
+  const detected = agents.filter(a => a.detected !== false)
+  const undetected = agents.filter(a => a.detected === false)
+  const strategy = [['off','不通知'],['auto','自动消失'],['sticky','常驻']]
+  return h('div',{className:'an-set'},
+    feedback ? h('div',{className:`an-feedback${feedback.error ? ' is-error' : ''}`,role:feedback.error ? 'alert' : 'status'},feedback.text,!ready && feedback.error ? h(Button,{size:'1',onClick:() => setLoadAttempt(value => value+1)},'重试') : null) : null,
+    section('Agent 联动','检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',[
+      sidecarStale ? h('p',{className:'section-desc'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
+      ...detected.map(agent => h('div',{className:'event-row',key:agent.id},
+        h('div',{className:'agent-label'},h('span',{className:'event-name'},NAMES[agent.id] || agent.id),h(Badge,{color:agent.installed ? 'green' : 'gray'},agent.installed ? '已安装' : '未安装')),
+        h(Button,{size:'2',variant:'soft',color:agent.installed ? 'red' : 'blue',loading:busy === agent.id,disabled:!!busy,onClick:() => void toggle(agent)},agent.installed ? '卸载 Hook' : '安装 Hook'))),
+      !detected.length ? h('p',{className:'section-desc'},'未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。') : null,
+      undetected.length ? row('未检测到',h('div',{className:'preview-row'},...undetected.map(a => h(Badge,{key:a.id,color:'amber',title:'未检测到配置目录，无法写入 hook'},NAMES[a.id] || a.id)))) : null,
+    ]),
+    section('调试','卡片底部可看 hook stdin。常用为去重后的字段，原始保留对方传来的全文。',[
+      row('调试显示',segments(config.debugView,[['off','关闭'],['common','常用'],['raw','原始']],debugView => update({debugView,showDebug:debugView !== 'off'}),!ready)),
+      row('默认状态',segments(config.debugExpanded ? 'expanded' : 'collapsed',[['collapsed','折叠'],['expanded','展开']],value => update({debugExpanded:value === 'expanded'}),!ready)),
+    ]),
+    section('事件通知策略','默认只对「需要你回来」的事件常驻；可按事件改成不通知 / 自动消失 / 常驻。',[
+      row('自动消失时间（秒）',h(TextField.Root,{type:'number',min:3,max:600,step:1,style:{width:'7.5rem'},value:config.autoHideSeconds,disabled:!ready,onChange:event => {
+        const n=Number(event.target.value); if (Number.isFinite(n) && n >= 3 && n <= 600) update({autoHideSeconds:Math.round(n)},200)
+      }})),
+      ...EVENTS.map(([id,label]) => row(label,segments(config.eventModes[id],strategy,mode => update({eventModes:{...configRef.current.eventModes,[id]:mode}}),!ready))),
+    ]),
+    section('提示音','通知弹出时播放。自定义支持本地 wav / mp3 / ogg / flac。',[
+      row('提示音模式',segments(config.soundMode,[['builtin','内置'],['custom','自定义'],['muted','静音']],soundMode => update({soundMode}),!ready)),
+      config.soundMode !== 'muted' ? row('提示音音量',h('div',{className:'sound-volume'},h(Slider,{value:[config.soundVolume],min:0,max:1,step:.05,style:{width:'8rem'},disabled:!ready,onValueChange:([soundVolume]) => update({soundVolume},200)}),h('span',{className:'ed-unit'},`${Math.round(config.soundVolume*100)}%`))) : null,
+      config.soundMode === 'custom' ? row('音频文件路径',h('div',{className:'sound-path'},h(TextField.Root,{className:'sound-input',value:config.soundPath,placeholder:'选择或输入本地音频文件',disabled:!ready,onChange:e => update({soundPath:e.target.value},500),onBlur:() => { if (dirty.current) void persist() }}),h(Button,{size:'2',onClick:() => void pickSoundFile(),disabled:!ready},'选择文件'))) : null,
+      config.soundMode !== 'muted' ? row('试听',h(Button,{size:'2',onClick:() => void playPreview(),disabled:!ready},'预览')) : null,
+    ]),
+    section('调试卡片','弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',[
+      h('div',{className:'preview-row'},...[['stop','任务完成'],['working','调用工具中'],['tool','批准工具'],['ask','回答问题'],['ask-multi','多题问答']].map(([kind,label]) => h(Button,{key:kind,size:'2',loading:previewBusy === kind,disabled:!!previewBusy,onClick:() => void preview(kind)},label))),
+    ]))
 }
+export { AgentNotifySettings as Settings }

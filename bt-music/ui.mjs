@@ -1,8 +1,8 @@
-/** Bluetooth headset toast — compact row; progress bar pauses with host hover timer. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') throw new Error('Catrace plugin Vue runtime missing')
-
-const STYLE_ID = 'catrace-plugin-bt-music-css'
+const React = globalThis.__CATRACE_REACT__;
+if (!React?.createElement || !React?.useState)
+    throw new Error('Catrace plugin React runtime missing');
+const { createElement: h, useState, useRef, useEffect } = React;
+const STYLE_ID = 'catrace-plugin-bt-music-css';
 const CSS = `
 .bt-root { position:relative; width:100%; box-sizing:border-box; }
 .bt-row {
@@ -59,79 +59,66 @@ const CSS = `
   from { transform:scaleX(1); }
   to { transform:scaleX(0); }
 }
-`
-
+`;
 function ensureStyles() {
-  if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const style = document.createElement('style')
-  style.id = STYLE_ID
-  style.textContent = CSS
-  document.head.appendChild(style)
+    if (typeof document === 'undefined')
+        return;
+    if (document.getElementById(STYLE_ID))
+        return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = plugin.theme.css(CSS);
+    document.head.appendChild(style);
 }
-
 function playerLabel(payload) {
-  const name = String(payload.playerName || '').trim()
-  if (name) return name.toLowerCase().endsWith('.exe') ? name : `${name}.exe`
-  const path = String(payload.playerPath || '').trim()
-  if (!path) return ''
-  return path.split(/[/\\]/).pop() || path
+    const name = String(payload.playerName || '').trim();
+    if (name)
+        return name.toLowerCase().endsWith('.exe') ? name : `${name}.exe`;
+    const path = String(payload.playerPath || '').trim();
+    if (!path)
+        return '';
+    return path.split(/[/\\]/).pop() || path;
 }
-
-export default {
-  name: 'BtMusicCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const payload = event.payload || {}
-    const deviceName = String(payload.deviceName || event.body || '蓝牙耳机').trim() || '蓝牙耳机'
-    const exe = playerLabel(payload)
-    const playerIcon = String(payload.playerIconDataUrl || '')
-    const letter = (exe || deviceName || '?').replace(/\.exe$/i, '').slice(0, 1).toUpperCase()
-
-    return h('div', { class: 'bt-root' }, [
-      h('div', { class: 'bt-row' }, [
-        playerIcon
-          ? h('img', { class: 'bt-icon', src: playerIcon, alt: '' })
-          : h('div', { class: 'bt-icon fallback' }, letter),
-        h('div', { class: 'bt-mid' }, [
-          h('h2', { class: 'bt-title' }, `${deviceName} 已连接`),
-          exe ? h('p', { class: 'bt-sub' }, `已关联: ${exe}`) : null,
-        ]),
-        h('div', { class: 'bt-right' }, [
-          h(
-            'button',
-            {
-              class: 'bt-launch',
-              type: 'button',
-              onClick: () => this.$emit('action', 'open-player'),
-            },
-            '启动程序',
-          ),
-          h(
-            'button',
-            {
-              class: 'bt-x',
-              type: 'button',
-              'aria-label': '关闭',
-              onClick: () => this.$emit('close'),
-            },
-            '×',
-          ),
-        ]),
-      ]),
-      !event.sticky
-        ? h('div', { class: 'bt-bar-wrap' }, [
-            h('div', { class: ['bt-bar', this.isHovered ? 'paused' : ''] }),
-          ])
-        : null,
-    ])
-  },
+export default function BtMusicCard({ event: incomingEvent = {}, isHovered = false, onClose, onAction }) {
+    useEffect(ensureStyles, []);
+    const event = incomingEvent || {};
+    const payload = event.payload || {};
+    const deviceName = String(payload.deviceName || event.body || '蓝牙耳机').trim() || '蓝牙耳机';
+    const exe = playerLabel(payload);
+    const playerIcon = String(payload.playerIconDataUrl || '');
+    const letter = (exe || deviceName || '?').replace(/\.exe$/i, '').slice(0, 1).toUpperCase();
+    return h('div', {
+        className: 'bt-root'
+    }, h('div', {
+        className: 'bt-row'
+    }, playerIcon
+        ? h('img', {
+            className: 'bt-icon',
+            src: playerIcon,
+            alt: ''
+        }) : h('div', {
+        className: 'bt-icon fallback'
+    }, letter), h('div', {
+        className: 'bt-mid'
+    }, h('h2', {
+        className: 'bt-title'
+    }, `${deviceName} 已连接`), exe ? h('p', {
+        className: 'bt-sub'
+    }, `已关联: ${exe}`) : null), h('div', {
+        className: 'bt-right'
+    }, h('button', {
+        className: 'bt-launch',
+        type: 'button',
+        onClick: () => onAction?.('open-player')
+    }, '启动程序'), h('button', {
+        className: 'bt-x',
+        type: 'button',
+        'aria-label': '关闭',
+        onClick: () => onClose?.()
+    }, '×'))), !event.sticky
+        ? h('div', {
+            className: 'bt-bar-wrap'
+        }, h('div', {
+            className: ['bt-bar', isHovered ? 'paused' : ''].filter(Boolean).join(" ")
+        })) : null);
 }

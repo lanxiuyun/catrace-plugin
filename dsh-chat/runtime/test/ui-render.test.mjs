@@ -1,353 +1,211 @@
-/**
- * UI 冒烟：在 Node 里用最小 Vue/Naive 桩跑一遍 ui.mjs / settings.mjs 的 setup + render。
- *
- * 目的不是「渲染得像不像」，而是把只能在运行时才炸的合同错误挡在单测里：
- * 导出名写错、解构到不存在的注入成员、render 里引用未定义变量、顶层抛错。
- * （真正的前端验证要连 `pnpm tauri dev`，不在这里做。）
- */
+/** React component/hook contract tests. No browser, WebView, server, network or installed DSH. */
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-const here = dirname(fileURLToPath(import.meta.url))
-const ROOT = join(here, '..', '..')
+const ROOT=join(dirname(fileURLToPath(import.meta.url)),'..','..')
+const flush=async () => {for(let i=0;i<40;i++)await Promise.resolve()}
+const read=file => readFileSync(join(ROOT,file),'utf8').replace(/\r\n/g,'\n')
 
-function installStubs() {
-  const mounted = []
-  globalThis.__CATRACE_VUE__ = {
-    h: (type, props, children) => ({ type, props: props ?? {}, children: children ?? null }),
-    ref: (value) => ({ value }),
-    computed: (getter) => ({ get value() { return getter() } }),
-    watch: () => () => {},
-    markRaw: (value) => value,
-    onMounted: (fn) => mounted.push(fn),
-    onBeforeUnmount: () => {},
+function harness(api={}) {
+  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
+  const before=new Map(globals.map(key => [key,{present:Object.hasOwn(globalThis,key),value:globalThis[key]}]))
+  const instances=new Map()
+  const timeouts=new Map()
+  const intervals=new Map()
+  let timerId=0,current=null,effects=[],disposed=false
+  const changed=(left,right) => !left || !right || left.length!==right.length || right.some((value,index) => !Object.is(value,left[index]))
+  globalThis.__CATRACE_REACT__={
+    createElement:(type,props,...children) => ({type,key:props?.key,props:{...props,children}}),
+    useState(initial) {
+      const instance=current,index=instance.cursor++
+      if(!instance.slots[index])instance.slots[index]={value:typeof initial==='function' ? initial() : initial}
+      const slot=instance.slots[index]
+      return [slot.value,next => {slot.value=typeof next==='function' ? next(slot.value) : next}]
+    },
+    useRef(initial) {const index=current.cursor++;return current.slots[index] ||= {current:initial}},
+    useEffect(effect,deps) {
+      const instance=current,index=instance.cursor++,old=instance.slots[index]
+      if(!old || changed(old.deps,deps)) {
+        const slot={deps};instance.slots[index]=slot
+        effects.push(() => {old?.cleanup?.();slot.cleanup=effect()})
+      }
+    },
   }
-  const naiveNames = [
-    'NAlert', 'NButton', 'NDivider', 'NInput', 'NModal', 'NPopconfirm', 'NProgress',
-    'NRadioButton', 'NRadioGroup', 'NSelect', 'NSlider', 'NSpace', 'NSwitch', 'NTag', 'NTooltip',
-  ]
-  globalThis.__CATRACE_NAIVE__ = Object.fromEntries(naiveNames.map((name) => [name, { __naive: name }]))
-  globalThis.__CATRACE_NAIVE__.useMessage = () => ({ success: () => {}, error: () => {} })
-  globalThis.__CATRACE_NAIVE__.useDialog = () => ({})
-  globalThis.__CATRACE_UI__ = { SettingRow: { __ui: 'SettingRow' }, SliderControl: { __ui: 'SliderControl' } }
-  globalThis.__CATRACE_CREATE_PLUGIN_API__ = () => ({
-    config: { get: async () => ({}), set: async () => {} },
-    sidecar: { request: async () => ({}) },
-    dialog: { pickFile: async () => null, pickFolder: async () => null },
-    path: { get: async () => '', getPluginDir: async () => '' },
-    log: { info: async () => {}, warn: async () => {}, error: async () => {} },
+  globalThis.__CATRACE_RADIX__={Button:'RadixButton',Badge:'RadixBadge',Switch:'RadixSwitch',TextField:{Root:'RadixTextField'},TextArea:'RadixTextArea',Tooltip:'RadixTooltip'}
+  globalThis.__CATRACE_CREATE_PLUGIN_API__=() => ({
+    config:{get:async () => ({}),set:async () => {}},sidecar:{request:async () => ({contract:7,config:{},flat:[]})},
+    dialog:{pickFolder:async () => null},shell:{openExternal:async () => {}},theme:{css:css => css},...api,
   })
-  globalThis.document = {
-    head: { appendChild: () => {} },
-    getElementById: () => null,
-    createElement: () => ({ set id(v) {}, set textContent(v) {} }),
+  globalThis.document={visibilityState:'visible',head:{appendChild:() => {}},getElementById:() => null,createElement:() => ({})}
+  globalThis.setTimeout=fn => {const id=++timerId;timeouts.set(id,fn);return id}
+  globalThis.clearTimeout=id => timeouts.delete(id)
+  globalThis.setInterval=fn => {const id=++timerId;intervals.set(id,fn);return id}
+  globalThis.clearInterval=id => intervals.delete(id)
+  globalThis.window={setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout,setInterval:globalThis.setInterval,clearInterval:globalThis.clearInterval}
+  globalThis.fetch=async () => {throw new Error('Unexpected real HTTP request')}
+  function expand(node,path) {
+    if(Array.isArray(node))return node.map((child,index) => expand(child,`${path}/${child?.key ?? index}`))
+    if(!node || typeof node!=='object')return node
+    if(typeof node.type==='function') {
+      const id=`${path}:${node.type.name}:${node.key ?? ''}`
+      const instance=instances.get(id) || {cursor:0,slots:[]}
+      instances.set(id,instance);instance.cursor=0
+      const parent=current;current=instance
+      let result
+      try {result=node.type(node.props)}finally {current=parent}
+      return expand(result,`${id}/output`)
+    }
+    return {...node,props:{...node.props,children:expand(node.props?.children,`${path}/children`)}}
   }
-  return { mounted }
-}
-
-/** 把 h() 出来的树拍平成字符串，便于断言关键字（会下钻 slot 对象与 slot 函数） */
-function flatten(node) {
-  if (node === null || node === undefined || node === false) return ''
-  if (typeof node === 'function') return flatten(node())
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(flatten).join(' ')
-  if (typeof node !== 'object') return ''
-  const props = node.props ?? {}
-  const own = [props.class, props.title, props.placeholder].filter((v) => typeof v === 'string').join(' ')
-  const body = 'type' in node ? flatten(node.children) : Object.values(node).map(flatten).join(' ')
-  return `${own} ${body}`.trim()
-}
-
-async function loadSurface(file) {
-  // 每次请求带不同的 query，绕开 ESM 模块缓存（两个表面都要自己那份桩状态）
-  const url = `${pathToFileURL(join(ROOT, file)).href}?t=${Date.now()}${Math.random()}`
-  return import(url)
-}
-
-/**
- * 按宿主的方式加载：宿主会在插件源码前注入一行前奏
- * `const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__('<id>')`（见 tools/plugin-demo/develop.md）。
- * 想验证"真的能存配置"就必须照这个方式加载，否则模块里的 `plugin` 是未定义。
- */
-async function loadWithHostPrelude(file, id) {
-  const source = readFileSync(join(ROOT, file), 'utf8')
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-chat-plugin-'))
-  const target = join(dir, file.split(/[\\/]/).pop())
-  writeFileSync(target, `const plugin = globalThis.__CATRACE_CREATE_PLUGIN_API__(${JSON.stringify(id)})\n${source}`, 'utf8')
-  return import(`${pathToFileURL(target).href}?t=${Date.now()}${Math.random()}`)
-}
-
-/** 收集树里所有 NTag 节点（去装饰标签云） */
-function collectTags(node, out = []) {
-  if (node === null || node === undefined || node === false) return out
-  if (typeof node === 'function') return collectTags(node(), out)
-  if (Array.isArray(node)) {
-    for (const child of node) collectTags(child, out)
-    return out
+  return {
+    async load(file) {
+      const source=`const plugin=globalThis.__CATRACE_CREATE_PLUGIN_API__('dsh-chat')\n${read(file)}\n// ${Math.random()}`
+      return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+    },
+    render(component,props={}) {
+      const tree=expand({type:component,props},'root')
+      const pending=effects;effects=[];for(const effect of pending)effect()
+      return tree
+    },
+    async timers() {const pending=[...timeouts.values()];timeouts.clear();for(const fn of pending)fn();await flush()},
+    async dispose() {
+      if(disposed)return
+      disposed=true
+      for(const instance of instances.values())for(const slot of instance.slots)slot?.cleanup?.()
+      await flush()
+      assert.equal(intervals.size,0,'component unmount must dispose polling')
+      for(const [key,previous] of before) {if(previous.present)globalThis[key]=previous.value;else delete globalThis[key]}
+    },
   }
-  if (typeof node !== 'object') return out
-  if (node.type && node.type.__naive === 'NTag' && node.props?.checkable) out.push(node)
-  if ('type' in node) collectTags(node.children, out)
-  else for (const value of Object.values(node)) collectTags(value, out)
-  return out
+}
+function nodes(node,predicate,found=[]) {
+  if(Array.isArray(node)){for(const child of node)nodes(child,predicate,found);return found}
+  if(!node || typeof node!=='object')return found
+  if(predicate(node))found.push(node)
+  nodes(node.props?.children,predicate,found)
+  return found
+}
+function text(node) {
+  if(node==null || node===false)return ''
+  if(typeof node==='string'||typeof node==='number')return String(node)
+  if(Array.isArray(node))return node.map(text).join(' ')
+  return [node.props?.className,node.props?.title,node.props?.placeholder,text(node.props?.children)].filter(Boolean).join(' ')
+}
+const click=node => node.props.onClick?.({stopPropagation(){},preventDefault(){}})
+const button=(tree,label) => nodes(tree,node => node.type==='RadixButton' || node.type==='button').find(node => text(node.props.children)===label)
+const chips=tree => nodes(tree,node => typeof node.props?.['aria-pressed']==='boolean' && String(node.props.className || '').includes('__chip'))
+const controls=(tree,type) => nodes(tree,node => node.type===type)
+
+async function settingsHarness(t,api={}) {
+  const h=harness(api);t.after(() => h.dispose())
+  const mod=await h.load('settings.mjs')
+  assert.equal(typeof mod.default,'function')
+  assert.equal(mod.Settings,mod.default)
+  h.render(mod.default);await flush()
+  return {...h,mod,render:() => h.render(mod.default)}
 }
 
-/** 收集树里所有 NSwitch 节点（用于模拟用户点开关） */
-function collectSwitches(node, out = []) {
-  if (node === null || node === undefined || node === false) return out
-  if (typeof node === 'function') return collectSwitches(node(), out)
-  if (Array.isArray(node)) {
-    for (const child of node) collectSwitches(child, out)
-    return out
-  }
-  if (typeof node !== 'object') return out
-  if (node.type && node.type.__naive === 'NSwitch') out.push(node)
-  if ('type' in node) collectSwitches(node.children, out)
-  else for (const value of Object.values(node)) collectSwitches(value, out)
-  return out
-}
-
-/** 收集树里任意一种 naive 组件节点 */
-function collectNaive(node, name, out = []) {
-  if (node === null || node === undefined || node === false) return out
-  if (typeof node === 'function') return collectNaive(node(), name, out)
-  if (Array.isArray(node)) {
-    for (const child of node) collectNaive(child, name, out)
-    return out
-  }
-  if (typeof node !== 'object') return out
-  if (node.type && node.type.__naive === name) out.push(node)
-  // 注意：递归必须把 name 传下去（漏传会让深层节点永远搜不到——CSS 输入框就藏在 details 折叠里）
-  if ('type' in node) collectNaive(node.children, name, out)
-  else for (const value of Object.values(node)) collectNaive(value, name, out)
-  return out
-}
-
-/** 从 settings.mjs 源码里解析 DEFAULTS 的键集合（用来自动覆盖"以后新增的键"） */
-function parseDefaultsKeys(source) {
-  const block = source.replace(/\r/g, '').match(/const DEFAULTS = \{([\s\S]*?)\n\}/)
-  if (!block) return []
-  return block[1]
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, '').match(/^\s*([A-Za-z][A-Za-z0-9]*):/))
-    .filter(Boolean)
-    .map((match) => match[1])
-}
-
-test('ui.mjs：窗口卡无 guiUrl 时渲染旧版镜像卡的"请重开"提示', async () => {
-  installStubs()
-  const mod = await loadSurface('ui.mjs')
-  assert.ok(mod.default, 'ui.mjs 必须默认导出卡片组件')
-  assert.equal(mod.Card, mod.default, 'Card 与 default 必须是同一个组件')
-
-  const component = mod.default
-  const setupResult = component.setup(
-    { event: { title: 'DSH 对话', payload: { httpPort: 23457, httpToken: 'x' } }, isHovered: false },
-    { emit: () => {} },
-  )
-  assert.equal(typeof setupResult, 'function', 'setup 必须返回 render 函数')
-  const text = flatten(setupResult())
-  assert.match(text, /dsh-chat-card/, '应渲染出 dsh-chat-card 根节点')
-  assert.match(text, /镜像模式已经移除/, '0.2.x 的旧镜像卡事件要给出明确提示，而不是白屏')
-  assert.match(text, /展开官方界面/, '提示里要给出下一步动作')
-  assert.ok(!text.includes('问问 DSH'), '镜像输入框已随 SDK 链路移除')
-  assert.ok(!text.includes('iframe'), '没有 guiUrl 就不该渲染 iframe')
+test('React window card: missing GUI URL gives actionable fallback; GUI iframe and callbacks remain intact',async t => {
+  let closed=0
+  const opened=[]
+  const h=harness({shell:{openExternal:async url => opened.push(url)}});t.after(() => h.dispose())
+  const mod=await h.load('ui.mjs')
+  assert.equal(typeof mod.default,'function');assert.equal(mod.Card,mod.default)
+  const fallback=h.render(mod.default,{event:{title:'DSH 对话',payload:{}},onClose:() => closed++})
+  assert.match(text(fallback),/dsh-chat-card/);assert.match(text(fallback),/重新展开官方界面/)
+  assert.equal(nodes(fallback,node => node.type==='iframe').length,0)
+  click(button(fallback,'×'));assert.equal(closed,1)
+  const url='http://127.0.0.1:23458/?dshw-session=s1'
+  const tree=h.render(mod.default,{event:{title:'第二个会话',payload:{guiUrl:url,guiTitle:'第二个会话',guiSessionId:'s1'}}})
+  assert.match(text(tree),/第二个会话/)
+  const frame=nodes(tree,node => node.type==='iframe')[0]
+  assert.equal(frame.props.src,url);assert.equal(frame.props.allow,'clipboard-read; clipboard-write')
+  assert.equal(frame.props.sandbox,undefined)
+  click(button(tree,'↗'));await flush();assert.deepEqual(opened,[url])
 })
 
-test('ui.mjs：真 GUI 窗口卡渲染 iframe，状态通知卡渲染折叠条', async () => {
-  installStubs()
-  const mod = await loadSurface('ui.mjs')
-  const component = mod.default
-
-  // 窗口卡：payload 带 guiUrl → iframe 指向同源反代
-  const guiSetup = component.setup(
-    {
-      event: {
-        title: '第二个会话',
-        payload: { guiUrl: 'http://127.0.0.1:23458/?dshw-session=s1', guiTitle: '第二个会话', guiSessionId: 's1' },
-      },
-      isHovered: false,
-    },
-    { emit: () => {} },
-  )
-  const guiTree = guiSetup()
-  assert.match(flatten(guiTree), /第二个会话/, '卡片顶栏要显示会话标题')
-  assert.match(JSON.stringify(guiTree), /'iframe'|iframe/, '应渲染 iframe')
-  assert.match(JSON.stringify(guiTree), /dshw-session=s1/, 'iframe src 要指向反代')
-
-  // 状态通知卡：正文点击打开小窗，没有对话输入框
-  const noticeEvent = {
-    event_type: 'dsh-chat.notice',
-    title: '整理三点结论',
-    payload: {
-      notice: true,
-      sessionId: 's1',
-      status: 'running',
-      preview: '最新的输出文本',
-      httpPort: 23457,
-      httpToken: 'x',
-    },
+test('React notice card: running/error labels, preview, iframe expansion and manual collapse survive republishing',async t => {
+  const calls=[]
+  let closed=0
+  const h=harness();t.after(() => h.dispose())
+  globalThis.fetch=async (url,init) => {
+    calls.push({url,init,body:JSON.parse(init.body)})
+    return {ok:true,json:async () => ({ok:true,result:url.endsWith('/gui') ? {guiUrl:'http://127.0.0.1:23458/?dshw-session=s1'} : {ok:true}})}
   }
-  const noticeSetup = component.setup({ event: noticeEvent, isHovered: false }, { emit: () => {} })
-  assert.equal(typeof noticeSetup, 'function', '状态卡也要 setup 出 render 函数')
-  const text = flatten(noticeSetup())
-  assert.match(text, /dsh-chat-notice/, '应渲染 dsh-chat-notice 根节点')
-  assert.match(text, /整理三点结论/, '折叠条要显示会话标题')
-  assert.match(text, /进行中/, '要显示状态 chip')
-  assert.match(text, /is-running/, '进行中状态要标记为 running，供顶部流动色条启用动画')
-  assert.match(text, /dsh-chat-notice__statusline/, '状态边框层应随通知卡渲染')
-  assert.match(text, /最新的输出文本/, '要显示最新输出预览')
-  assert.ok(!text.includes('发送'), '状态卡不该有对话输入框')
-
-  const errorEvent = { ...noticeEvent, payload: { ...noticeEvent.payload, status: 'error' } }
-  const errorSetup = component.setup({ event: errorEvent, isHovered: false }, { emit: () => {} })
-  const errorTree = errorSetup()
-  assert.match(flatten(errorTree), /is-error/, 'error 必须映射到红色错误状态类')
-  assert.match(flatten(errorTree), /处理失败/, 'error 状态应显示失败标签')
+  const mod=await h.load('ui.mjs')
+  const event={event_type:'dsh-chat.notice',title:'整理三点结论',payload:{notice:true,sessionId:'s1',status:'running',preview:'最新的输出文本',httpPort:23457,httpToken:'secret'}}
+  const props=() => ({event,onClose:() => closed++})
+  let tree=h.render(mod.default,props())
+  for(const keyword of ['整理三点结论','进行中','is-running','dsh-chat-notice__statusline','最新的输出文本'])assert.ok(text(tree).includes(keyword),keyword)
+  assert.ok(!text(tree).includes('发送'))
+  event.payload={...event.payload,status:'error'}
+  tree=h.render(mod.default,props());assert.match(text(tree),/is-error/);assert.match(text(tree),/处理失败/)
+  event.payload={...event.payload,status:'waiting',statusLabel:'等你审批',waitKind:'approval',autoExpand:true}
+  h.render(mod.default,props());await flush();tree=h.render(mod.default,props())
+  assert.equal(nodes(tree,node => node.type==='iframe').length,1,'waiting automatically opens official GUI')
+  assert.equal(calls.find(call => call.url.endsWith('/gui')).init.headers['X-Dsh-Chat-Token'],'secret')
+  click(button(tree,'收起'));await flush();tree=h.render(mod.default,props())
+  assert.equal(nodes(tree,node => node.type==='iframe').length,0)
+  event.payload={...event.payload,autoExpand:false};h.render(mod.default,props())
+  event.payload={...event.payload,autoExpand:true};tree=h.render(mod.default,props());await flush();tree=h.render(mod.default,props())
+  assert.equal(nodes(tree,node => node.type==='iframe').length,0,'same waiting reason must not override manual collapse')
+  const preview=nodes(tree,node => String(node.props?.className || '').includes('__preview'))[0]
+  click(preview);await flush();tree=h.render(mod.default,props())
+  assert.equal(nodes(tree,node => node.type==='iframe').length,1,'manual reopen obtains fresh URL')
+  assert.equal(calls.filter(call => call.url.endsWith('/gui')).length,2)
+  assert.ok(calls.some(call => call.url.endsWith('/notice/view') && call.body.expanded===false))
+  click(button(tree,'×'));assert.equal(closed,1)
 })
 
-test('settings.mjs：点开关后保存对象必须带上这些键（防「设置没用」）', async () => {
-  const stubs = installStubs()
-  const saved = []
-  const rpc = []
-  globalThis.__CATRACE_CREATE_PLUGIN_API__ = () => ({
-    config: { get: async () => ({}), set: async (config) => saved.push(config) },
-    sidecar: {
-      request: async (method, params) => {
-        rpc.push({ method, params })
-        return { config: {}, flat: [] }
-      },
-    },
-    dialog: { pickFile: async () => null, pickFolder: async () => null },
-    path: { get: async () => '', getPluginDir: async () => '' },
-    log: { info: async () => {}, warn: async () => {}, error: async () => {} },
+test('React settings: all appearance keys and custom CSS are loaded, edited, saved and pushed without duplicate writes',async t => {
+  const saved=[],rpc=[]
+  const h=await settingsHarness(t,{
+    config:{get:async () => ({}),set:async config => saved.push(config)},
+    sidecar:{request:async (method,params) => {rpc.push({method,params});return {contract:7,config:{},flat:[{group:'整体',selector:'[class*="_header"]',desc:'官方顶栏'}]}}},
   })
-  // scheduleSave 用 window.setTimeout 做 debounce
-  // 轮询用假的 setInterval（真定时器会让测试进程挂着不退出；轮询本身不是这里要测的东西）
-  globalThis.window = {
-    setTimeout: (fn, ms) => setTimeout(fn, ms),
-    clearTimeout: (id) => clearTimeout(id),
-    setInterval: () => 0,
-    clearInterval: () => {},
-  }
-
-  const mod = await loadWithHostPrelude('settings.mjs', 'dsh-chat')
-  // 注意：模块在 import 那一刻就解构了 __CATRACE_VUE__.onMounted，
-  // 所以必须用 installStubs 收集的那份（import 之后再往 globalThis 上赋同名函数是不生效的）
-  const render = mod.default.setup({}, { emit: () => {} })
-  // mounted 抛错必须让测试红：allSettled 会吞掉 rejection（loaded 未定义那类 bug 就这么漏过）
-  const mountedResults = await Promise.allSettled(stubs.mounted.map((fn) => fn()))
-  const mountedErrors = mountedResults.filter((r) => r.status === 'rejected')
-  assert.equal(mountedErrors.length, 0, `onMounted 抛错：${mountedErrors.map((r) => String(r.reason)).join('; ')}`)
-
-  // 外观卡的顶层 4 个 chip（顶栏子项在父项点亮后才渲染）+ 2 个开关（状态通知卡头 / 紧凑留白）
-  const tags = collectTags(render())
-  const switches = collectSwitches(render())
-  assert.equal(tags.length, 4, `顶层应有 4 个 chip（实际 ${tags.length}）`)
-  assert.equal(switches.length, 2, `应有 2 个 NSwitch（实际 ${switches.length}）`)
-  for (const tag of tags) {
-    assert.equal(typeof tag.props['onUpdate:checked'], 'function', 'NTag 必须绑定 onUpdate:checked（否则点了不落盘）')
-  }
-  for (const sw of switches) {
-    assert.equal(typeof sw.props['onUpdate:value'], 'function', 'NSwitch 必须绑定 onUpdate:value')
-  }
-
-  // 父项点亮后才出现子项（不是置灰）：顶栏内部 → 图标内部，两级
-  const tagByLabel = (label) => collectTags(render()).find((tag) => flatten(tag).includes(label))
-  assert.ok(!flatten(render()).includes('对话/轨迹 标签'), '「官方顶栏」没点亮时，顶栏子项不应渲染')
-  tagByLabel('官方顶栏').props['onUpdate:checked'](true)
-  assert.ok(flatten(render()).includes('对话/轨迹 标签'), '点亮「官方顶栏」后应出现顶栏子项')
-  assert.ok(!flatten(render()).includes('「…」更多操作'), '「顶栏右侧图标」没点亮时，图标子项不该渲染')
-  tagByLabel('顶栏右侧图标').props['onUpdate:checked'](true)
-  assert.ok(flatten(render()).includes('「…」更多操作'), '点亮「顶栏右侧图标」后应出现它的子项')
-  assert.equal(collectTags(render()).length, 11, '父项全亮时应看到全部 11 个 chip')
-
-  // 全部关掉：保存对象必须把 false 落盘（漏键 = sidecar 回退默认值 → 设置没用）
-  for (const tag of collectTags(render())) tag.props['onUpdate:checked'](false)
-  for (const sw of collectSwitches(render())) sw.props['onUpdate:value'](false)
-
-  // 自定义 CSS：输入框收在默认折叠的 details 里，但必须存在且能存
-  const cssInput = collectNaive(render(), 'NInput').find((input) => input.props?.type === 'textarea')
-  assert.ok(cssInput, '自定义 CSS 输入框必须在（折叠在 details 里也算）')
-  cssInput.props['onUpdate:value']('/* marker */')
-
-  await new Promise((resolve) => setTimeout(resolve, 900))
-
-  assert.ok(saved.length > 0, '改开关必须触发保存')
-  const last = saved.at(-1)
-  const expected = [
-    'showRail',
-    'showHeader',
-    'showTabs',
-    'showHeaderIcons',
-    'showHeaderMore',
-    'showHeaderPanel',
-    'showHeaderTitle',
-    'showHeaderChips',
-    'showComposerStatus',
-    'showMessageMeta',
-    'showHeaderLabels',
-    'compactSpacing',
-    'noticeEnabled',
-  ]
-  for (const key of expected) {
-    assert.equal(last[key], false, `保存对象必须包含 ${key}=false（否则 sidecar 会回退默认值 → 设置没用）`)
-  }
-  assert.equal(last.customCss, '/* marker */', '自定义 CSS 必须一起保存')
-  // 通用护栏：保存对象必须覆盖 DEFAULTS 的所有键。以后新增键若忘了在 compose() 里处理，这条会立刻失败。
-  const defaultsKeys = parseDefaultsKeys(readFileSync(join(ROOT, 'settings.mjs'), 'utf8'))
-  assert.ok(defaultsKeys.length >= 10, `没解析到 DEFAULTS 键（拿到 ${defaultsKeys.length} 个）`)
-  for (const key of defaultsKeys) {
-    assert.ok(key in last, `保存对象缺键 ${key}：每次保存都会被抹回默认值 → 用户看到「设置没用/重启还原」`)
-  }
-
-  // 无改动不落盘：同样的值再走一遍保存路径（模拟 onBlur：输入框点进去再点走）
-  const savedCountAfterChange = saved.length
-  cssInput.props['onUpdate:value']('/* marker */')
-  await new Promise((resolve) => setTimeout(resolve, 900))
-  assert.equal(
-    saved.length,
-    savedCountAfterChange,
-    '没有实际改动时不该再落盘（onBlur 误触发 saveNow 也不能写盘/弹「已保存」）',
-  )
-
-  // 关键：宿主不会把新配置推给正在运行的 sidecar（只在启动时发一次），
-  // 所以设置页必须自己 push 一次 applyConfig，否则改设置要 disable/enable 插件才生效。
-  const pushed = rpc.filter((entry) => entry.method === 'applyConfig')
-  assert.ok(pushed.length > 0, '保存后必须调用 sidecar 的 applyConfig 推送新配置')
-  const lastPush = pushed.at(-1).params?.config
-  assert.ok(lastPush, 'applyConfig 必须带 config')
-  for (const key of expected) {
-    assert.equal(lastPush[key], false, `推给 sidecar 的配置必须带 ${key}`)
-  }
+  let tree=h.render()
+  assert.equal(chips(tree).length,4);assert.equal(controls(tree,'RadixSwitch').length,2)
+  const chipByLabel=label => chips(h.render()).find(node => text(node.props.children)===label)
+  assert.ok(!text(tree).includes('对话/轨迹 标签'))
+  click(chipByLabel('官方顶栏'));tree=h.render();assert.ok(text(tree).includes('对话/轨迹 标签'))
+  assert.ok(!text(tree).includes('「…」更多操作'))
+  click(chipByLabel('顶栏右侧图标'));tree=h.render();assert.equal(chips(tree).length,11)
+  for(const chip of chips(tree))if(chip.props['aria-pressed'])click(chip)
+  for(const control of controls(tree,'RadixSwitch'))control.props.onCheckedChange(false)
+  const cssInput=controls(h.render(),'RadixTextArea')[0]
+  assert.ok(cssInput);cssInput.props.onChange({target:{value:'/* marker */'}})
+  await h.timers()
+  assert.ok(saved.length>0)
+  const last=saved.at(-1)
+  const expected=['showRail','showHeader','showTabs','showHeaderIcons','showHeaderMore','showHeaderPanel','showHeaderTitle','showHeaderChips','showComposerStatus','showMessageMeta','showHeaderLabels','compactSpacing','noticeEnabled']
+  for(const key of expected)assert.equal(last[key],false,`must persist ${key}=false`)
+  assert.equal(last.customCss,'/* marker */')
+  const block=read('settings.mjs').match(/const DEFAULTS = \{([\s\S]*?)\n\}/)[1]
+  const keys=[...block.matchAll(/^\s*([A-Za-z]\w*):/gm)].map(match => match[1])
+  assert.ok(keys.length>=10);for(const key of keys)assert.ok(key in last,`missing default key ${key}`)
+  assert.deepEqual(rpc.filter(call => call.method==='applyConfig').at(-1).params.config,last)
+  const count=saved.length
+  controls(h.render(),'RadixTextArea')[0].props.onChange({target:{value:'/* marker */'}})
+  await h.timers();assert.equal(saved.length,count,'same normalized config must not write again')
+  click(button(h.render(),'插入'));await h.timers();assert.match(saved.at(-1).customCss,/\[class\*="_header"\] \{/)
+  click(button(h.render(),'清空'));await h.timers();assert.equal(saved.at(-1).customCss,'')
 })
 
-test('settings.mjs：能加载、setup 出 render，并渲染出四块设置（会话/对话卡已移除）', async () => {
-  installStubs()
-  const mod = await loadSurface('settings.mjs')
-  const component = mod.default
-  assert.ok(component, 'settings.mjs 必须默认导出设置组件')
+test('React settings: status, polling controls, notices, appearance and CSS help remain present',async t => {
+  const h=await settingsHarness(t)
+  const tree=h.render(),output=text(tree)
+  for(const keyword of ['运行状态','小窗外观','状态通知','测试卡','状态卡端口','小窗页面端口','DSH 数据目录','运行环境','处理失败','紧凑留白','全部显示','恢复推荐','自定义样式（CSS）与 class 速查'])assert.ok(output.includes(keyword),keyword)
+  for(const removed of ['对话（向 DSH 提问）','DSH 会话','跟随最新','固定到镜像卡','展开默认','显示条数','轮询间隔','打开小窗','小窗标题','启用即弹出','GUI 复用状态','已连上 DSH','本机服务','本机端口','官方界面端口','DSH 主目录','巡检间隔','后台服务','完成后停留','刷新状态'])assert.ok(!output.includes(removed),removed)
+  for(const input of controls(tree,'RadixTextField')) {assert.equal(typeof input.props.onChange,'function');assert.equal(typeof input.props.onBlur,'function');assert.ok('value' in input.props)}
+})
 
-  const setupResult = component.setup({}, { emit: () => {} })
-  assert.equal(typeof setupResult, 'function')
-  const text = flatten(setupResult())
-  for (const keyword of ['运行状态', '小窗外观', '状态通知', '测试卡', '状态卡端口', '小窗页面端口', 'DSH 数据目录', '运行环境']) {
-    assert.match(text, new RegExp(keyword), `设置页应包含「${keyword}」`)
-  }
-  // 「小窗」整卡（打开按钮 / 标题 / 启用即弹出）已并入运行状态；会话/对话卡、紧凑留白开关也不再出现
-  // 「官方界面」状态行是 debug 信息（失败时卡片自己和「最近一次错误」都会说），不该占设置页版面
-  // 端口/目录一律用"用它的东西"命名（状态卡端口 / 小窗页面端口 / DSH 数据目录），旧的行话名不许回潮
-  // 「后台服务」行也删了：能看到这个页面就说明它在运行，恒真的状态行没有信息量
-  for (const gone of ['对话（向 DSH 提问）', 'DSH 会话', '跟随最新', '固定到镜像卡', '展开默认', '显示条数', '轮询间隔', '打开小窗', '小窗标题', '启用即弹出', 'GUI 复用状态', '已连上 DSH', '连接失败', '还没展开过状态卡', '本机服务', '本机端口', '官方界面端口', 'DSH 主目录', '巡检间隔', '后台服务', '完成后停留']) {
-    assert.ok(!text.includes(gone), `已砍掉的界面不应再出现：「${gone}」`)
-  }
-  // 先证明这条不是空断言：flatten 必须看得见按钮标签（拿还留着的「处理失败」当对照）
-  assert.ok(text.includes('处理失败'), 'flatten 应能看到按钮标签，否则下面的"不存在"断言等于没写')
-  // 「测试卡」行里的「刷新状态」也删了：它只是重复卡头「刷新」+ 每 4 秒自动刷新，
-  // 而它唯一影响的那行摘要（盯着几个会话）几乎不变、又没有任何点击反馈 → 点了跟没点一样。
-  assert.ok(!text.includes('刷新状态'), '与卡头重复、点了没反应的「刷新状态」按钮不应再出现')
+test('React settings: unmount flushes dirty config and stops polling',async t => {
+  const saved=[]
+  const h=await settingsHarness(t,{config:{get:async () => ({}),set:async config => saved.push(config)}})
+  controls(h.render(),'RadixTextArea')[0].props.onChange({target:{value:'/* pending */'}})
+  await h.dispose()
+  assert.equal(saved.at(-1).customCss,'/* pending */')
 })

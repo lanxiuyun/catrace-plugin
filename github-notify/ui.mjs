@@ -1,10 +1,8 @@
-/** github-notify toast card — repo + type + title + open link. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
-
-const STYLE_ID = 'catrace-plugin-github-notify-css'
+const React = globalThis.__CATRACE_REACT__;
+if (!React?.createElement || !React?.useState)
+    throw new Error('Catrace plugin React runtime missing');
+const { createElement: h, useState, useRef, useEffect } = React;
+const STYLE_ID = 'catrace-plugin-github-notify-css';
 const CSS = `
 .gh-card {
   display: flex; flex-direction: column; width: 100%; min-height: 0;
@@ -62,138 +60,117 @@ const CSS = `
 .gh-card .btn.ghost { background: var(--bg); color: var(--title); }
 .gh-card .btn.primary { background: #1f883d; color: #fff; }
 .gh-card .btn:hover { filter: brightness(0.97); }
-`
-
+`;
 function ensureStyles() {
-  if (typeof document === 'undefined') return
-  let el = document.getElementById(STYLE_ID)
-  if (!el) {
-    el = document.createElement('style')
-    el.id = STYLE_ID
-    document.head.appendChild(el)
-  }
-  el.textContent = CSS
+    if (typeof document === 'undefined')
+        return;
+    let el = document.getElementById(STYLE_ID);
+    if (!el) {
+        el = document.createElement('style');
+        el.id = STYLE_ID;
+        document.head.appendChild(el);
+    }
+    el.textContent = plugin.theme.css(CSS);
 }
-
 function trimLead(snippet, subjectTitle) {
-  const lines = String(snippet || '').split('\n')
-  if (!lines.length) return ''
-  const first = lines[0].trim()
-  const ver = String(subjectTitle || '').replace(/^v/i, '').trim()
-  const dup =
-    /^what'?s\s+new/i.test(first) ||
-    /^更新/i.test(first) ||
-    (ver && first.replace(/^v/i, '').includes(ver))
-  if (dup) {
-    let i = 1
-    while (i < lines.length && !lines[i].trim()) i += 1
-    return lines.slice(i).join('\n')
-  }
-  return snippet
+    const lines = String(snippet || '').split('\n');
+    if (!lines.length)
+        return '';
+    const first = lines[0].trim();
+    const ver = String(subjectTitle || '').replace(/^v/i, '').trim();
+    const dup = /^what'?s\s+new/i.test(first) ||
+        /^更新/i.test(first) ||
+        (ver && first.replace(/^v/i, '').includes(ver));
+    if (dup) {
+        let i = 1;
+        while (i < lines.length && !lines[i].trim())
+            i += 1;
+        return lines.slice(i).join('\n');
+    }
+    return snippet;
 }
-
 function formatTime(iso) {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ''
-    return d.toLocaleString()
-  } catch {
-    return ''
-  }
+    if (!iso)
+        return '';
+    try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime()))
+            return '';
+        return d.toLocaleString();
+    }
+    catch {
+        return '';
+    }
 }
-
-export default {
-  name: 'GithubNotifyCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const payload = event.payload || {}
-    const actions = event.actions || []
-    const reason = payload.reason_label || payload.reason || ''
-    const when = formatTime(payload.updated_at)
-
+export default function GithubNotifyCard({ event: incomingEvent = {}, isHovered = false, onClose, onAction }) {
+    useEffect(ensureStyles, []);
+    const event = incomingEvent || {};
+    const payload = event.payload || {};
+    const actions = event.actions || [];
+    const reason = payload.reason_label || payload.reason || '';
+    const when = formatTime(payload.updated_at);
     const children = [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          h('span', { class: 'badge' }, 'GH'),
-          h('h2', { class: 'title' }, event.title || 'GitHub'),
-        ]),
-        h(
-          'button',
-          {
-            class: 'x',
+        h('div', {
+            key: 'header',
+            className: 'hdr'
+        }, h('div', {
+            className: 'left'
+        }, h('span', {
+            className: 'badge'
+        }, 'GH'), h('h2', {
+            className: 'title'
+        }, event.title || 'GitHub')), h('button', {
+            className: 'x',
             type: 'button',
             'aria-label': 'Close',
-            onClick: () => this.$emit('close'),
-          },
-          '×',
-        ),
-      ]),
-    ]
-
+            onClick: () => onClose?.()
+        }, '×')),
+    ];
     if (!event.sticky) {
-      children.push(
-        h('div', {
-          class: ['bar', this.isHovered ? 'paused' : ''],
-        }),
-      )
+        children.push(h('div', {
+            key: 'progress',
+            className: ['bar', isHovered ? 'paused' : ''].filter(Boolean).join(" ")
+        }));
     }
-
-    const subjectTitle = payload.subject_title || ''
-    const snippet = trimLead(payload.body_snippet || '', subjectTitle)
-    const author = payload.body_author || ''
+    const subjectTitle = payload.subject_title || '';
+    const snippet = trimLead(payload.body_snippet || '', subjectTitle);
+    const author = payload.body_author || '';
     if (subjectTitle || snippet || event.body) {
-      if (payload.body_snippet) {
-        children.push(
-          h('div', { class: 'block' }, [
-            subjectTitle ? h('p', { class: 'subj' }, subjectTitle) : null,
-            snippet ? h('p', { class: 'snippet' }, snippet) : null,
-          ]),
-        )
-      } else {
-        children.push(h('p', { class: 'plain' }, event.body || subjectTitle))
-      }
+        if (payload.body_snippet) {
+            children.push(h('div', {
+                key: 'content',
+                className: 'block'
+            }, subjectTitle ? h('p', {
+                className: 'subj'
+            }, subjectTitle) : null, snippet ? h('p', {
+                className: 'snippet'
+            }, snippet) : null));
+        }
+        else {
+            children.push(h('p', {
+                key: 'content',
+                className: 'plain'
+            }, event.body || subjectTitle));
+        }
     }
-
     if (author || reason || when) {
-      children.push(
-        h('div', { class: 'meta' }, [
-          author ? h('span', author) : null,
-          reason ? h('span', reason) : null,
-          when ? h('span', when) : null,
-        ]),
-      )
+        children.push(h('div', {
+            key: 'metadata',
+            className: 'meta'
+        }, author ? h('span', null, author) : null, reason ? h('span', null, reason) : null, when ? h('span', null, when) : null));
     }
-
     if (actions.length) {
-      children.push(
-        h(
-          'div',
-          { class: 'acts' },
-          actions.map((a, i) =>
-            h(
-              'button',
-              {
-                key: a.id,
-                type: 'button',
-                class: ['btn', a.id === 'open' || i === 0 ? 'primary' : 'ghost'],
-                onClick: () => this.$emit('action', a.id),
-              },
-              a.label,
-            ),
-          ),
-        ),
-      )
+        children.push(h('div', {
+            key: 'actions',
+            className: 'acts'
+        }, actions.map((a, i) => h('button', {
+            key: a.id,
+            type: 'button',
+            className: ['btn', a.id === 'open' || i === 0 ? 'primary' : 'ghost'].filter(Boolean).join(" "),
+            onClick: () => onAction?.(a.id)
+        }, a.label))));
     }
-
-    return h('div', { class: 'gh-card' }, children)
-  },
+    return h('div', {
+        className: 'gh-card'
+    }, children);
 }

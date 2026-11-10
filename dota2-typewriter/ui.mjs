@@ -1,10 +1,8 @@
-/** Dota2 typewriter toast — stacked start/pause + end; idle purple / running green. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
-
-const STYLE_ID = 'catrace-plugin-dota2-typewriter-css'
+const React = globalThis.__CATRACE_REACT__;
+if (!React?.createElement || !React?.useState)
+    throw new Error('Catrace plugin React runtime missing');
+const { createElement: h, useState, useRef, useEffect } = React;
+const STYLE_ID = 'catrace-plugin-dota2-typewriter-css';
 const CSS = `
 .d2tw {
   display: flex; flex-direction: column; width: 100%; min-height: 0; gap: 0.625rem;
@@ -38,63 +36,47 @@ const CSS = `
 .d2tw .btn.primary { background: var(--accent); color: #fff; }
 .d2tw .btn.ghost { background: var(--bg); color: var(--title); }
 .d2tw .btn:hover { filter: brightness(0.97); }
-`
-
+`;
 function ensureStyles() {
-  if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
-  el.textContent = CSS
-  document.head.appendChild(el)
+    if (typeof document === 'undefined')
+        return;
+    if (document.getElementById(STYLE_ID))
+        return;
+    const el = document.createElement('style');
+    el.id = STYLE_ID;
+    el.textContent = plugin.theme.css(CSS);
+    document.head.appendChild(el);
 }
-
-export default {
-  name: 'Dota2TypewriterCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const running = !!(event.payload && event.payload.running)
-    return h('div', { class: ['d2tw', running ? 'is-run' : ''] }, [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          h('span', { class: 'dot' }),
-          h('h2', { class: 'title' }, event.title || '暗黑狂欢打字机'),
-        ]),
-        h(
-          'button',
-          { class: 'x', type: 'button', 'aria-label': 'Close', onClick: () => this.$emit('close') },
-          '×',
-        ),
-      ]),
-      event.body ? h('p', { class: 'body' }, event.body) : null,
-      h('div', { class: 'acts' }, [
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'btn primary',
-            onClick: () => this.$emit('action', running ? 'pause' : 'start'),
-          },
-          running ? '暂停' : '开始',
-        ),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'btn ghost',
-            onClick: () => this.$emit('action', 'end'),
-          },
-          '结束',
-        ),
-      ]),
-    ])
-  },
+export default function Dota2TypewriterCard({ event: incomingEvent = {}, isHovered = false, onClose, onAction }) {
+    useEffect(ensureStyles, []);
+    const event = incomingEvent || {};
+    const running = !!(event.payload && event.payload.running);
+    return h('div', {
+        className: ['d2tw', running ? 'is-run' : ''].filter(Boolean).join(" ")
+    }, h('div', {
+        className: 'hdr'
+    }, h('div', {
+        className: 'left'
+    }, h('span', {
+        className: 'dot'
+    }), h('h2', {
+        className: 'title'
+    }, event.title || '暗黑狂欢打字机')), h('button', {
+        className: 'x',
+        type: 'button',
+        'aria-label': 'Close',
+        onClick: () => onClose?.()
+    }, '×')), event.body ? h('p', {
+        className: 'body'
+    }, event.body) : null, h('div', {
+        className: 'acts'
+    }, h('button', {
+        type: 'button',
+        className: 'btn primary',
+        onClick: () => onAction?.(running ? 'pause' : 'start')
+    }, running ? '暂停' : '开始'), h('button', {
+        type: 'button',
+        className: 'btn ghost',
+        onClick: () => onAction?.('end')
+    }, '结束')));
 }

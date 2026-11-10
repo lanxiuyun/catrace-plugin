@@ -1,8 +1,5 @@
-/** WeCom todo toast — title + optional body; 完成 / 关闭. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
+const { createElement: h, useState, useEffect, useRef } = globalThis.__CATRACE_REACT__ || {}
+if (typeof h !== 'function' || typeof useState !== 'function') throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
 
 const STYLE_ID = 'catrace-plugin-wecom-todo-css'
 const CSS = `
@@ -56,66 +53,17 @@ function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = plugin.theme.css(CSS)
   document.head.appendChild(el)
 }
 
-export default {
-  name: 'WecomTodoCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const payload = event.payload || {}
-    const actions = event.actions || []
-    const children = [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          h('span', { class: 'badge' }, '待办'),
-          h('h2', { class: 'title' }, event.title || '企业微信待办'),
-        ]),
-        h(
-          'button',
-          { class: 'x', type: 'button', 'aria-label': 'Close', onClick: () => this.$emit('close') },
-          '×',
-        ),
-      ]),
-    ]
-    if (!event.sticky) {
-      children.push(h('div', { class: ['bar', this.isHovered ? 'paused' : ''] }))
-    }
-    if (event.body && event.body !== event.title) {
-      children.push(h('p', { class: 'plain' }, event.body))
-    }
-    if (payload.create_time) {
-      children.push(h('p', { class: 'meta' }, payload.create_time))
-    }
-    if (actions.length) {
-      children.push(
-        h(
-          'div',
-          { class: 'acts' },
-          actions.map((a, i) =>
-            h(
-              'button',
-              {
-                key: a.id,
-                type: 'button',
-                class: ['btn', i === 0 ? 'primary' : 'ghost'],
-                onClick: () => this.$emit('action', a.id),
-              },
-              a.label,
-            ),
-          ),
-        ),
-      )
-    }
-    return h('div', { class: 'wc-todo' }, children)
-  },
+export default function WecomTodoCard({ event = {}, isHovered = false, onClose, onAction }) {
+  useEffect(ensureStyles, [])
+  const payload = event.payload || {}, actions = event.actions || []
+  return h('div', { className: 'wc-todo' },
+    h('div', { className: 'hdr' }, h('div', { className: 'left' }, h('span', { className: 'badge' }, '待办'), h('h2', { className: 'title' }, event.title || '企业微信待办')), h('button', { className: 'x', type: 'button', 'aria-label': 'Close', onClick: () => onClose?.() }, '×')),
+    !event.sticky ? h('div', { className: `bar${isHovered ? ' paused' : ''}` }) : null,
+    event.body && event.body !== event.title ? h('p', { className: 'plain' }, event.body) : null,
+    payload.create_time ? h('p', { className: 'meta' }, payload.create_time) : null,
+    actions.length ? h('div', { className: 'acts' }, actions.map((action, i) => h('button', { key: action.id, type: 'button', className: `btn ${i === 0 ? 'primary' : 'ghost'}`, onClick: () => onAction?.(action.id) }, action.label))) : null)
 }

@@ -21,27 +21,7 @@ const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
  */
 const read = (name) => readFileSync(join(ROOT, name), 'utf8').replace(/\r\n/g, '\n')
 
-/** 宿主注入的白名单（见 src/plugins/pluginRuntime.ts） */
-const VUE_WHITELIST = ['h', 'ref', 'computed', 'watch', 'markRaw', 'onMounted', 'onBeforeUnmount']
-const NAIVE_WHITELIST = [
-  'NAlert',
-  'NButton',
-  'NDivider',
-  'NInput',
-  'NModal',
-  'NPopconfirm',
-  'NProgress',
-  'NRadioButton',
-  'NRadioGroup',
-  'NSelect',
-  'NSlider',
-  'NSpace',
-  'NSwitch',
-  'NTag',
-  'NTooltip',
-  'useDialog',
-  'useMessage',
-]
+/** UI is self-contained ESM using the host's React and Radix namespaces. */
 /** 宿主保留 kind，插件不得占用 */
 const RESERVED_KINDS = ['rest', 'water', 'agent', 'permission', 'update', 'rest-timer', 'sdk']
 
@@ -92,33 +72,26 @@ test('manifest：声明的脚本都在插件目录内且存在', () => {
   }
 })
 
-test('ui/settings：只用注入的白名单，且不 import 宿主模块', () => {
+test('ui/settings: React namespaces only, self-contained ESM and function exports', () => {
+  assert.equal(manifest.uiFramework, 'react')
+  assert.equal(manifest.version, '2026.11.09')
   for (const file of ['ui.mjs', 'settings.mjs']) {
     const source = read(file)
-    assert.ok(!/^\s*import\s/m.test(source), `${file} 不得使用 import（宿主用 blob 加载，裸导入会失败）`)
-    assert.ok(!/from\s+['"]vue['"]/.test(source), `${file} 不得 import vue`)
-    assert.ok(!/from\s+['"]naive-ui['"]/.test(source), `${file} 不得 import naive-ui`)
-    assert.ok(!/template:\s*`/.test(source), `${file} 不得使用模板字符串 SFC`)
-
-    for (const name of destructuredFrom(source, '__CATRACE_VUE__')) {
-      assert.ok(VUE_WHITELIST.includes(name), `${file} 用了未注入的 Vue API：${name}`)
-    }
-    for (const name of destructuredFrom(source, '__CATRACE_NAIVE__')) {
-      assert.ok(NAIVE_WHITELIST.includes(name), `${file} 用了白名单外的 Naive 组件：${name}`)
-    }
-    for (const name of destructuredFrom(source, '__CATRACE_UI__')) {
-      assert.ok(['SettingRow', 'SliderControl'].includes(name), `${file} 用了未知的 __CATRACE_UI__ 成员：${name}`)
-    }
+    assert.doesNotMatch(source, /^\s*import\s|\bimport\s*\(/m, `${file} must not import sibling or bare modules`)
+    assert.doesNotMatch(source, /__CATRACE_VUE__|__CATRACE_NAIVE__|onUpdate:|\bsetup\s*\(/)
+    assert.match(source, /globalThis\.__CATRACE_REACT__/)
+    assert.match(source, /globalThis\.__CATRACE_RADIX__/)
+    assert.match(source, /export default function/)
+    assert.doesNotMatch(source, /template:\s*`/)
   }
 })
 
-test('ui.mjs：卡片合同（props / emits / 导出）', () => {
+test('ui.mjs: React Card receives event, hover and callback props', () => {
   const source = read('ui.mjs')
-  assert.match(source, /props:\s*\{[\s\S]*?event:[\s\S]*?isHovered:[\s\S]*?\}/, '缺少 event / isHovered props')
-  assert.match(source, /emits:\s*\[\s*'close'\s*,\s*'action'\s*\]/, 'emits 必须是 close / action')
-  assert.match(source, /export default\s+DshChatWindowCard/, '必须默认导出卡片组件')
-  assert.match(source, /export const Card\s*=\s*DshChatWindowCard/, '必须同时导出 Card')
-  assert.match(source, /dsh-chat-card/, '样式类名要有插件前缀')
+  assert.match(source, /export default function DshChatWindowCard\(\{event=\{\},isHovered=false,onClose,onAction\}\)/)
+  assert.match(source, /export \{ DshChatWindowCard as Card \}/)
+  assert.match(source, /onClose\?\.\(\)/)
+  assert.match(source, /dsh-chat-card/)
 })
 
 test('ui.mjs：Toast 窗不许调 plugin.sidecar.request（宿主只放行 main 窗）', () => {
@@ -173,23 +146,16 @@ test('小窗卡片：走 standalone 外壳，且宽度不超过宿主 22.5rem �
   )
 })
 
-test('输入必须双向绑定，否则「设置完全没办法调整」', () => {
-  const settings = read('settings.mjs')
-  const inputCount = (settings.match(/h\(NInput/g) || []).length
-  const updateCount = (settings.match(/'onUpdate:value'/g) || []).length
-  const valueCount = (settings.match(/^\s*value:/gm) || []).length
-  // 0.3.0 起字面 h(NInput 只有 3 处（textInput / numberInput / CSS textarea），都走 helper 复用
-  assert.ok(inputCount >= 3, `settings.mjs 应有多处 NInput（实测 ${inputCount}）`)
-  // 受控 NInput 只给 value、不接 onUpdate:value → 打字不落（历史上真踩过）
-  assert.ok(
-    updateCount >= inputCount,
-    `每个 NInput 都要接 onUpdate:value（NInput ${inputCount} 个 / update ${updateCount} 处）`,
-  )
-  assert.ok(valueCount >= inputCount, `每个 NInput 都要绑定 value（NInput ${inputCount} 个 / value ${valueCount} 处）`)
-  // 数值字段要防打字中途被改写：字符串暂存 + 失焦/保存时钳制
-  assert.match(settings, /function clamp\(/, '数值要有钳制函数')
-  assert.match(settings, /onBlur/, '数值输入应在失焦时钳制落盘')
-  assert.match(settings, /scheduleSave|saveNow/, '改动要落盘到 plugin.config')
+test('React inputs are controlled and numeric edits stay strings until blur/save', () => {
+  const source = read('settings.mjs')
+  assert.ok((source.match(/h\(TextField\.Root/g) || []).length >= 2)
+  assert.match(source, /h\(TextArea/)
+  assert.ok((source.match(/onChange:/g) || []).length >= 3)
+  assert.ok((source.match(/\bvalue:/g) || []).length >= 3)
+  assert.match(source, /function clamp\(/)
+  assert.match(source, /onBlur/)
+  assert.match(source, /scheduleSave|saveNow/)
+  assert.match(source, /onCheckedChange:/)
 })
 
 test('默认值必须与 sidecar 的 lib/config.mjs 一致（防两处漂移）', () => {
@@ -273,7 +239,7 @@ test('改设置不该要求用户重启插件', () => {
   // 因此 ui.mjs 收起时必须丢弃 iframe 地址，否则下次展开拿到的还是已被 sidecar 关掉的旧反代。
   assert.match(
     ui,
-    /function collapse\(\)[\s\S]{0,320}guiUrl\.value = ''/,
+    /function collapse\(\)[\s\S]{0,500}setGuiUrl\(''\)/,
     '收起时要清 iframe 地址，保证下次展开重新 /gui 拿新配置的界面',
   )
   assert.ok(!/reopenGuiSoon/.test(settings), '不要再引入自动重开小窗（没有窗口卡要管理了，弹窗会打扰）')
@@ -293,21 +259,21 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   // 1) 保存路径必须**遍历 DEFAULTS 全键**（而不是逐个登记）：漏键 = 每次保存被抹回默认值
   assert.match(
     settings,
-    /for \(const key of Object\.keys\(DEFAULTS\)\)/,
+    /for\s*\(const\s*\[key,fallback\]\s*of\s*Object\.entries\(DEFAULTS\)\)/,
     'compose() 必须遍历 DEFAULTS 全键（曾经只写 SHOW_KEYS → 没登记的键被丢掉）',
   )
   // 2) 加载路径要以 sidecar 的生效配置为准（存盘缺键时不能显示成关），同样遍历全键
   assert.match(settings, /call\('status'\)[\s\S]{0,120}config/, 'loadConfig 应读取 sidecar 的生效配置')
-  assert.match(settings, /for \(const key of Object\.keys\(DEFAULTS\)\)/, '加载路径同样要遍历全键回填')
+  assert.match(settings, /for\s*\(const\s*\[key,fallback\]\s*of\s*Object\.entries\(DEFAULTS\)\)/, '加载路径同样要遍历全键回填')
   // 3) 改完要看到效果：外观改动在下次展开时生效（卡片正文有这句说明），不再是自动重开
   assert.match(settings, /下次展开状态卡时生效/, '外观改动要说明"下次展开生效"（否则用户以为设置没用）')
-  assert.match(read('ui.mjs'), /展开状态卡时生效|guiUrl\.value = ''/, 'ui.mjs 收起要清 iframe 地址，保证下次展开生效')
+  assert.match(read('ui.mjs'), /setGuiUrl\(''\)/, 'ui.mjs 收起要清 iframe 地址，保证下次展开生效')
   // 4) 用标签云呈现：点亮 = 显示，悬停有说明
-  assert.match(settings, /checkable: true/, '显示项应做成可点标签（checkable）')
-  assert.match(settings, /'onUpdate:checked'/, '标签必须绑定 onUpdate:checked')
-  assert.match(settings, /NTooltip/, '标签要有 hover 说明')
+  assert.match(settings, /'aria-pressed':Boolean\(form\[item\.key\]\)/, '显示项应做成可点标签（checkable）')
+  assert.match(settings, /onClick:\(\) => update/, '标签必须绑定 onUpdate:checked')
+  assert.match(settings, /h\(Tooltip/, '标签要有 hover 说明')
   // tooltip 必须限宽换行：说明是长句，不限宽会拉成一条横线撑出窗口被裁（用户实测截图）
-  assert.match(settings, /contentStyle: \{ maxWidth/, 'chip 的 tooltip 要限宽并允许换行')
+  assert.match(settings, /maxWidth:'17rem',whiteSpace:'normal',overflowWrap:'anywhere'/, 'chip 的 tooltip 要限宽并允许换行')
   const main = read('runtime/main.mjs')
   assert.match(main, /cropFlagsFor\(config\)/, 'sidecar 必须用 config 模块的 cropFlagsFor 生成裁剪项（单一真相）')
   // 宿主不会把新配置推给运行中的 sidecar，所以设置页必须自己 push
@@ -327,7 +293,7 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
     'showMessageMeta',
     'showHeaderLabels',
   ]) {
-    assert.match(settings, new RegExp(`key: '${key}'`), `设置页标签清单缺少 ${key}`)
+    assert.match(settings, new RegExp(`key:\\s*'${key}'`), `设置页标签清单缺少 ${key}`)
   }
   // 紧凑留白：独立开关（配置 + 界面 + 传给反代）
   assert.match(main, /compactSpacing: config\.compactSpacing/, 'sidecar 必须把紧凑留白传给 buildCropCss')
@@ -361,16 +327,16 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   assert.match(tagsRules[0], /gap:\s*0\.5rem/, 'chip 之间必须有间距')
   // 2) naive-ui 没有 NInput.Textarea（多行必须 type:'textarea'），否则会掉进兜底分支丢 placeholder
   assert.ok(!/h\(NInput\.Textarea/.test(settings), '不要用 NInput.Textarea（naive-ui 里不存在）')
-  assert.match(settings, /type:\s*'textarea'/, '多行输入用 NInput + type: textarea')
+  assert.match(settings, /h\(TextArea/, '多行输入使用 Radix TextArea')
   // 3) 未选中的 chip 必须有可见描边（checkable 的 NTag 会忽略 bordered，得自己画）
   assert.match(settings, /\.dsh-chat-settings__chip:not\(\.is-on\)\s*\{[^}]*border:\s*1px solid/, '未选中 chip 要有自己的描边')
   assert.match(settings, /\.dsh-chat-settings__chip:not\(\.is-on\)\s*\{[^}]*background:/, '未选中 chip 要有底色（否则看起来像纯文字）')
   // 4) class 速查表：不给清单用户不知道改什么
   assert.match(main, /guiClasses: methodGuiClasses/, 'sidecar 必须提供 class 速查 RPC')
   assert.match(settings, /call\('guiClasses'\)/, '设置页应拉取 class 速查表')
-  assert.match(settings, /classCheatSheet/, '设置页应渲染 class 速查表')
-  assert.match(settings, /官方 class 带哈希前缀/, '速查表要有"为什么用语义后缀匹配"的说明')
-  assert.match(settings, /smallButton\('插入'/, '速查表每行要能一键插入规则骨架')
+  assert.match(settings, /const classRows=/, '设置页应渲染 class 速查表')
+  assert.match(settings, /官方 class 带构建哈希前缀/, '速查表要有"为什么用语义后缀匹配"的说明')
+  assert.match(settings, /button\('插入'/, '速查表每行要能一键插入规则骨架')
   // 5) 契约版本自检：两边常量必须一致，且侧车要在 status 里报出来
   const versionOf = (text, file) => {
     const m = text.match(/CONTRACT_VERSION\s*=\s*(\d+)/)
@@ -383,6 +349,6 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
     'settings.mjs 与 runtime/main.mjs 的 CONTRACT_VERSION 必须一致',
   )
   assert.match(main, /contract:\s*CONTRACT_VERSION/, 'sidecar 的 status 必须报出契约版本')
-  assert.match(settings, /staleSidecar/, '设置页要能提示"侧车在跑旧代码"')
+  assert.match(settings, /Number\(status\.contract\)!==CONTRACT_VERSION/, '设置页要能提示"侧车在跑旧代码"')
   assert.match(settings, /速查表没加载出来/, '速查表取不到数据时要说明原因（不要静默什么都不显示）')
 })

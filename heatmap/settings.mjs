@@ -1,22 +1,10 @@
-/** History rest/focus visualization — ring / timeline / flow cards. */
-const vue = globalThis.__CATRACE_VUE__ || {}
-const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted } = vue
-const { NDatePicker, useMessage } = naive
-
-if (typeof h !== 'function' || typeof ref !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
-if (!NDatePicker || !useMessage) {
-  throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
-}
-if (!plugin || !plugin.activity) {
-  throw new Error('Catrace plugin API missing (plugin facade)')
-}
-
+/** History rest/focus visualization: React ring / timeline / flow cards. */
+const React = globalThis.__CATRACE_REACT__
+if (!React?.createElement) throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
+const { createElement: h, useState, useEffect, useMemo, useId } = React
 const MINUTES = 1440
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
-const COLOR = { active: '#8B5CF6', rest: '#10B981', empty: '#E8EDF5' }
+const COLOR = { active: 'var(--ct-accent)', rest: 'var(--ct-success)', empty: 'var(--ct-surface-2)' }
 const VIEWS = [
   { id: 'timeline', label: '单轴时间线' },
   { id: 'ring', label: '环形表盘' },
@@ -50,12 +38,7 @@ const CSS = `
   min-width: 0;
 }
 .hm-picker { width: 10.5rem; flex-shrink: 0; }
-.hm-picker .n-input {
-  --n-height: 2.25rem !important;
-  --n-border-radius: 0.75rem !important;
-  background: #f6f3fc !important;
-  font-weight: 700;
-}
+.hm-picker {height:2.25rem;border:1px solid #ddd6fe;border-radius:.75rem;background:#f6f3fc;font:inherit;font-weight:700;color:inherit;padding:0 .5rem;min-width:0;}
 .hm-week { font-size: 0.875rem; font-weight: 700; color: #8b5cf6; padding: 0 0.15rem; }
 .hm-today, .hm-round, .hm-seg button {
   appearance: none; -webkit-appearance: none;
@@ -201,7 +184,7 @@ function ensureStyles() {
     el.id = STYLE_ID
     document.head.appendChild(el)
   }
-  el.textContent = CSS
+  el.textContent = plugin.theme.css(CSS)
 }
 
 function startOfLocalDay(d) {
@@ -310,264 +293,118 @@ function arcPath(cx, cy, r, startMin, endMin) {
 
 function iconChevron(dir) {
   const d = dir === 'left' ? 'M15 6L9 12l6 6' : 'M9 6l6 6-6 6'
-  return h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
-    h('path', { d }),
+  return h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2.2', strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { key: 'chevron', d }),
   ])
 }
 
-export default {
-  name: 'HeatmapSettings',
-  setup() {
+export default function HeatmapSettings() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [day, setDay] = useState(todayLocal)
+  const [minutes, setMinutes] = useState([])
+  const [view, setView] = useState('ring')
+  const [selected, setSelected] = useState(0)
+  const [initialized, setInitialized] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const filterId = `hm-shadow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const blocks = useMemo(() => mergeBlocks(minutes), [minutes])
+  const stats = useMemo(() => {
+    let active = 0, rest = 0
+    for (const minute of minutes) {
+      if (minute.active === true) active++
+      else if (minute.active === false) rest++
+    }
+    return { active, rest }
+  }, [minutes])
+  const selectedBlock = blocks[selected] || blocks[0] || null
+  const isToday = ymd(day) === ymd(todayLocal())
+  useEffect(() => {
+    let alive = true
     ensureStyles()
-    useMessage()
-    const loading = ref(false)
-    const error = ref('')
-    const day = ref(todayLocal())
-    const minutes = ref([])
-    const view = ref('ring')
-    const selected = ref(0)
-
-    const isToday = computed(() => ymd(day.value) === ymd(todayLocal()))
-    const blocks = computed(() => mergeBlocks(minutes.value))
-    const stats = computed(() => {
-      let active = 0
-      let rest = 0
-      for (const m of minutes.value) {
-        if (m.active === true) active += 1
-        else if (m.active === false) rest += 1
-      }
-      return { active, rest }
-    })
-    const selectedBlock = computed(() => blocks.value[selected.value] || blocks.value[0] || null)
-
-    function pickDefault(list) {
-      let best = 0
-      let bestMins = -1
-      list.forEach((b, i) => {
-        if (b.active === false && b.mins > bestMins) {
-          best = i
-          bestMins = b.mins
-        }
-      })
-      if (bestMins < 0 && list.length) best = 0
-      selected.value = best
-    }
-
-    async function persist() {
-      try {
-        await plugin.storage.set('lastDay', ymd(day.value))
-        await plugin.storage.set('lastView', view.value)
-      } catch {
-        /* ignore */
-      }
-    }
-
-    async function loadDay(next) {
-      const target = clampToToday(next)
-      day.value = target
-      error.value = ''
-      if (typeof plugin.activity.getRecords !== 'function') {
-        error.value = '当前 Catrace 没有历史记录 API，请更新并重启宿主。'
-        minutes.value = densify(startOfLocalDay(target), [])
-        pickDefault(blocks.value)
-        return
-      }
-      loading.value = true
-      try {
-        const from = startOfLocalDay(target)
-        const rows = await plugin.activity.getRecords({ from, to: from + MINUTES * 60 })
-        minutes.value = densify(from, Array.isArray(rows) ? rows : [])
-        pickDefault(mergeBlocks(minutes.value))
-        await persist()
-      } catch (e) {
-        minutes.value = densify(startOfLocalDay(target), [])
-        error.value = e instanceof Error ? e.message : String(e)
-      } finally {
-        loading.value = false
-      }
-    }
-
-    function setView(id) {
-      view.value = id
-      persist()
-    }
-
-    onMounted(async () => {
-      let initial = todayLocal()
+    void (async () => {
+      let initial = todayLocal(), lastView = 'ring'
       try {
         const saved = await plugin.storage.get('lastDay')
         const parsed = parseYmd(saved)
-        if (parsed) initial = parsed
-        const v = await plugin.storage.get('lastView')
-        if (VIEWS.some((x) => x.id === v)) view.value = v
-      } catch {
-        /* ignore */
-      }
-      await loadDay(initial)
-    })
-
-    function renderRing() {
-      const cx = 160
-      const cy = 160
-      const r = 118
-      const list = blocks.value
-      const sel = selectedBlock.value
-      const paths = list.map((b, i) =>
-        h('path', {
-          d: arcPath(cx, cy, r, b.startIdx, b.endIdx),
-          fill: 'none',
-          stroke: colorOf(b.active),
-          'stroke-width': 36,
-          'stroke-linecap': 'round',
-          class: sel && i !== selected.value ? 'is-dim' : '',
-          onMouseenter: () => {
-            selected.value = i
-          },
-          onClick: () => {
-            selected.value = i
-          },
-        }),
-      )
-      const k = sel ? kindOf(sel.active) : 'empty'
-      return h('div', { class: 'hm-ring-wrap' }, [
-        h('div', { class: 'hm-ring-stage' }, [
-          h('svg', { class: 'hm-ring', viewBox: '0 0 320 320' }, [
-            h('defs', [
-              h('filter', { id: 'hm-shadow', x: '-20%', y: '-20%', width: '140%', height: '140%' }, [
-                h('feDropShadow', { dx: '0', dy: '6', stdDeviation: '8', 'flood-color': '#8b5cf6', 'flood-opacity': '0.14' }),
-              ]),
-            ]),
-            h('g', { filter: 'url(#hm-shadow)' }, paths),
-          ]),
-          h('div', { class: 'hm-center' }, sel
-            ? [
-                h('span', { class: `hm-badge ${k}` }, nameOf(sel.active)),
-                h('p', { class: 'hm-range' }, `${hhmm(sel.startTs)}  -  ${hhmm(sel.endTs)}`),
-                h('p', { class: 'hm-dur' }, durZh(sel.mins)),
-              ]
-            : [h('p', { class: 'hm-dur' }, '当天没有记录')]),
-        ]),
-        h('div', { class: 'hm-legend' }, [
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.active } }), '专注/活跃']),
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.rest } }), '休息/睡眠']),
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.empty } }), '未记录']),
-        ]),
-      ])
-    }
-
-    function renderTimeline() {
-      return h('div', [
-        h('div', { class: 'hm-axis' }, blocks.value.map((b, i) =>
-          h('i', {
-            class: i === selected.value ? 'is-on' : '',
-            style: { flexGrow: String(b.mins), background: colorOf(b.active) },
-            onMouseenter: () => {
-              selected.value = i
-            },
-            onClick: () => {
-              selected.value = i
-            },
-          }),
-        )),
-        h('div', { class: 'hm-hours' }, ['00', '06', '12', '18', '24'].map((t) => h('span', t))),
-        selectedBlock.value
-          ? h('div', { class: 'hm-detail' }, [
-              h('span', { class: `hm-badge ${kindOf(selectedBlock.value.active)}` }, nameOf(selectedBlock.value.active)),
-              h('p', { class: 'hm-range' }, `${hhmm(selectedBlock.value.startTs)}  -  ${hhmm(selectedBlock.value.endTs)}`),
-              h('p', { class: 'hm-dur' }, durZh(selectedBlock.value.mins)),
-            ])
-          : null,
-        h('div', { class: 'hm-legend' }, [
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.active } }), '专注/活跃']),
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.rest } }), '休息/睡眠']),
-          h('span', [h('i', { class: 'hm-dot', style: { background: COLOR.empty } }), '未记录']),
-        ]),
-      ])
-    }
-
-    function renderCards() {
-      return h('div', { class: 'hm-flow' }, blocks.value.map((b, i) =>
-        h('div', {
-          class: ['hm-flow-item', i === selected.value ? 'is-on' : ''],
-          onClick: () => {
-            selected.value = i
-          },
-        }, [
-          h('i', { class: 'hm-flow-bar', style: { background: colorOf(b.active) } }),
-          h('span', { class: 'hm-flow-time' }, `${hhmm(b.startTs)} – ${hhmm(b.endTs)}`),
-          h('span', { class: 'hm-flow-name' }, nameOf(b.active)),
-          h('span', { class: 'hm-flow-dur' }, hmLabel(b.mins)),
-        ]),
-      ))
-    }
-
-    return () =>
-      h('div', { class: 'hm' }, [
-        h('div', { class: 'hm-bar' }, [
-          h('div', { class: 'hm-nav' }, [
-            h('button', {
-              type: 'button',
-              class: 'hm-round',
-              'aria-label': '前一天',
-              disabled: loading.value,
-              onClick: () => loadDay(addDays(day.value, -1)),
-            }, [iconChevron('left')]),
-            h(NDatePicker, {
-              class: 'hm-picker',
-              value: day.value.getTime(),
-              type: 'date',
-              format: 'yyyy/MM/dd',
-              clearable: false,
-              inputReadonly: true,
-              bordered: false,
-              size: 'medium',
-              disabled: loading.value,
-              actions: null,
-              placeholder: '选择日期',
-              isDateDisabled: (ts) => ts > todayLocal().getTime(),
-              'onUpdate:value': (v) => {
-                if (typeof v === 'number') loadDay(new Date(v))
-              },
-            }),
-            h('span', { class: 'hm-week' }, `周${WEEKDAYS[day.value.getDay()]}`),
-            h('button', {
-              type: 'button',
-              class: 'hm-round',
-              'aria-label': '后一天',
-              disabled: loading.value || isToday.value,
-              onClick: () => loadDay(addDays(day.value, 1)),
-            }, [iconChevron('right')]),
-            h('button', {
-              type: 'button',
-              class: 'hm-today',
-              disabled: loading.value || isToday.value,
-              onClick: () => loadDay(todayLocal()),
-            }, '今天'),
-          ]),
-          h('div', { class: 'hm-stats' }, [
-            h('span', { class: 'hm-stat' }, [
-              h('i', { class: 'hm-dot', style: { background: COLOR.active } }),
-              '专注活跃 ',
-              h('b', hmLabel(stats.value.active)),
-            ]),
-            h('span', { class: 'hm-stat' }, [
-              h('i', { class: 'hm-dot', style: { background: COLOR.rest } }),
-              '休息睡眠 ',
-              h('b', hmLabel(stats.value.rest)),
-            ]),
-          ]),
-          h('div', { class: 'hm-seg' }, VIEWS.map((v) =>
-            h('button', {
-              type: 'button',
-              class: view.value === v.id ? 'is-on' : '',
-              onClick: () => setView(v.id),
-            }, v.label),
-          )),
-        ]),
-        h('div', { class: 'hm-card' }, [
-          error.value ? h('p', { class: 'hm-err' }, error.value) : null,
-          view.value === 'ring' ? renderRing() : view.value === 'timeline' ? renderTimeline() : renderCards(),
-        ]),
-      ])
-  },
+        if (parsed) initial = clampToToday(parsed)
+        const savedView = await plugin.storage.get('lastView')
+        if (VIEWS.some((entry) => entry.id === savedView)) lastView = savedView
+      } catch { /* Storage is optional for the initial view. */ }
+      if (alive) { setDay(initial); setView(lastView); setInitialized(true) }
+    })()
+    return () => { alive = false }
+  }, [])
+  useEffect(() => {
+    if (!initialized) return
+    let alive = true
+    const from = startOfLocalDay(day)
+    setLoading(true)
+    setError('')
+    setMinutes(densify(from, []))
+    setSelected(0)
+    void (async () => {
+      try {
+        if (typeof plugin.activity.getRecords !== 'function') throw new Error('当前 Catrace 没有历史记录 API，请更新并重启宿主。')
+        const rows = await plugin.activity.getRecords({ from, to: from + MINUTES * 60 })
+        if (!alive) return
+        const dense = densify(from, Array.isArray(rows) ? rows : [])
+        const list = mergeBlocks(dense)
+        let best = 0, longestRest = -1
+        list.forEach((block, index) => {
+          if (block.active === false && block.mins > longestRest) { best = index; longestRest = block.mins }
+        })
+        setMinutes(dense)
+        setSelected(best)
+        await plugin.storage.set('lastDay', ymd(day)).catch(() => {})
+      } catch (e) { if (alive) setError(e instanceof Error ? e.message : String(e)) }
+      finally { if (alive) setLoading(false) }
+    })()
+    return () => { alive = false }
+  }, [day, initialized, attempt])
+  useEffect(() => {
+    if (initialized) void plugin.storage.set('lastView', view).catch(() => {})
+  }, [view, initialized])
+  const changeDay = (next) => { if (!loading) setDay(clampToToday(next)) }
+  const selectBlockProps = (index) => ({
+    tabIndex: 0,
+    role: 'button',
+    'aria-label': `${nameOf(blocks[index].active)} ${hhmm(blocks[index].startTs)}–${hhmm(blocks[index].endTs)}，${durZh(blocks[index].mins)}`,
+    'aria-pressed': index === selected,
+    onMouseEnter: () => setSelected(index),
+    onClick: () => setSelected(index),
+    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(index) } },
+  })
+  const legend = () => h('div', { className: 'hm-legend' }, [['active', '专注/活跃'], ['rest', '休息/睡眠'], ['empty', '未记录']].map(([kind, label]) => h('span', { key: kind }, h('i', { className: 'hm-dot', style: { background: COLOR[kind] } }), label)))
+  const details = (className) => h('div', { className, 'aria-live': 'polite' }, selectedBlock
+    ? [h('span', { key: 'kind', className: `hm-badge ${kindOf(selectedBlock.active)}` }, nameOf(selectedBlock.active)), h('p', { key: 'range', className: 'hm-range' }, `${hhmm(selectedBlock.startTs)} – ${hhmm(selectedBlock.endTs)}`), h('p', { key: 'duration', className: 'hm-dur' }, durZh(selectedBlock.mins))]
+    : h('p', { className: 'hm-dur' }, '当天没有记录'))
+  const renderRing = () => h('div', { className: 'hm-ring-wrap' },
+    h('div', { className: 'hm-ring-stage' },
+      h('svg', { className: 'hm-ring', viewBox: '0 0 320 320', 'aria-label': '全天作息环形表盘' },
+        h('defs', null, h('filter', { id: filterId, x: '-20%', y: '-20%', width: '140%', height: '140%' }, h('feDropShadow', { dx: 0, dy: 6, stdDeviation: 8, floodColor: '#8b5cf6', floodOpacity: .14 }))),
+        h('g', { filter: `url(#${filterId})` }, blocks.map((block, index) => h('path', { key: block.startIdx, d: arcPath(160, 160, 118, block.startIdx, block.endIdx), fill: 'none', stroke: colorOf(block.active), strokeWidth: 36, strokeLinecap: 'round', className: selectedBlock && index !== selected ? 'is-dim' : '', ...selectBlockProps(index) })))),
+      details('hm-center')),
+    legend())
+  const renderTimeline = () => h('div', null,
+    h('div', { className: 'hm-axis', 'aria-label': '全天单轴时间线' }, blocks.map((block, index) => h('i', { key: block.startIdx, className: index === selected ? 'is-on' : '', style: { flexGrow: block.mins, background: colorOf(block.active) }, ...selectBlockProps(index) }))),
+    h('div', { className: 'hm-hours' }, ['00', '06', '12', '18', '24'].map((label) => h('span', { key: label }, label))),
+    details('hm-detail'), legend())
+  const renderCards = () => h('div', { className: 'hm-flow' }, blocks.map((block, index) => h('div', { key: block.startIdx, className: `hm-flow-item${index === selected ? ' is-on' : ''}`, ...selectBlockProps(index) },
+    h('i', { className: 'hm-flow-bar', style: { background: colorOf(block.active) } }),
+    h('span', { className: 'hm-flow-time' }, `${hhmm(block.startTs)} – ${hhmm(block.endTs)}`),
+    h('span', { className: 'hm-flow-name' }, nameOf(block.active)), h('span', { className: 'hm-flow-dur' }, hmLabel(block.mins)))))
+  return h('div', { className: 'hm' },
+    h('div', { className: 'hm-bar' },
+      h('div', { className: 'hm-nav' },
+        h('button', { type: 'button', className: 'hm-round', 'aria-label': '前一天', disabled: loading, onClick: () => changeDay(addDays(day, -1)) }, iconChevron('left')),
+        h('input', { className: 'hm-picker', type: 'date', value: ymd(day), max: ymd(todayLocal()), 'aria-label': '选择日期', disabled: loading, onChange: (e) => { const next = parseYmd(e.target.value); if (next) changeDay(next) } }),
+        h('span', { className: 'hm-week' }, `周${WEEKDAYS[day.getDay()]}`),
+        h('button', { type: 'button', className: 'hm-round', 'aria-label': '后一天', disabled: loading || isToday, onClick: () => changeDay(addDays(day, 1)) }, iconChevron('right')),
+        h('button', { type: 'button', className: 'hm-today', disabled: loading || isToday, onClick: () => changeDay(todayLocal()) }, '今天')),
+      h('div', { className: 'hm-stats' }, h('span', { className: 'hm-stat' }, h('i', { className: 'hm-dot', style: { background: COLOR.active } }), '专注活跃 ', h('b', null, hmLabel(stats.active))), h('span', { className: 'hm-stat' }, h('i', { className: 'hm-dot', style: { background: COLOR.rest } }), '休息睡眠 ', h('b', null, hmLabel(stats.rest)))),
+      h('div', { className: 'hm-seg', role: 'group', 'aria-label': '作息视图' }, VIEWS.map((entry) => h('button', { key: entry.id, type: 'button', className: view === entry.id ? 'is-on' : '', 'aria-pressed': view === entry.id, onClick: () => setView(entry.id) }, entry.label)))),
+    h('div', { className: 'hm-card', 'aria-busy': loading },
+      error ? h('div', { className: 'hm-err', role: 'alert' }, error, h('button', { type: 'button', onClick: () => setAttempt((n) => n + 1) }, '重试')) : null,
+      loading ? h('p', { className: 'hm-dur', role: 'status' }, '加载中…') : view === 'ring' ? renderRing() : view === 'timeline' ? renderTimeline() : renderCards()))
 }

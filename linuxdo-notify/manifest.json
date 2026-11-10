@@ -1,7 +1,8 @@
 {
   "id": "linuxdo-notify",
   "name": "LINUX DO 通知",
-  "version": "2026.10.08",
+  "version": "2026.11.09",
+  "uiFramework": "react",
   "description": "轮询 linux.do 通知，活跃时弹出回复/提及等提醒卡片",
   "main": "ui.mjs",
   "background": "background.mjs",

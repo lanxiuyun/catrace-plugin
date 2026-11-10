@@ -1,18 +1,12 @@
-/** smsforwarder-notify settings — webhook / filter / status / guide. */
-const vue = globalThis.__CATRACE_VUE__ || {}
-const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, computed, onMounted, onBeforeUnmount } = vue
-const { NButton, NInput, NSwitch, NTag, NPopconfirm, NSelect, useMessage } = naive
-
-if (typeof h !== 'function' || typeof ref !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
+/** SmsForwarder settings: native React; config/RPC contracts remain framework-independent. */
+const React = globalThis.__CATRACE_REACT__
+const Radix = globalThis.__CATRACE_RADIX__
+if (!React?.createElement || !React.useState || !Radix?.Button || !Radix.TextField || !Radix.Switch || !Radix.Select || !Radix.AlertDialog) {
+  throw new Error('Catrace React/Radix runtime missing')
 }
-if (!NButton || !NInput || !NSwitch || !NTag || !NSelect || !useMessage) {
-  throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
-}
-if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
-  throw new Error('Catrace plugin API missing (plugin facade)')
-}
+if (!plugin?.config || !plugin.events) throw new Error('Catrace plugin facade missing')
+const { createElement: h, Fragment, useState, useEffect, useRef } = React
+const { Button, TextField, Switch, Badge, Select, AlertDialog } = Radix
 
 const PLUGIN_ID = 'smsforwarder-notify'
 const MIN_PORT = 1024
@@ -26,8 +20,16 @@ const MIN_DEDUPE_SEC = 0
 const MAX_DEDUPE_SEC = 300
 const DEFAULT_DEDUPE_SEC = 5
 
-const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-v16'
+const STYLE_ID = 'catrace-plugin-smsforwarder-notify-settings-css-react-20261109'
 const CSS = `
+.sf-settings .sf-config-fields { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: .75rem; }
+.sf-settings .sf-chip { max-width: 100%; white-space: normal; height: auto; display: inline-flex; align-items: center; gap: .375rem; }
+.sf-settings .sf-chip-remove { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 0 .125rem; }
+.sf-settings .sf-chip-remove:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.sf-settings .sf-feedback { padding: .625rem .75rem; border-radius: .5rem; background: #ecfdf5; color: #047857; font-size: .8125rem; }
+.sf-settings .sf-feedback.is-error { background: #fef2f2; color: #b91c1c; }
+.sf-settings .sf-feedback.is-warning { background: #fffbeb; color: #b45309; }
+
 .sf-settings {
   width: 100%; box-sizing: border-box;
   display: flex; flex-direction: column; gap: 0.75rem;
@@ -179,7 +181,7 @@ const CSS = `
 .sf-settings .mms-tag.is-selected { box-shadow: 0 0 0 0.125rem #d97706 inset; }
 .sf-settings .mms-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
 .sf-settings .kw-add { display: flex; gap: 0.5rem; align-items: center; }
-.sf-settings .kw-add .n-input { flex: 1; min-width: 0; }
+.sf-settings .kw-add .rt-TextFieldRoot { flex: 1; min-width: 0; }
 .sf-settings .filter-empty { margin: 0; font-size: 0.8125rem; color: #8b949e; }
 .sf-settings .adv-section-title {
   margin: 0.25rem 0 0; font-size: 0.875rem; font-weight: 750; color: #134e4a;
@@ -226,7 +228,7 @@ const CSS = `
   width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #14b8a6; display: inline-block;
 }
 .sf-settings .adv-metric { display: flex; align-items: center; gap: 0.5rem; }
-.sf-settings .adv-metric .n-input { flex: 1; min-width: 0; }
+.sf-settings .adv-metric .rt-TextFieldRoot { flex: 1; min-width: 0; }
 .sf-settings .filter-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
 }
@@ -344,9 +346,9 @@ const CSS = `
 .sf-settings .search-add {
   display: flex; align-items: center; gap: 0.5rem;
 }
-.sf-settings .search-add .n-input { flex: 1; min-width: 0; }
+.sf-settings .search-add .rt-TextFieldRoot { flex: 1; min-width: 0; }
 .sf-settings .title-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
-.sf-settings .title-chips .n-tag { max-width: 100%; height: auto; white-space: normal; }
+.sf-settings .title-chips .rt-Badge { max-width: 100%; height: auto; white-space: normal; }
 .sf-settings .advanced-card { gap: 0; padding: 0; overflow: hidden; }
 .sf-settings .adv-toggle {
   border: 0; background: transparent; cursor: pointer;
@@ -390,29 +392,14 @@ const CSS = `
 
 function ensureStyles() {
   if (typeof document === 'undefined') return
-  for (const id of [
-    'catrace-plugin-smsforwarder-notify-settings-css',
-    'catrace-plugin-smsforwarder-notify-settings-css-v2',
-    'catrace-plugin-smsforwarder-notify-settings-css-v3',
-    'catrace-plugin-smsforwarder-notify-settings-css-v4',
-    'catrace-plugin-smsforwarder-notify-settings-css-v5',
-    'catrace-plugin-smsforwarder-notify-settings-css-v6',
-    'catrace-plugin-smsforwarder-notify-settings-css-v7',
-    'catrace-plugin-smsforwarder-notify-settings-css-v8',
-    'catrace-plugin-smsforwarder-notify-settings-css-v9',
-    'catrace-plugin-smsforwarder-notify-settings-css-v10',
-    'catrace-plugin-smsforwarder-notify-settings-css-v11',
-  ]) {
-    const old = document.getElementById(id)
-    if (old) old.remove()
-  }
+  document.querySelectorAll('style[id^="catrace-plugin-smsforwarder-notify-settings-css"]').forEach(node => { if (node.id !== STYLE_ID) node.remove() })
   let el = document.getElementById(STYLE_ID)
   if (!el) {
     el = document.createElement('style')
     el.id = STYLE_ID
     document.head.appendChild(el)
   }
-  el.textContent = CSS
+  el.textContent = plugin.theme.css(CSS)
 }
 
 function clamp(n, min, max, fallback) {
@@ -585,13 +572,13 @@ function chevronIcon() {
       fill: 'none',
       'aria-hidden': 'true',
     },
-    [
+    ...[
       h('path', {
         d: 'M6 9l6 6 6-6',
         stroke: 'currentColor',
-        'stroke-width': '1.8',
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round',
+        strokeWidth: '1.8',
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
       }),
     ],
   )
@@ -694,1514 +681,335 @@ const FAQ = [
   ],
 ]
 
-export default {
-  name: 'SmsforwarderNotifySettings',
-  setup(_props, { expose }) {
-    ensureStyles()
-    const message = useMessage()
-    const loading = ref(true)
-    const busy = ref('')
-    const headerLoading = ref(false)
-    const enabled = ref(true)
-    const host = ref('0.0.0.0')
-    const port = ref(DEFAULT_PORT)
-    const path = ref(DEFAULT_PATH)
-    const token = ref('')
-    const showToken = ref(false)
-    const cardDurationSec = ref(DEFAULT_CARD_SEC)
-    const dedupeWindowSec = ref(DEFAULT_DEDUPE_SEC)
-    const blacklistText = ref('')
-    const mmsTitleBlacklist = ref([])
-    const mmsTitleQuery = ref('')
-    const mmsSelected = ref(new Set())
-    const filters = ref([])
-    const keywordDraft = ref('')
-    const filterDraft = ref({
-      field: 'title',
-      match: 'contains',
-      value: '',
-      appContains: '',
-    })
-    const appDraft = ref('')
-    const appQuery = ref('')
-    const titleQuery = ref('')
-    const pausedApps = ref([])
-    const hideSensitiveBody = ref(false)
-    const enableOtpAction = ref(true)
-    const onlyPushWhenActive = ref(false)
-    const mergeChatThreads = ref(true)
-    const chatAppsText = ref(blacklistToText(DEFAULT_CONFIG.chatApps))
-    const chatAppDraft = ref('')
-    const status = ref(null)
-    const webhookInfo = ref(null)
-    const activeTab = ref('overview')
-    const showAdvanced = ref(false)
-    let saveTimer = null
+export default function SmsforwarderNotifySettings() {
+  const [config, setConfig] = useState(() => ({ ...DEFAULT_CONFIG }))
+  const configRef = useRef(config)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState('')
+  const [feedback, setFeedback] = useState(null)
+  const [showToken, setShowToken] = useState(false)
+  const [status, setStatus] = useState(null)
+  const [webhookInfo, setWebhookInfo] = useState(null)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [appDraft, setAppDraft] = useState('')
+  const [titleDraft, setTitleDraft] = useState('')
+  const [chatAppDraft, setChatAppDraft] = useState('')
+  const [filterDraft, setFilterDraft] = useState({ field: 'title', match: 'contains', value: '', appContains: '' })
+  const mounted = useRef(false)
+  const saveTimer = useRef(null)
+  const pendingSave = useRef(false)
+  const saveQueue = useRef(Promise.resolve())
+  const feedbackTimer = useRef(null)
+  const running = useRef(false)
 
-    const headerEnabled = computed(() => enabled.value !== false)
-
-    const shownMmsTitles = computed(() => {
-      const q = mmsTitleQuery.value.trim().toLowerCase()
-      const list = sortBlacklist(mmsTitleBlacklist.value)
-      if (!q) return list
-      return list.filter((t) => String(t).toLowerCase().includes(q))
-    })
-
-    const mmsSelectedCount = computed(() => mmsSelected.value.size)
-
-    function toggleMmsTitle(t) {
-      const next = new Set(mmsSelected.value)
-      if (next.has(t)) next.delete(t)
-      else next.add(t)
-      mmsSelected.value = next
+  function notify(text, type = 'success') {
+    if (!mounted.current) return
+    setFeedback({ text, type })
+    clearTimeout(feedbackTimer.current)
+    feedbackTimer.current = setTimeout(() => { if (mounted.current) setFeedback(null) }, 4000)
+  }
+  function replaceConfig(next) {
+    configRef.current = next
+    if (mounted.current) setConfig(next)
+  }
+  function normalizeConfig(raw = {}) {
+    return {
+      ...DEFAULT_CONFIG, ...raw,
+      enabled: raw.enabled !== false,
+      host: String(raw.host || '0.0.0.0').trim() || '0.0.0.0',
+      port: clamp(raw.port, MIN_PORT, MAX_PORT, DEFAULT_PORT),
+      path: normalizePath(raw.path), token: String(raw.token || '').trim(),
+      cardDurationSec: clamp(raw.cardDurationSec, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC),
+      dedupeWindowSec: clamp(raw.dedupeWindowSec, MIN_DEDUPE_SEC, MAX_DEDUPE_SEC, DEFAULT_DEDUPE_SEC),
+      appBlacklist: textToBlacklist(blacklistToText(raw.appBlacklist)),
+      appBlacklistPaused: sortBlacklist(Array.isArray(raw.appBlacklistPaused) ? raw.appBlacklistPaused : []),
+      mmsTitleBlacklist: sortBlacklist(Array.isArray(raw.mmsTitleBlacklist) ? raw.mmsTitleBlacklist : []),
+      filters: normalizeFilters(raw.filters), hideSensitiveBody: false,
+      enableOtpAction: raw.enableOtpAction !== false,
+      onlyPushWhenActive: raw.onlyPushWhenActive === true,
+      mergeChatThreads: raw.mergeChatThreads !== false,
+      chatApps: Array.isArray(raw.chatApps) ? textToBlacklist(blacklistToText(raw.chatApps)) : [...DEFAULT_CONFIG.chatApps],
     }
-
-    function selectAllShown() {
-      mmsSelected.value = new Set(shownMmsTitles.value)
+  }
+  function settingsOnly(value) {
+    // Host owns top-level activation; nested filter.enabled remains business data.
+    const { enabled: _hostEnabled, ...settings } = value
+    return settings
+  }
+  function updateConfig(patch) {
+    replaceConfig({ ...configRef.current, ...patch })
+    clearTimeout(saveTimer.current)
+    pendingSave.current = true
+    saveTimer.current = setTimeout(() => { void persistAndSync(true).catch(error => notify(errorText(error), 'error')) }, 400)
+  }
+  async function refreshStatus() {
+    if (!plugin.sidecar?.request) {
+      if (mounted.current) setStatus({ error: 'sidecar 未运行（请启用插件）', running: false })
+      return
     }
-
-    function clearMmsSelection() {
-      mmsSelected.value = new Set()
+    const result = await plugin.sidecar.request('getStatus')
+    if (mounted.current) setStatus(result && typeof result === 'object' ? result : { raw: result })
+  }
+  async function refreshWebhookInfo() {
+    if (!plugin.sidecar?.request) return
+    const result = await plugin.sidecar.request('getWebhookInfo')
+    if (!mounted.current) return
+    setWebhookInfo(result && typeof result === 'object' ? result : null)
+    if (result?.token && String(configRef.current.token || '').trim() !== result.token.trim()) {
+      const next = { ...configRef.current, token: result.token.trim() }
+      replaceConfig(next)
+      await plugin.config.set(settingsOnly(normalizeConfig(next)))
     }
-
-    const blockedAppRows = computed(() => {
-      const q = appQuery.value.trim().toLowerCase()
-      return textToBlacklist(blacklistText.value)
-        .map((item) => {
-          const label = String(item || '').trim()
-          return {
-            key: `app:${label.toLowerCase()}`,
-            title: label,
-            tokens: [label],
-          }
-        })
-        .filter((row) => !q || row.title.toLowerCase().includes(q))
-        .sort((a, b) => compareBlacklist(a.title, b.title))
-    })
-
-    const titleBlocks = computed(() => {
-      const out = []
-      for (const f of filters.value) {
-        if (!f || !f.value) continue
-        out.push({
-          kind: 'filter',
-          id: f.id,
-          title: String(f.value).trim(),
-          sub: String(f.appContains || '').trim(),
-        })
-      }
-      for (const t of mmsTitleBlacklist.value) {
-        const label = String(t || '').trim()
-        if (!label) continue
-        out.push({ kind: 'mms', id: `mms:${label}`, title: label, sub: '锁屏短信' })
-      }
-      out.sort((a, b) => compareBlacklist(a.title, b.title))
-      const q = titleQuery.value.trim().toLowerCase()
-      if (!q) return out
-      return out.filter(
-        (r) =>
-          r.title.toLowerCase().includes(q) || String(r.sub || '').toLowerCase().includes(q),
-      )
-    })
-
-    function addChatApp() {
-      const value = String(chatAppDraft.value || '').trim()
-      if (!value) return
-      const list = textToBlacklist(chatAppsText.value)
-      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
-        list.push(value)
-        chatAppsText.value = sortBlacklist(list).join('\n')
-        scheduleSave()
-      }
-      chatAppDraft.value = ''
-    }
-
-    function removeChatApp(name) {
-      const drop = String(name || '').toLowerCase()
-      chatAppsText.value = textToBlacklist(chatAppsText.value)
-        .filter((x) => String(x).toLowerCase() !== drop)
-        .join('\n')
-      scheduleSave()
-    }
-
-    function addBlockedApp() {
-      const value = String(appDraft.value || '').trim()
-      if (!value) return
-      const list = textToBlacklist(blacklistText.value)
-      if (!list.some((x) => String(x).toLowerCase() === value.toLowerCase())) {
-        list.push(value)
-        blacklistText.value = sortBlacklist(list).join('\n')
-        scheduleSave()
-      }
-      appDraft.value = ''
-    }
-
-    function removeBlockedApp(row) {
-      const drop = String(row && row.title ? row.title : '').toLowerCase()
-      if (!drop) return
-      const list = textToBlacklist(blacklistText.value).filter(
-        (x) => String(x).toLowerCase() !== drop,
-      )
-      blacklistText.value = list.join('\n')
-      pausedApps.value = sortBlacklist(
-        pausedApps.value.filter((x) => String(x).toLowerCase() !== drop),
-      )
-      scheduleSave()
-    }
-
-    function patchFilter(idx, patch) {
-      const next = filters.value.slice()
-      if (!next[idx]) return
-      next[idx] = { ...next[idx], ...patch }
-      filters.value = next
-      scheduleSave()
-    }
-
-    function addKeywordFilter() {
-      const value = String(keywordDraft.value || '').trim()
-      if (!value) return
-      const dup = filters.value.some(
-        (f) =>
-          f &&
-          String(f.value || '').toLowerCase() === value.toLowerCase() &&
-          (f.match === 'contains' || f.match === 'equals'),
-      )
-      if (dup) {
-        keywordDraft.value = ''
-        return
-      }
-      if (filters.value.length >= MAX_FILTERS) return
-      filters.value = [
-        ...filters.value,
-        {
-          id: newFilterId(),
-          enabled: true,
-          field: 'any',
-          match: 'contains',
-          value,
-          appContains: '',
-        },
-      ]
-      keywordDraft.value = ''
-      scheduleSave()
-    }
-
-    function addCustomFilter() {
-      const field = FILTER_FIELDS.has(filterDraft.value.field) ? filterDraft.value.field : 'title'
-      const match = FILTER_MATCHES.has(filterDraft.value.match)
-        ? filterDraft.value.match
-        : 'contains'
-      const value = String(filterDraft.value.value || '').trim()
-      const appContains = String(filterDraft.value.appContains || '').trim()
-      if (!value) {
-        message.warning('先填要拦截的内容')
-        return
-      }
-      const regexErr = filterRegexError(match, value)
-      if (regexErr) {
-        message.warning(regexErr)
-        return
-      }
-      if (filters.value.length >= MAX_FILTERS) {
-        message.warning(`最多 ${MAX_FILTERS} 条`)
-        return
-      }
-      const dup = filters.value.some(
-        (f) =>
-          f &&
-          String(f.field || '') === field &&
-          String(f.match || '') === match &&
-          String(f.value || '').toLowerCase() === value.toLowerCase() &&
-          String(f.appContains || '').toLowerCase() === appContains.toLowerCase(),
-      )
-      if (dup) {
-        message.warning('已经有同样的规则了')
-        return
-      }
-      filters.value = [
-        ...filters.value,
-        {
-          id: newFilterId(),
-          enabled: true,
-          field,
-          match,
-          value,
-          appContains,
-        },
-      ]
-      filterDraft.value = { field, match, value: '', appContains }
-      scheduleSave()
-    }
-
-    function removeFilter(id) {
-      filters.value = filters.value.filter((f) => f && f.id !== id)
-      scheduleSave()
-    }
-
-    function removeTitleBlock(item) {
-      if (!item) return
-      if (item.kind === 'filter') {
-        removeFilter(item.id)
-        return
-      }
-      const label = String(item.title || item.label || '')
-      mmsTitleBlacklist.value = mmsTitleBlacklist.value.filter(
-        (t) => String(t).toLowerCase() !== label.toLowerCase(),
-      )
-      scheduleSave()
-    }
-
-    function removeSelectedMmsTitles() {
-      const sel = mmsSelected.value
-      if (!sel.size) return
-      const next = mmsTitleBlacklist.value.filter((t) => !sel.has(t))
-      mmsTitleBlacklist.value = next
-      mmsSelected.value = new Set()
-      scheduleSave()
-    }
-
-    function currentConfig() {
-      return {
-        enabled: enabled.value !== false,
-        host: String(host.value || '0.0.0.0').trim() || '0.0.0.0',
-        port: clamp(port.value, MIN_PORT, MAX_PORT, DEFAULT_PORT),
-        path: normalizePath(path.value),
-        token: String(token.value || '').trim(),
-        cardDurationSec: clamp(cardDurationSec.value, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC),
-        dedupeWindowSec: clamp(
-          dedupeWindowSec.value,
-          MIN_DEDUPE_SEC,
-          MAX_DEDUPE_SEC,
-          DEFAULT_DEDUPE_SEC,
-        ),
-        appBlacklist: textToBlacklist(blacklistText.value),
-        appBlacklistPaused: sortBlacklist(pausedApps.value),
-        mmsTitleBlacklist: sortBlacklist(
-          Array.isArray(mmsTitleBlacklist.value) ? mmsTitleBlacklist.value : [],
-        ),
-        filters: persistableFilters(filters.value),
-        hideSensitiveBody: false,
-        enableOtpAction: enableOtpAction.value !== false,
-        onlyPushWhenActive: onlyPushWhenActive.value === true,
-        mergeChatThreads: mergeChatThreads.value !== false,
-        chatApps: textToBlacklist(chatAppsText.value),
-      }
-    }
-
-    function applyConfig(cfg = {}) {
-      enabled.value = cfg.enabled !== false
-      if (typeof cfg.host === 'string' && cfg.host.trim()) host.value = cfg.host.trim()
-      port.value = clamp(cfg.port, MIN_PORT, MAX_PORT, DEFAULT_PORT)
-      path.value = normalizePath(cfg.path)
-      if (typeof cfg.token === 'string') token.value = cfg.token
-      cardDurationSec.value = clamp(cfg.cardDurationSec, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
-      dedupeWindowSec.value = clamp(
-        cfg.dedupeWindowSec,
-        MIN_DEDUPE_SEC,
-        MAX_DEDUPE_SEC,
-        DEFAULT_DEDUPE_SEC,
-      )
-      blacklistText.value = blacklistToText(cfg.appBlacklist)
-      pausedApps.value = sortBlacklist(
-        Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
-      )
-      mmsTitleBlacklist.value = sortBlacklist(
-        Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
-      )
-      mmsSelected.value = new Set()
-      mmsTitleQuery.value = ''
-      filters.value = normalizeFilters(cfg.filters)
-      hideSensitiveBody.value = false
-      enableOtpAction.value = cfg.enableOtpAction !== false
-      onlyPushWhenActive.value = cfg.onlyPushWhenActive === true
-      mergeChatThreads.value = cfg.mergeChatThreads !== false
-      chatAppsText.value = blacklistToText(
-        Array.isArray(cfg.chatApps) && cfg.chatApps.length ? cfg.chatApps : DEFAULT_CONFIG.chatApps,
-      )
-    }
-
-    async function run(key, task) {
-      busy.value = key
+    if (result) setStatus(previous => ({ ...previous, ...result, token: undefined }))
+  }
+  function persistAndSync(quiet = true) {
+    clearTimeout(saveTimer.current)
+    pendingSave.current = false
+    const snapshot = settingsOnly(normalizeConfig(configRef.current))
+    const job = saveQueue.current.catch(() => {}).then(async () => {
+      await plugin.config.set(snapshot)
+      // Unmount may be caused by host disable: flush user data, never restart its service.
+      if (!mounted.current) return
       try {
-        await task()
+        if (!plugin.sidecar?.request) throw new Error('sidecar 未运行')
+        const result = await plugin.sidecar.request('setConfig', snapshot)
+        if (mounted.current && result && typeof result === 'object') setStatus(result)
+        if (result?.ok === false && result.error) {
+          if (!quiet) notify(`监听失败：${result.error}`, 'error')
+        } else if (!quiet) notify('已保存')
+        // Do not replace a newer local Token draft with a previous save's response.
+        if (mounted.current && configRef.current.token === snapshot.token) await refreshWebhookInfo()
       } catch (error) {
-        message.error(errorText(error))
-      } finally {
-        busy.value = ''
-      }
-    }
-
-    async function copyText(text, okMsg = '已复制') {
-      const s = String(text || '')
-      if (!s) {
-        message.warning('无可复制内容')
-        return
-      }
-      try {
-        if (plugin.clipboard && typeof plugin.clipboard.writeText === 'function') {
-          await plugin.clipboard.writeText(s)
-        } else if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(s)
-        } else {
-          throw new Error('clipboard unavailable')
-        }
-        message.success(okMsg)
-      } catch (e) {
-        message.error(`复制失败：${errorText(e)}`)
-      }
-    }
-
-    async function persistAndSync({ quiet = false } = {}) {
-      const cfg = currentConfig()
-      port.value = cfg.port
-      path.value = cfg.path
-      cardDurationSec.value = cfg.cardDurationSec
-      dedupeWindowSec.value = cfg.dedupeWindowSec
-      await plugin.config.set(cfg)
-      try {
-        if (plugin.sidecar && typeof plugin.sidecar.request === 'function') {
-          const result = await plugin.sidecar.request('setConfig', cfg)
-          status.value = result && typeof result === 'object' ? result : status.value
-          if (result && result.ok === false && result.error) {
-            if (!quiet) message.error(`监听失败：${result.error}`)
-          } else if (!quiet) {
-            message.success('已保存')
-          }
-          // pull token if sidecar generated one
-          await refreshWebhookInfo({ quiet: true })
-        } else if (!quiet) {
-          message.warning('已保存（启用插件后 sidecar 生效）')
-        }
-      } catch (error) {
-        if (!quiet) message.warning('已保存（启用插件后 sidecar 生效）')
+        if (!quiet) notify('已保存（启用插件后 sidecar 生效）', 'warning')
         await plugin.log?.warn?.('config saved without sidecar', { error: errorText(error) })
       }
-    }
-
-    function scheduleSave() {
-      if (saveTimer) clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        saveTimer = null
-        persistAndSync({ quiet: true }).catch((error) => message.error(errorText(error)))
-      }, 400)
-    }
-
-    async function refreshStatus() {
-      if (!plugin.sidecar || typeof plugin.sidecar.request !== 'function') {
-        status.value = { error: 'sidecar 未运行（请启用插件）', running: false }
-        return
-      }
-      const result = await plugin.sidecar.request('getStatus')
-      status.value = result && typeof result === 'object' ? result : { raw: result }
-    }
-
-    async function refreshWebhookInfo({ quiet = false } = {}) {
-      if (!plugin.sidecar || typeof plugin.sidecar.request !== 'function') {
-        if (!quiet) webhookInfo.value = null
-        return
-      }
-      try {
-        const result = await plugin.sidecar.request('getWebhookInfo')
-        webhookInfo.value = result && typeof result === 'object' ? result : null
-        if (result && typeof result.token === 'string' && result.token) {
-          // sidecar is source of truth for the live webhook secret
-          const prev = String(token.value || '').trim()
-          const live = result.token.trim()
-          if (prev !== live) {
-            token.value = live
-            await plugin.config.set(currentConfig())
-          }
-        }
-        if (result) {
-          status.value = {
-            ...(status.value && typeof status.value === 'object' ? status.value : {}),
-            ...result,
-            token: undefined,
-          }
-        }
-      } catch (e) {
-        if (!quiet) throw e
-      }
-    }
-
-    async function regenerateToken() {
-      await run('regen', async () => {
-        if (!plugin.sidecar?.request) {
-          // local fallback
-          const bytes = new Uint8Array(32)
-          crypto.getRandomValues(bytes)
-          token.value = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-          await persistAndSync({ quiet: true })
-          message.success('已重新生成 Token')
-          return
-        }
+    })
+    saveQueue.current = job
+    return job
+  }
+  async function run(key, task) {
+    if (running.current) return
+    running.current = true
+    setBusy(key)
+    try { await task() } catch (error) { notify(errorText(error), 'error') }
+    finally { running.current = false; if (mounted.current) setBusy('') }
+  }
+  async function copyText(text) {
+    const value = String(text || '')
+    if (!value) { notify('无可复制内容', 'warning'); return }
+    try {
+      if (plugin.clipboard?.writeText) await plugin.clipboard.writeText(value)
+      else if (globalThis.navigator?.clipboard?.writeText) await navigator.clipboard.writeText(value)
+      else throw new Error('clipboard unavailable')
+      notify('已复制')
+    } catch (error) { notify(`复制失败：${errorText(error)}`, 'error') }
+  }
+  async function regenerateToken() {
+    await run('regen', async () => {
+      await persistAndSync(true)
+      let nextToken
+      if (plugin.sidecar?.request) {
         const result = await plugin.sidecar.request('regenerateToken')
-        if (result && typeof result.token === 'string') {
-          token.value = result.token
-          webhookInfo.value = result
-          await plugin.config.set(currentConfig())
-          message.success('已重新生成 Token（手机端需同步更新）')
-        }
-        await refreshStatus()
-      })
-    }
-
-    async function restartServer() {
-      await run('restart', async () => {
-        await persistAndSync({ quiet: true })
-        if (!plugin.sidecar?.request) {
-          message.warning('sidecar 未运行')
-          return
-        }
-        const result = await plugin.sidecar.request('restartServer')
-        status.value = result
-        if (result?.ok === false) message.error(result.error || '重启失败')
-        else message.success('服务已重启')
-        await refreshWebhookInfo({ quiet: true })
-      })
-    }
-
-    async function clearChatHistory() {
-      await run('clear-chat', async () => {
-        if (plugin.sidecar?.request) {
-          await plugin.sidecar.request('clearChatHistory', {})
-        }
-        if (plugin.storage && typeof plugin.storage.remove === 'function') {
-          try {
-            await plugin.storage.remove('chatThreads')
-          } catch {
-            /* sidecar already cleared */
-          }
-        }
-        message.success('对话历史已清空')
-      })
-    }
-
-    async function sendTest() {
-      await run('test', async () => {
-        const cfg = currentConfig()
-        // prefer sidecar test (exercises publish path)
-        if (plugin.sidecar?.request) {
-          try {
-            await plugin.sidecar.request('setConfig', cfg)
-            await plugin.sidecar.request('sendTest', {})
-            message.success('已发送测试通知')
-            await refreshStatus()
-            return
-          } catch {
-            /* fall through */
-          }
-        }
-        const sticky = cfg.cardDurationSec <= 0
-        const now = Date.now()
-        const lagMs = 5 * 60 * 1000
-        const phoneIso = new Date(now - lagMs).toISOString()
-        const pcIso = new Date(now).toISOString()
-        await plugin.events.publish({
-          eventType: 'smsforwarder-notify.notification',
-          kind: 'smsforwarder-notify',
-          title: '测试 App · 测试通知',
-          body: '这是一条 SmsForwarder 测试消息，验证码 123456',
-          level: 'info',
-          sticky,
-          actions: [
-            { id: 'copy-otp', label: '复制验证码' },
-            ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []),
-            { id: 'block-app', label: '屏蔽此应用' },
-            { id: 'block-title', label: '屏蔽这个标题' },
-          ],
-          payload: {
-            packageName: 'com.example.test',
-            appName: '测试 App',
-            title: '测试通知',
-            body: '这是一条 SmsForwarder 测试消息，验证码 123456',
-            // phone 5 min earlier; PC receive / toast now → 延迟 ~5 分
-            receivedAt: phoneIso,
-            webhookAt: pcIso,
-            publishedAt: pcIso,
-            shownAt: pcIso,
-            otp: '123456',
-            noticeKind: 'otp',
-            auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000,
-            card_duration_sec: cfg.cardDurationSec,
-          },
-          dedupeKey: `smsforwarder-notify:test:${now}`,
-        })
-        message.success('已发送测试通知')
-      })
-    }
-
-    async function toggleEnabled(val) {
-      const previous = enabled.value
-      enabled.value = val
-      headerLoading.value = true
-      try {
-        await plugin.setEnabled(val)
-        await plugin.config.set(currentConfig())
-        window.dispatchEvent(
-          new CustomEvent('catrace:plugin-enabled-changed', {
-            detail: { id: PLUGIN_ID, enabled: val },
-          }),
-        )
-        try {
-          if (plugin.sidecar?.request) {
-            const result = await plugin.sidecar.request('setConfig', currentConfig())
-            status.value = result
-          }
-        } catch {
-          /* ignore */
-        }
-      } catch (e) {
-        enabled.value = previous
-        message.error(errorText(e))
-      } finally {
-        headerLoading.value = false
+        if (!result?.token) throw new Error('未收到新的 Token')
+        nextToken = result.token
+        if (mounted.current) setWebhookInfo(result)
+      } else {
+        const bytes = new Uint8Array(32)
+        crypto.getRandomValues(bytes)
+        nextToken = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
       }
-    }
-
-    /** Reload blacklist / switches when toast block-app (or other window) writes config. */
-    async function reloadConfigFromStore() {
+      replaceConfig({ ...configRef.current, token: nextToken })
+      await persistAndSync(true)
+      notify('已重新生成 Token（手机端需同步更新）')
+      await refreshStatus()
+    })
+  }
+  async function restartServer() {
+    await run('restart', async () => {
+      await persistAndSync(true)
+      if (!plugin.sidecar?.request) { notify('sidecar 未运行', 'warning'); return }
+      const result = await plugin.sidecar.request('restartServer')
+      if (mounted.current) setStatus(result)
+      notify(result?.ok === false ? result.error || '重启失败' : '服务已重启', result?.ok === false ? 'error' : 'success')
+      await refreshWebhookInfo()
+    })
+  }
+  async function clearChatHistory() {
+    await run('clear-chat', async () => {
+      if (plugin.sidecar?.request) await plugin.sidecar.request('clearChatHistory', {})
+      if (plugin.storage?.remove) {
+        try { await plugin.storage.remove('chatThreads') } catch { /* sidecar already cleared */ }
+      }
+      notify('对话历史已清空')
+    })
+  }
+  async function sendTest() {
+    await run('test', async () => {
+      const cfg = normalizeConfig(configRef.current)
+      if (plugin.sidecar?.request) {
+        try {
+          await plugin.sidecar.request('setConfig', cfg)
+          await plugin.sidecar.request('sendTest', {})
+          notify('已发送测试通知')
+          await refreshStatus()
+          return
+        } catch { /* fallback exercises event publish when the process is unavailable */ }
+      }
+      const sticky = cfg.cardDurationSec <= 0
+      const now = Date.now()
+      const pcIso = new Date(now).toISOString()
+      await plugin.events.publish({
+        eventType: 'smsforwarder-notify.notification', kind: 'smsforwarder-notify',
+        title: '测试 App · 测试通知', body: '这是一条 SmsForwarder 测试消息，验证码 123456', level: 'info', sticky,
+        actions: [{ id: 'copy-otp', label: '复制验证码' }, ...(sticky ? [{ id: 'dismiss', label: '知道了' }] : []), { id: 'block-app', label: '屏蔽此应用' }, { id: 'block-title', label: '屏蔽这个标题' }],
+        payload: { packageName: 'com.example.test', appName: '测试 App', title: '测试通知', body: '这是一条 SmsForwarder 测试消息，验证码 123456', receivedAt: new Date(now - 300000).toISOString(), webhookAt: pcIso, publishedAt: pcIso, shownAt: pcIso, otp: '123456', noticeKind: 'otp', auto_hide_ms: sticky ? 0 : cfg.cardDurationSec * 1000, card_duration_sec: cfg.cardDurationSec },
+        dedupeKey: `smsforwarder-notify:test:${now}`,
+      })
+      notify('已发送测试通知')
+    })
+  }
+  useEffect(() => {
+    mounted.current = true
+    running.current = true
+    setBusy('boot')
+    ensureStyles()
+    let disposed = false
+    const changed = async event => {
+      const id = event?.detail?.pluginId
+      if (id && id !== PLUGIN_ID) return
       try {
         const raw = await plugin.config.get()
-        if (!raw || typeof raw !== 'object') return
-        // Keep local edits if user is mid-type: only refresh lists + toggles that
-        // toast actions mutate; full applyConfig would stomp port/token drafts.
-        const cfg = raw
-        blacklistText.value = blacklistToText(cfg.appBlacklist)
-        pausedApps.value = sortBlacklist(
-          Array.isArray(cfg.appBlacklistPaused) ? cfg.appBlacklistPaused : [],
-        )
-        mmsTitleBlacklist.value = sortBlacklist(
-          Array.isArray(cfg.mmsTitleBlacklist) ? cfg.mmsTitleBlacklist : [],
-        )
-        filters.value = normalizeFilters(cfg.filters)
-        // Drop selections that no longer exist
-        if (mmsSelected.value.size) {
-          const set = new Set(mmsTitleBlacklist.value)
-          mmsSelected.value = new Set([...mmsSelected.value].filter((t) => set.has(t)))
-        }
-      } catch (e) {
-        console.warn('[smsforwarder-notify] reload config failed', e)
-      }
+        if (disposed || !raw || typeof raw !== 'object') return
+        const normalized = normalizeConfig(raw)
+        // Cross-window block actions change these lists, not connection drafts.
+        replaceConfig({ ...configRef.current, appBlacklist: normalized.appBlacklist, appBlacklistPaused: normalized.appBlacklistPaused, mmsTitleBlacklist: normalized.mmsTitleBlacklist, filters: normalized.filters })
+      } catch (error) { console.warn('[smsforwarder-notify] reload config failed', error) }
     }
-
-    function onPluginConfigChanged(ev) {
-      const id = ev && ev.detail && ev.detail.pluginId
-      if (id && id !== PLUGIN_ID) return
-      void reloadConfigFromStore()
-    }
-
-    onMounted(() => {
-      if (typeof window !== 'undefined') {
-        window.addEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
-      }
-      run('boot', async () => {
-        loading.value = true
+    window.addEventListener('catrace:plugin-config-changed', changed)
+    void (async () => {
+      try {
+        const raw = await plugin.config.get()
+        if (disposed) return
+        const initial = normalizeConfig(raw && typeof raw === 'object' ? raw : DEFAULT_CONFIG)
+        replaceConfig(initial)
         try {
-          const raw = await plugin.config.get()
-          applyConfig(raw && typeof raw === 'object' ? raw : DEFAULT_CONFIG)
-          try {
-            // push UI/plugin.config into sidecar first so the Token field is what HTTP checks
-            if (plugin.sidecar?.request) {
-              const pushed = await plugin.sidecar.request('setConfig', currentConfig())
-              if (pushed && typeof pushed === 'object') status.value = pushed
-            }
-            await refreshStatus()
-            // pull live token (sidecar may have generated one if field was empty)
-            await refreshWebhookInfo({ quiet: true })
-          } catch {
-            status.value = null
+          if (plugin.sidecar?.request) {
+            const result = await plugin.sidecar.request('setConfig', initial)
+            if (!disposed) setStatus(result)
           }
-        } finally {
-          loading.value = false
+          if (!disposed) await refreshStatus()
+          if (!disposed) await refreshWebhookInfo()
+        } catch (error) { if (!disposed) setStatus({ running: false, error: errorText(error) }) }
+      } catch (error) { if (!disposed) notify(errorText(error), 'error') }
+      finally {
+        if (!disposed) {
+          running.current = false
+          setBusy('')
+          setLoading(false)
         }
-      })
-    })
-
-    if (typeof onBeforeUnmount === 'function') {
-      onBeforeUnmount(() => {
-        if (typeof window !== 'undefined') {
-          window.removeEventListener('catrace:plugin-config-changed', onPluginConfigChanged)
-        }
-      })
-    }
-
-    expose({
-      headerEnabled,
-      headerLoading,
-      toggleEnabled,
-    })
-
+      }
+    })()
     return () => {
-      const st = status.value || {}
-      const info = webhookInfo.value || {}
-      const urls =
-        (Array.isArray(st.webhookUrls) && st.webhookUrls.length
-          ? st.webhookUrls
-          : Array.isArray(info.webhookUrls)
-            ? info.webhookUrls
-            : []) || []
-      const primaryUrl = urls[0] || `http://<电脑IP>:${port.value}${normalizePath(path.value)}`
-      const authHeader =
-        info.authorizationHeader ||
-        (token.value ? `Authorization: Bearer ${token.value}` : 'Authorization: Bearer <token>')
-      const template = info.jsonTemplate || JSON_TEMPLATE
-
-      const statusRows = st.error
-        ? [['状态', st.error]]
-        : [
-            ['服务', st.running ? '运行中' : '未运行'],
-            ['监听', st.running ? `${st.host || host.value}:${st.port || port.value}` : '-'],
-            ['路径', st.path || path.value],
-            ['Token', st.hasToken || token.value ? '已配置' : '未配置'],
-            ['已接收', String(st.acceptedCount ?? 0)],
-            ['已拒绝', String(st.rejectedCount ?? 0)],
-            ['已去重', String(st.dedupedCount ?? 0)],
-            [
-              '最近成功',
-              st.lastSuccessAt ? new Date(st.lastSuccessAt).toLocaleString() : '-',
-            ],
-            ['最近来源', st.lastClientIp || '-'],
-            ['最近错误', st.lastErrorSummary || '无'],
-            ...(st.onlyPushWhenActive && st.pendingCount > 0
-              ? [['待补推', `${String(st.pendingCount)} 条（空闲时暂存，活跃后推送）`]]
-              : []),
-          ]
-
-      const copyBtn = (label, text, key) =>
-        h(
-          NButton,
-          {
-            size: 'tiny',
-            secondary: true,
-            loading: busy.value === key,
-            onClick: () => copyText(text),
-          },
-          { default: () => label },
-        )
-
-      const tabBar = h(
-        'div',
-        { class: 'tabs' },
-        TABS.map((t) =>
-          h(
-            'button',
-            {
-              key: t.id,
-              class: ['tab', { 'is-active': activeTab.value === t.id }],
-              onClick: () => {
-                activeTab.value = t.id
-              },
-            },
-            t.label,
-          ),
-        ),
-      )
-
-      const headerCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [
-          h('h2', 'SmsForwarder 通知'),
-          h(
-            NTag,
-            {
-              size: 'small',
-              round: true,
-              bordered: false,
-              type: enabled.value ? 'success' : 'default',
-            },
-            { default: () => (enabled.value ? '已启用' : '已关闭') },
-          ),
-        ]),
-        h(
-          'p',
-          { class: 'desc' },
-          '本机开 HTTP Webhook，接收 Android SmsForwarder 转发的 App 通知，弹出 Catrace Toast。仅建议可信局域网使用。',
-        ),
-        h(
-          'p',
-          { class: 'warn' },
-          '安全：默认监听 0.0.0.0（全部网卡）。务必使用强 Token，勿暴露到公网。首次启动防火墙弹窗选「允许访问」即可，无需手动配置；手机连不上时再放行入站端口。',
-        ),
-      ])
-
-      const overviewCard = h('div', { class: ['card', { 'is-error': !!st.error }] }, [
-        h('div', { class: 'head' }, [h('h2', '服务状态')]),
-        loading.value
-          ? h('p', { class: 'desc' }, '加载中…')
-          : h(
-              'div',
-              { class: ['status', { 'is-error': !!st.error }] },
-              statusRows.flatMap(([k, v]) => [h('strong', k), h('span', String(v))]),
-            ),
-        h('div', { class: 'actions' }, [
-          h(
-            NButton,
-            {
-              size: 'small',
-              loading: busy.value === 'status',
-              disabled: !!busy.value && busy.value !== 'status',
-              onClick: () =>
-                run('status', async () => {
-                  await refreshStatus()
-                  await refreshWebhookInfo({ quiet: true })
-                }),
-            },
-            { default: () => '刷新状态' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              loading: busy.value === 'restart',
-              disabled: !!busy.value && busy.value !== 'restart',
-              onClick: restartServer,
-            },
-            { default: () => '重启服务' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: 'primary',
-              loading: busy.value === 'test',
-              disabled: !!busy.value && busy.value !== 'test',
-              onClick: sendTest,
-            },
-            { default: () => '发送测试 Toast' },
-          ),
-        ]),
-      ])
-
-      const settingsCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '连接')]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '电脑接收地址'),
-          h('div', { class: 'copy-row' }, [
-            h('pre', { class: 'mono' }, primaryUrl),
-            copyBtn('复制', primaryUrl, 'copy-url'),
-          ]),
-          urls.length > 1
-            ? h(
-                'div',
-                { class: 'url-list' },
-                urls.slice(1).map((u) =>
-                  h('div', { class: 'copy-row', key: u }, [
-                    h('pre', { class: 'mono' }, u),
-                    copyBtn('复制', u, `copy-url-${u}`),
-                  ]),
-                ),
-              )
-            : null,
-          h('p', { class: 'hint' }, '填到手机 SmsForwarder 的 Webhook。详细步骤见「教程」。'),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, 'Token'),
-          h('div', { class: 'row-inline' }, [
-            h(NInput, {
-              value: token.value,
-              type: showToken.value ? 'text' : 'password',
-              showPasswordOn: 'click',
-              placeholder: '启用插件后自动生成',
-              style: { flex: 1, minWidth: '12rem' },
-              'onUpdate:value': (v) => {
-                token.value = v
-                scheduleSave()
-              },
-            }),
-            h(
-              NButton,
-              {
-                size: 'small',
-                onClick: () => {
-                  showToken.value = !showToken.value
-                },
-              },
-              { default: () => (showToken.value ? '隐藏' : '显示') },
-            ),
-            copyBtn('复制', authHeader.replace(/^Authorization:\s*/i, ''), 'copy-token'),
-            NPopconfirm
-              ? h(
-                  NPopconfirm,
-                  {
-                    onPositiveClick: regenerateToken,
-                  },
-                  {
-                    trigger: () =>
-                      h(
-                        NButton,
-                        {
-                          size: 'small',
-                          type: 'warning',
-                          loading: busy.value === 'regen',
-                          disabled: !!busy.value && busy.value !== 'regen',
-                        },
-                        { default: () => '重新生成' },
-                      ),
-                    default: () => '重新生成会使手机端旧 Token 立即失效，确认？',
-                  },
-                )
-              : h(
-                  NButton,
-                  {
-                    size: 'small',
-                    type: 'warning',
-                    loading: busy.value === 'regen',
-                    onClick: regenerateToken,
-                  },
-                  { default: () => '重新生成' },
-                ),
-          ]),
-          h('p', { class: 'hint' }, 'SmsForwarder 请求头：Authorization: Bearer <token>'),
-        ]),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '卡片显示多久'),
-          h('div', { class: 'row-inline' }, [
-            h(NInput, {
-              class: 'num',
-              value: String(cardDurationSec.value),
-              'onUpdate:value': (v) => {
-                cardDurationSec.value = clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
-                scheduleSave()
-              },
-            }),
-            h('span', { class: 'unit' }, '秒（0=不自动关掉）'),
-          ]),
-        ]),
-        h('div', { class: 'actions' }, [
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: 'primary',
-              loading: busy.value === 'save',
-              onClick: () => run('save', () => persistAndSync({ quiet: false })),
-            },
-            { default: () => '保存并应用' },
-          ),
-        ]),
-      ])
-
-      const chatApps = textToBlacklist(chatAppsText.value)
-      const clearChatBtn = NPopconfirm
-        ? h(
-            NPopconfirm,
-            { onPositiveClick: clearChatHistory },
-            {
-              trigger: () =>
-                h(
-                  NButton,
-                  {
-                    size: 'tiny',
-                    type: 'error',
-                    text: true,
-                    loading: busy.value === 'clear-chat',
-                  },
-                  { default: () => '清空聊天记录' },
-                ),
-              default: () => '清空本机保存的全部会话气泡？',
-            },
-          )
-        : h(
-            NButton,
-            {
-              size: 'tiny',
-              type: 'error',
-              text: true,
-              loading: busy.value === 'clear-chat',
-              onClick: clearChatHistory,
-            },
-            { default: () => '清空聊天记录' },
-          )
-
-      const advancedBody = [
-        h('div', { class: 'adv-grid-2' }, [
-          h('div', { class: 'adv-tile' }, [
-            h('div', { class: 'adv-tile-head' }, [
-              h('h3', { class: 'adv-tile-title' }, '活跃时推送'),
-              h(NSwitch, {
-                value: onlyPushWhenActive.value,
-                'onUpdate:value': (v) => {
-                  onlyPushWhenActive.value = v === true
-                  scheduleSave()
-                },
-              }),
-            ]),
-            h(
-              'p',
-              { class: 'adv-tile-desc' },
-              '电脑有键鼠操作时才实时推送；空闲时先暂存，回来后一次性补推。',
-            ),
-            h('div', { class: 'adv-tile-foot' }, [
-              h('span', [
-                h('span', { class: 'adv-status-dot' }),
-                ' ',
-                onlyPushWhenActive.value ? '已开启（空闲先存）' : '已关闭（随时推送）',
-              ]),
-            ]),
-          ]),
-          h('div', { class: 'adv-tile' }, [
-            h('div', { class: 'adv-tile-head' }, [
-              h('h3', { class: 'adv-tile-title' }, '聊天小窗'),
-              h(NSwitch, {
-                value: mergeChatThreads.value,
-                'onUpdate:value': (v) => {
-                  mergeChatThreads.value = v !== false
-                  scheduleSave()
-                },
-              }),
-            ]),
-            h('p', { class: 'adv-tile-desc' }, '指定 IM 合成对话小窗：弹出只显示最新一条，新消息往上顶；往上滚加载本机历史。'),
-            h('div', { class: 'adv-chip-box' }, [
-              ...chatApps.map((name) =>
-                h(
-                  NTag,
-                  {
-                    key: name,
-                    size: 'small',
-                    round: true,
-                    closable: true,
-                    onClose: () => removeChatApp(name),
-                  },
-                  { default: () => h('span', { class: 'chip-text' }, name) },
-                ),
-              ),
-              h(NInput, {
-                class: 'adv-chip-input',
-                size: 'small',
-                bordered: true,
-                value: chatAppDraft.value,
-                placeholder: '+ 输入名字按回车添加',
-                'onUpdate:value': (v) => {
-                  chatAppDraft.value = v
-                },
-                onKeyup: (e) => {
-                  if (e && e.key === 'Enter') addChatApp()
-                },
-              }),
-            ]),
-            h('div', { class: 'adv-tile-foot' }, [
-              h('span', '输入应用名或包名后按回车添加'),
-              clearChatBtn,
-            ]),
-          ]),
-        ]),
-        h('h3', { class: 'adv-section-title' }, '频控与 Webhook'),
-        h('div', { class: 'adv-grid-3' }, [
-          h('div', { class: 'adv-tile' }, [
-            h('h3', { class: 'adv-tile-title' }, '相同通知最短间隔'),
-            h('div', { class: 'adv-metric' }, [
-              h(NInput, {
-                value: String(dedupeWindowSec.value),
-                'onUpdate:value': (v) => {
-                  dedupeWindowSec.value = clamp(
-                    v,
-                    MIN_DEDUPE_SEC,
-                    MAX_DEDUPE_SEC,
-                    DEFAULT_DEDUPE_SEC,
-                  )
-                  scheduleSave()
-                },
-              }),
-              h('span', { class: 'unit' }, '秒'),
-            ]),
-            h('p', { class: 'hint' }, '完全不一样的通知，短时间内再来一次就不重复。'),
-          ]),
-          h('div', { class: 'adv-tile' }, [
-            h('h3', { class: 'adv-tile-title' }, 'Webhook 监听端口'),
-            h(NInput, {
-              value: String(port.value),
-              'onUpdate:value': (v) => {
-                port.value = clamp(v, MIN_PORT, MAX_PORT, DEFAULT_PORT)
-                scheduleSave()
-              },
-            }),
-            h('p', { class: 'hint' }, `端口范围：${MIN_PORT} – ${MAX_PORT}`),
-          ]),
-          h('div', { class: 'adv-tile' }, [
-            h('h3', { class: 'adv-tile-title' }, 'Webhook 路由路径'),
-            h(NInput, {
-              value: path.value,
-              placeholder: '/webhook',
-              'onUpdate:value': (v) => {
-                path.value = v
-                scheduleSave()
-              },
-            }),
-            h('p', { class: 'hint' }, '接收 SmsForwarder POST 的 HTTP 路径。'),
-          ]),
-        ]),
-        h('div', { class: 'filter-head' }, [
-          h('h3', { class: 'adv-section-title' }, '自定义过滤规则'),
-          h(
-            'p',
-            { class: 'hint' },
-            '比「不看这些标题」更细：可指定应用、正文或正则。命中就不弹。',
-          ),
-        ]),
-        h('div', { class: 'filter-composer' }, [
-          h('p', { class: 'filter-composer-title' }, '新建规则'),
-          h('div', { class: 'filter-form' }, [
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '动作'),
-              h(NSelect, {
-                value: 'hide',
-                options: FILTER_ACTION_OPTIONS,
-                size: 'small',
-                disabled: true,
-              }),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '匹配字段'),
-              h(NSelect, {
-                value: filterDraft.value.field,
-                options: FILTER_FIELD_OPTIONS,
-                size: 'small',
-                'onUpdate:value': (v) => {
-                  filterDraft.value = {
-                    ...filterDraft.value,
-                    field: FILTER_FIELDS.has(v) ? v : 'title',
-                  }
-                },
-              }),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '匹配逻辑'),
-              h(NSelect, {
-                value: filterDraft.value.match,
-                options: FILTER_MATCH_OPTIONS,
-                size: 'small',
-                'onUpdate:value': (v) => {
-                  filterDraft.value = {
-                    ...filterDraft.value,
-                    match: FILTER_MATCHES.has(v) ? v : 'contains',
-                  }
-                },
-              }),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '关键词 / 正则'),
-              h(NInput, {
-                size: 'small',
-                value: filterDraft.value.value,
-                placeholder:
-                  filterDraft.value.match === 'regex'
-                    ? '例如 DSH Desktop.*交流群'
-                    : '例如：DSH Desktop 交流群',
-                'onUpdate:value': (v) => {
-                  filterDraft.value = { ...filterDraft.value, value: v }
-                },
-                onKeyup: (e) => {
-                  if (e && e.key === 'Enter') addCustomFilter()
-                },
-              }),
-            ]),
-            h('div', { class: 'field' }, [
-              h('div', { class: 'label' }, '仅限应用（可选）'),
-              h(NInput, {
-                size: 'small',
-                value: filterDraft.value.appContains,
-                placeholder: 'QQ / com.tencent.mobileqq',
-                'onUpdate:value': (v) => {
-                  filterDraft.value = { ...filterDraft.value, appContains: v }
-                },
-                onKeyup: (e) => {
-                  if (e && e.key === 'Enter') addCustomFilter()
-                },
-              }),
-            ]),
-          ]),
-          filterRegexError(filterDraft.value.match, filterDraft.value.value)
-            ? h('p', { class: 'filter-warn' }, filterRegexError(filterDraft.value.match, filterDraft.value.value))
-            : null,
-          h('div', { class: 'filter-add' }, [
-            h(
-              NButton,
-              {
-                size: 'small',
-                type: 'primary',
-                disabled: filters.value.length >= MAX_FILTERS,
-                onClick: addCustomFilter,
-              },
-              { default: () => '添加到规则列表' },
-            ),
-          ]),
-        ]),
-        h('div', { class: 'filter-list-head' }, [
-          h('span', `已生效规则（${filters.value.length}）`),
-          h('span', { class: 'hint' }, '从上到下匹配'),
-        ]),
-        filters.value.length
-          ? h(
-              'div',
-              { class: 'filter-list' },
-              filters.value.map((f, idx) => {
-                const issue = filterIssue(f)
-                return h(
-                  'div',
-                  {
-                    class: ['filter-item', { 'is-off': f.enabled === false, 'is-warn': !!issue }],
-                    key: f.id,
-                  },
-                  [
-                    h('div', { class: 'filter-tags' }, [
-                      h('span', { class: 'filter-tag is-hide' }, '不看'),
-                      h('span', { class: 'filter-tag is-muted' }, optionLabel(FILTER_FIELD_OPTIONS, f.field, '标题')),
-                      h('span', { class: 'filter-tag is-match' }, optionLabel(FILTER_MATCH_OPTIONS, f.match, '包含文本')),
-                      h('span', { class: 'filter-quote' }, `"${f.value || '…'}"`),
-                      f.appContains ? h('span', { class: 'filter-scope' }, `仅限 ${f.appContains}`) : null,
-                    ]),
-                    issue ? h('p', { class: 'filter-warn' }, issue) : null,
-                    h(NSwitch, {
-                      size: 'small',
-                      value: f.enabled !== false,
-                      'onUpdate:value': (v) => patchFilter(idx, { enabled: v === true }),
-                    }),
-                    h(
-                      NButton,
-                      {
-                        size: 'tiny',
-                        quaternary: true,
-                        type: 'error',
-                        onClick: () => {
-                          filters.value = filters.value.filter((_, i) => i !== idx)
-                          scheduleSave()
-                        },
-                      },
-                      { default: () => '删除' },
-                    ),
-                  ],
-                )
-              }),
-            )
-          : h('p', { class: 'filter-empty' }, '还没有自定义规则。常见群名直接在上面「不看这些标题」里加就行。'),
-      ]
-
-      const appPane = h('div', { class: 'pane' }, [
-        h('div', { class: 'pane-head' }, [
-          h('h3', { class: 'pane-title' }, [
-            '不看这些应用',
-            h('span', { class: 'count' }, `(${blockedAppRows.value.length})`),
-          ]),
-        ]),
-        h('div', { class: 'search-add' }, [
-          h(NInput, {
-            size: 'small',
-            value: appDraft.value || appQuery.value,
-            placeholder: '搜索或输入包名，按 Enter 添加…',
-            'onUpdate:value': (v) => {
-              appDraft.value = v
-              appQuery.value = v
-            },
-            onKeyup: (e) => {
-              if (e && e.key === 'Enter') addBlockedApp()
-            },
-          }),
-          h(
-            NButton,
-            { size: 'small', secondary: true, onClick: addBlockedApp },
-            { default: () => '添加' },
-          ),
-        ]),
-        h(
-          'div',
-          { class: 'pane-body' },
-          blockedAppRows.value.length
-            ? h(
-                'div',
-                { class: 'title-chips' },
-                blockedAppRows.value.map((row) =>
-                  h(
-                    NTag,
-                    {
-                      key: row.key,
-                      size: 'small',
-                      round: true,
-                      type: 'info',
-                      closable: true,
-                      onClose: () => removeBlockedApp(row),
-                    },
-                    {
-                      default: () =>
-                        h('span', { class: 'chip-text chip-pkg', title: row.title }, row.title),
-                    },
-                  ),
-                ),
-              )
-            : h(
-                'p',
-                { class: 'filter-empty' },
-                appQuery.value.trim() ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。',
-              ),
-        ),
-      ])
-
-      const titlePane = h('div', { class: 'pane' }, [
-        h('div', { class: 'pane-head' }, [
-          h('h3', { class: 'pane-title' }, [
-            '不看这些标题',
-            h('span', { class: 'count' }, `(${titleBlocks.value.length})`),
-          ]),
-          h('span', { class: 'pane-hint' }, '支持文本模糊或精准匹配'),
-        ]),
-        h('div', { class: 'search-add' }, [
-          h(NInput, {
-            size: 'small',
-            value: keywordDraft.value || titleQuery.value,
-            placeholder: '搜索或输入消息标题关键字，按 Enter 添加…',
-            'onUpdate:value': (v) => {
-              keywordDraft.value = v
-              titleQuery.value = v
-            },
-            onKeyup: (e) => {
-              if (e && e.key === 'Enter') addKeywordFilter()
-            },
-          }),
-          h(
-            NButton,
-            {
-              size: 'small',
-              secondary: true,
-              disabled: filters.value.length >= MAX_FILTERS,
-              onClick: addKeywordFilter,
-            },
-            { default: () => '添加' },
-          ),
-        ]),
-        h(
-          'div',
-          { class: 'pane-body' },
-          titleBlocks.value.length
-            ? h(
-                'div',
-                { class: 'title-chips' },
-                titleBlocks.value.map((item) =>
-                  h(
-                    NTag,
-                    {
-                      key: item.id,
-                      size: 'small',
-                      round: true,
-                      type: 'warning',
-                      closable: true,
-                      onClose: () => removeTitleBlock(item),
-                    },
-                    {
-                      default: () => [
-                        h('span', { class: 'chip-text' }, item.title),
-                        item.sub === '锁屏短信'
-                          ? h(
-                              NTag,
-                              { size: 'tiny', round: true, bordered: false },
-                              { default: () => '锁屏短信' },
-                            )
-                          : null,
-                      ],
-                    },
-                  ),
-                ),
-              )
-            : h(
-                'p',
-                { class: 'filter-empty' },
-                titleQuery.value.trim() ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。',
-              ),
-        ),
-      ])
-
-      const filterCard = h('div', { class: 'block-split' }, [appPane, titlePane])
-
-      const advancedCard = h('div', { class: 'card advanced-card' }, [
-        h(
-          'button',
-          {
-            class: 'adv-toggle',
-            type: 'button',
-            'aria-expanded': String(showAdvanced.value),
-            'aria-controls': 'smsforwarder-advanced-settings',
-            onClick: () => {
-              showAdvanced.value = !showAdvanced.value
-            },
-          },
-          [
-            '高级',
-            h('span', { class: 'adv-chevron', 'aria-hidden': 'true' }, [chevronIcon()]),
-          ],
-        ),
-        h(
-          'div',
-          {
-            id: 'smsforwarder-advanced-settings',
-            class: ['adv-collapse', { open: showAdvanced.value }],
-            'aria-hidden': String(!showAdvanced.value),
-            inert: !showAdvanced.value,
-          },
-          [h('div', { class: 'adv-collapse-inner' }, [h('div', { class: 'adv-body' }, advancedBody)])],
-        ),
-      ])
-
-      const urlRows = urls.length ? urls : [primaryUrl]
-
-      const steps = [
-        {
-          title: '准备条件',
-          items: [
-            '电脑已安装 Catrace，且能在命令行执行 node 命令（sidecar 依赖 Node）',
-            '手机与电脑连接同一 Wi-Fi',
-            '手机上安装 SmsForwarder（官方支持 Android 4.4–13，14 以上需实机验证；下载地址见上方）',
-            '在 Catrace 插件列表启用 smsforwarder-notify，回到本页「概览」确认服务「运行中」',
-            'Windows 防火墙首次弹窗选「允许访问」；手机连不上时再手动放行入站端口',
-          ],
-        },
-        {
-          title: 'SmsForwarder 通用设置',
-          items: [
-            '打开 SmsForwarder → 通用设置，开启需要的转发能力（短信 / 应用通知）',
-            '按系统弹窗逐一授权；加入电池优化白名单，允许后台运行，勿强杀',
-            '转发应用通知：开启「通知使用权」',
-            '设置里开启「启动时异步获取已安装 App 列表」，否则取不到 App 名',
-          ],
-        },
-        {
-          title: '新建发送通道（Webhook）',
-          items: [
-            '发送通道 → 新建，类型选 Webhook，方法选 POST，通道名称随意（如 catrace）',
-            {
-              kind: 'copy',
-              label: 'Webhook Server：选手机能访问的电脑局域网 IP',
-              urls: urlRows,
-              emptyUrls: !urls.length,
-            },
-            {
-              kind: 'copy',
-              label: 'Headers：点 + 加一行，Key / Value 分开填',
-              headers: [
-                { key: 'Authorization', value: authHeader.replace(/^Authorization:\s*/i, '') },
-              ],
-            },
-            { kind: 'copy', label: '消息模板：整段粘贴', value: template, copyKey: 'copy-tpl' },
-            '保存后点「测试」，SmsForwarder 显示发送成功、电脑弹出 Toast 即通道 OK',
-          ],
-        },
-        {
-          title: '新建转发规则（通道建好后必做）',
-          items: [
-            '仅有发送通道不会转发；必须再配「转发规则」并绑定到刚才的通道',
-            '应用通知：转发规则 → 通知转发规则 → 新建',
-            '短信：转发规则 → 短信转发规则 → 新建（可选）',
-            '规则别名随意（如 catrace）；发送通道选刚建的 catrace',
-            '匹配字段选「全部」（先跑通全量；之后可改成包名/内容过滤）',
-            '「启用自定义模版」「启用正则替换」保持关闭（用通道里的消息模板即可）',
-            '打开「启用该条转发规则」，免打扰时段保持 00:00～00:00（相等=不启用）',
-            '保存后点「测试」；再让手机来一条真实通知/短信，电脑应弹 Toast',
-          ],
-        },
-      ]
-
-      const renderStepItem = (it) => {
-        if (!it || it.kind !== 'copy') return h('li', it)
-        if (Array.isArray(it.headers)) {
-          return h('li', { class: 'step-copy' }, [
-            h('span', { class: 'step-copy-label' }, it.label),
-            h(
-              'div',
-              { class: 'step-copy-values' },
-              it.headers.map((hdr) =>
-                h('div', { class: 'copy-row', key: hdr.key }, [
-                  h('pre', { class: 'mono' }, `${hdr.key}: ${hdr.value}`),
-                  h('div', { class: 'row-inline' }, [
-                    copyBtn('复制 Key', hdr.key, `copy-hk-${hdr.key}`),
-                    copyBtn('复制 Value', hdr.value, `copy-hv-${hdr.key}`),
-                  ]),
-                ]),
-              ),
-            ),
-          ])
-        }
-        const rows = Array.isArray(it.urls)
-          ? it.urls.map((u) =>
-              h('div', { class: 'copy-row', key: u }, [
-                h('pre', { class: 'mono' }, u),
-                copyBtn('复制', u, `copy-${u}`),
-              ]),
-            )
-          : [
-              h('div', { class: 'copy-row' }, [
-                h('pre', { class: 'mono' }, it.value),
-                copyBtn('复制', it.value, it.copyKey),
-              ]),
-            ]
-        return h('li', { class: 'step-copy' }, [
-          h('span', { class: 'step-copy-label' }, it.label),
-          h('div', { class: 'step-copy-values' }, rows),
-          it.emptyUrls
-            ? h('p', { class: 'hint' }, 'URL 列表为空：先启用插件，确认服务运行中，再点「刷新状态」。')
-            : null,
-        ])
-      }
-
-      const tutorialCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '使用教程')]),
-        h(
-          'p',
-          { class: 'desc' },
-          '按官方流程：通用设置 → 发送通道 → 转发规则。通道只决定「发到哪」；规则决定「哪些通知/短信会转发」。需要填写的内容点「复制」即可。',
-        ),
-        h('div', { class: 'field' }, [
-          h('div', { class: 'label' }, '下载 SmsForwarder'),
-          h(
-            'div',
-            { class: 'dl-list' },
-            DOWNLOAD_LINKS.map((d) =>
-              h('div', { class: 'dl-item', key: d.url }, [
-                h(
-                  'div',
-                  { class: 'dl-name' },
-                  h(
-                    'a',
-                    { href: d.url, target: '_blank', rel: 'noopener noreferrer' },
-                    d.name,
-                  ),
-                ),
-                h('p', { class: 'dl-note' }, d.note),
-              ]),
-            ),
-          ),
-        ]),
-        h(
-          'div',
-          { class: 'steps-wrap' },
-          steps.map((s, i) =>
-            h('div', { class: 'step', key: s.title }, [
-              h('span', { class: 'step-num' }, String(i + 1)),
-              h('div', { class: 'step-body' }, [
-                h('div', { class: 'step-title' }, s.title),
-                h('ul', { class: 'step-list' }, s.items.map(renderStepItem)),
-              ]),
-            ]),
-          ),
-        ),
-      ])
-
-      const faqCard = h('div', { class: 'card' }, [
-        h('div', { class: 'head' }, [h('h2', '常见问题')]),
-        ...FAQ.map(([q, a]) =>
-          h('div', { class: 'faq', key: q }, [
-            h('div', { class: 'faq-q' }, q),
-            h('p', { class: 'faq-a' }, a),
-          ]),
-        ),
-      ])
-
-      let panel
-      if (activeTab.value === 'settings') {
-        panel = h('div', { class: 'sf-tab-panel' }, [settingsCard, filterCard, advancedCard])
-      } else if (activeTab.value === 'tutorial') {
-        panel = h('div', { class: 'sf-tab-panel' }, [tutorialCard, faqCard])
-      } else {
-        panel = h('div', { class: 'sf-tab-panel' }, [overviewCard])
-      }
-
-      return h('div', { class: 'sf-settings' }, [headerCard, tabBar, panel])
+      disposed = true
+      mounted.current = false
+      window.removeEventListener('catrace:plugin-config-changed', changed)
+      clearTimeout(feedbackTimer.current)
+      clearTimeout(saveTimer.current)
+      if (pendingSave.current) void persistAndSync(true).catch(error => console.warn('[smsforwarder-notify] final save failed', error))
     }
-  },
+  }, [])
+
+  function addApp() {
+    const value = appDraft.trim()
+    if (!value) return
+    const list = configRef.current.appBlacklist
+    if (!list.some(item => item.toLowerCase() === value.toLowerCase())) updateConfig({ appBlacklist: sortBlacklist([...list, value]).slice(0, 200) })
+    setAppDraft('')
+  }
+  function removeApp(value) {
+    const same = item => String(item).toLowerCase() !== value.toLowerCase()
+    updateConfig({ appBlacklist: configRef.current.appBlacklist.filter(same), appBlacklistPaused: configRef.current.appBlacklistPaused.filter(same) })
+  }
+  function addKeyword() {
+    const value = titleDraft.trim()
+    if (!value) return
+    const list = configRef.current.filters
+    if (list.length >= MAX_FILTERS) { notify(`最多 ${MAX_FILTERS} 条`, 'warning'); return }
+    if (!list.some(f => f.value.toLowerCase() === value.toLowerCase() && ['contains', 'equals'].includes(f.match))) updateConfig({ filters: [...list, { id: newFilterId(), enabled: true, field: 'any', match: 'contains', value, appContains: '' }] })
+    setTitleDraft('')
+  }
+  function addCustomFilter() {
+    const next = normalizeFilter(filterDraft)
+    if (!next.value) { notify('先填要拦截的内容', 'warning'); return }
+    const issue = filterIssue(next)
+    if (issue) { notify(issue, 'warning'); return }
+    const list = configRef.current.filters
+    if (list.length >= MAX_FILTERS) { notify(`最多 ${MAX_FILTERS} 条`, 'warning'); return }
+    if (list.some(f => f.field === next.field && f.match === next.match && f.value.toLowerCase() === next.value.toLowerCase() && f.appContains.toLowerCase() === next.appContains.toLowerCase())) { notify('已经有同样的规则了', 'warning'); return }
+    updateConfig({ filters: [...list, next] })
+    setFilterDraft(previous => ({ ...previous, value: '' }))
+  }
+  function addChatApp() {
+    const value = chatAppDraft.trim()
+    if (!value) return
+    const list = configRef.current.chatApps
+    if (!list.some(item => item.toLowerCase() === value.toLowerCase())) updateConfig({ chatApps: sortBlacklist([...list, value]).slice(0, 200) })
+    setChatAppDraft('')
+  }
+  const st = status || {}, info = webhookInfo || {}
+  const urls = Array.isArray(st.webhookUrls) && st.webhookUrls.length ? st.webhookUrls : Array.isArray(info.webhookUrls) ? info.webhookUrls : []
+  const primaryUrl = urls[0] || `http://<电脑IP>:${config.port}${normalizePath(config.path)}`
+  const authHeader = info.authorizationHeader || (config.token ? `Authorization: Bearer ${config.token}` : 'Authorization: Bearer <token>')
+  const template = info.jsonTemplate || JSON_TEMPLATE
+  const field = (label, control, hint) => h('div', { className: 'field' }, h('label', { className: 'label' }, label), control, hint ? h('p', { className: 'hint' }, hint) : null)
+  const button = (label, onClick, options = {}) => h(Button, { type: 'button', size: '2', variant: 'soft', onClick, ...options }, label)
+  const input = (value, onChange, props = {}) => h(TextField.Root, { size: '2', value: String(value ?? ''), onChange: event => onChange(event.target.value), ...props })
+  const enter = action => event => { if (event.key === 'Enter' && !event.nativeEvent?.isComposing) { event.preventDefault(); action() } }
+  const select = (value, options, onChange, disabled = false) => h(Select.Root, { value, onValueChange: onChange, disabled, size: '2' }, h(Select.Trigger, { 'aria-label': optionLabel(options, value, '') }), h(Select.Content, null, options.map(option => h(Select.Item, { key: option.value, value: option.value }, option.label))))
+  const chip = (text, onRemove, color = 'teal', title = text, key = text) => h(Badge, { key, color, size: '2', className: 'sf-chip', title }, h('span', { className: 'chip-text' }, text), h('button', { type: 'button', className: 'sf-chip-remove', 'aria-label': `移除 ${text}`, onClick: onRemove }, '×'))
+  const copyRow = (text, key = text) => h('div', { className: 'copy-row', key }, h('pre', { className: 'mono' }, text), button('复制', () => void copyText(text), { size: '1' }))
+  const confirmButton = (label, description, action, key) => h(AlertDialog.Root, null,
+    h(AlertDialog.Trigger, null, button(label, undefined, { color: 'red', disabled: !!busy, loading: busy === key })),
+    h(AlertDialog.Content, { maxWidth: '28rem' }, h(AlertDialog.Title, null, label), h(AlertDialog.Description, null, description), h('div', { className: 'actions', style: { justifyContent: 'flex-end', marginTop: '1rem' } }, h(AlertDialog.Cancel, null, button('取消', undefined, { color: 'gray' })), h(AlertDialog.Action, null, button('确认', () => void action(), { color: 'red' })))))
+  const section = (title, children, className = '') => h('section', { className: `card ${className}` }, h('div', { className: 'head' }, h('h2', null, title)), ...children)
+  const statusRows = st.error ? [['状态', st.error]] : [['服务', st.running ? '运行中' : '未运行'], ['监听', st.running ? `${st.host || config.host}:${st.port || config.port}` : '-'], ['路径', st.path || config.path], ['Token', st.hasToken || config.token ? '已配置' : '未配置'], ['已接收', String(st.acceptedCount ?? 0)], ['已拒绝', String(st.rejectedCount ?? 0)], ['已去重', String(st.dedupedCount ?? 0)], ['最近成功', st.lastSuccessAt ? new Date(st.lastSuccessAt).toLocaleString() : '-'], ['最近来源', st.lastClientIp || '-'], ['最近错误', st.lastErrorSummary || '无'], ...(st.onlyPushWhenActive && st.pendingCount > 0 ? [['待补推', `${st.pendingCount} 条（空闲时暂存，活跃后推送）`]] : [])]
+  const overview = section('服务状态', [loading ? h('p', { className: 'desc' }, '加载中…') : h('div', { className: `status${st.error ? ' is-error' : ''}` }, statusRows.map(([label, value]) => h(Fragment, { key: label }, h('strong', null, label), h('span', null, String(value))))), h('div', { className: 'actions' }, button('刷新状态', () => void run('status', async () => { await refreshStatus(); await refreshWebhookInfo() }), { disabled: !!busy, loading: busy === 'status' }), button('重启服务', () => void restartServer(), { disabled: !!busy, loading: busy === 'restart' }), button('发送测试 Toast', () => void sendTest(), { disabled: !!busy, loading: busy === 'test', variant: 'solid' }))], st.error ? 'is-error' : '')
+  const connection = section('连接', [field('电脑接收地址', h('div', { className: 'url-list' }, (urls.length ? urls : [primaryUrl]).map(url => copyRow(url))), '填到手机 SmsForwarder 的 Webhook。详细步骤见「教程」。'), field('Token', h('div', { className: 'row-inline' }, input(config.token, value => updateConfig({ token: value }), { type: showToken ? 'text' : 'password', placeholder: '启用插件后自动生成', 'aria-label': 'Token', style: { flex: 1, minWidth: '12rem' } }), button(showToken ? '隐藏' : '显示', () => setShowToken(!showToken)), button('复制', () => void copyText(authHeader.replace(/^Authorization:\s*/i, ''))), confirmButton('重新生成', '重新生成会使手机端旧 Token 立即失效，确认？', regenerateToken, 'regen')), 'SmsForwarder 请求头：Authorization: Bearer <token>'), field('卡片显示多久', h('div', { className: 'row-inline' }, input(config.cardDurationSec, value => updateConfig({ cardDurationSec: clamp(value, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC) }), { className: 'num', inputMode: 'numeric', 'aria-label': '卡片停留秒数' }), h('span', { className: 'unit' }, '秒（0=不自动关掉）'))), h('div', { className: 'actions' }, button('保存并应用', () => void run('save', () => persistAndSync(false)), { variant: 'solid', loading: busy === 'save', disabled: !!busy || loading }))])
+  const appRows = config.appBlacklist.filter(item => item.toLowerCase().includes(appDraft.trim().toLowerCase())).sort(compareBlacklist)
+  const titleRows = [...config.filters.filter(f => f.value).map(f => ({ ...f, kind: 'filter', title: f.value, sub: f.appContains })), ...config.mmsTitleBlacklist.map(title => ({ kind: 'mms', id: `mms:${title}`, title, sub: '锁屏短信' }))].filter(item => `${item.title} ${item.sub || ''}`.toLowerCase().includes(titleDraft.trim().toLowerCase())).sort((a, b) => compareBlacklist(a.title, b.title))
+  const blockPanes = h('div', { className: 'block-split' },
+    h('section', { className: 'pane' }, h('h3', { className: 'pane-title' }, `不看这些应用 (${appRows.length})`), h('div', { className: 'search-add' }, input(appDraft, setAppDraft, { placeholder: '搜索或输入包名，按 Enter 添加…', onKeyDown: enter(addApp), 'aria-label': '应用搜索或包名' }), button('添加', addApp)), h('div', { className: 'pane-body' }, appRows.length ? h('div', { className: 'title-chips' }, appRows.map(item => chip(item, () => removeApp(item), 'blue'))) : h('p', { className: 'filter-empty' }, appDraft ? '没有匹配的应用' : '暂无。也可在通知卡片上点「屏蔽此应用」。'))),
+    h('section', { className: 'pane' }, h('h3', { className: 'pane-title' }, `不看这些标题 (${titleRows.length})`), h('p', { className: 'hint' }, '支持文本模糊或精准匹配'), h('div', { className: 'search-add' }, input(titleDraft, setTitleDraft, { placeholder: '搜索或输入消息标题关键字，按 Enter 添加…', onKeyDown: enter(addKeyword), 'aria-label': '标题搜索或关键词' }), button('添加', addKeyword, { disabled: config.filters.length >= MAX_FILTERS })), h('div', { className: 'pane-body' }, titleRows.length ? h('div', { className: 'title-chips' }, titleRows.map(item => chip(`${item.title}${item.sub ? ` · ${item.sub}` : ''}`, () => updateConfig(item.kind === 'filter' ? { filters: configRef.current.filters.filter(f => f.id !== item.id) } : { mmsTitleBlacklist: configRef.current.mmsTitleBlacklist.filter(t => t.toLowerCase() !== item.title.toLowerCase()) }), 'amber', filterPreview(item), item.id))) : h('p', { className: 'filter-empty' }, titleDraft ? '没有匹配的标题' : '暂无。也可在通知卡片上点「屏蔽这个标题」。'))))
+  const advanced = h('section', { className: 'card advanced-card' }, h('button', { type: 'button', className: 'adv-toggle', 'aria-expanded': showAdvanced, 'aria-controls': 'smsforwarder-advanced-settings', onClick: () => setShowAdvanced(!showAdvanced) }, '高级', h('span', { className: 'adv-chevron', 'aria-hidden': true }, chevronIcon())), h('div', { id: 'smsforwarder-advanced-settings', className: `adv-collapse${showAdvanced ? ' open' : ''}`, 'aria-hidden': !showAdvanced, inert: !showAdvanced }, h('div', { className: 'adv-collapse-inner' }, h('div', { className: 'adv-body' },
+    h('div', { className: 'adv-grid-2' }, h('section', { className: 'adv-tile' }, h('div', { className: 'adv-tile-head' }, h('h3', { className: 'adv-tile-title' }, '活跃时推送'), h(Switch, { checked: config.onlyPushWhenActive, onCheckedChange: value => updateConfig({ onlyPushWhenActive: value }), 'aria-label': '活跃时推送' })), h('p', { className: 'adv-tile-desc' }, '电脑有键鼠操作时才实时推送；空闲时先暂存，回来后一次性补推。'), h('div', { className: 'adv-tile-foot' }, config.onlyPushWhenActive ? '已开启（空闲先存）' : '已关闭（随时推送）')), h('section', { className: 'adv-tile' }, h('div', { className: 'adv-tile-head' }, h('h3', { className: 'adv-tile-title' }, '聊天小窗'), h(Switch, { checked: config.mergeChatThreads, onCheckedChange: value => updateConfig({ mergeChatThreads: value }), 'aria-label': '合并聊天小窗' })), h('p', { className: 'adv-tile-desc' }, '指定 IM 合成对话小窗：弹出只显示最新一条，新消息往上顶；往上滚加载本机历史。'), h('div', { className: 'adv-chip-box' }, config.chatApps.map(name => chip(name, () => updateConfig({ chatApps: configRef.current.chatApps.filter(item => item.toLowerCase() !== name.toLowerCase()) }))), input(chatAppDraft, setChatAppDraft, { className: 'adv-chip-input', placeholder: '+ 输入名字按回车添加', onKeyDown: enter(addChatApp), 'aria-label': '聊天应用名称或包名' })), h('div', { className: 'adv-tile-foot' }, h('span', null, '输入应用名或包名后按回车添加'), confirmButton('清空聊天记录', '清空本机保存的全部会话气泡？', clearChatHistory, 'clear-chat')))),
+    h('h3', { className: 'adv-section-title' }, '频控与 Webhook'), h('div', { className: 'adv-grid-3' }, h('section', { className: 'adv-tile' }, field('相同通知最短间隔', input(config.dedupeWindowSec, value => updateConfig({ dedupeWindowSec: clamp(value, MIN_DEDUPE_SEC, MAX_DEDUPE_SEC, DEFAULT_DEDUPE_SEC) }), { inputMode: 'numeric', 'aria-label': '相同通知最短间隔秒数' }), '相同通知在间隔内再次到达时不重复弹出。')), h('section', { className: 'adv-tile' }, field('Webhook 监听端口', input(config.port, value => updateConfig({ port: clamp(value, MIN_PORT, MAX_PORT, DEFAULT_PORT) }), { inputMode: 'numeric', 'aria-label': 'Webhook 监听端口' }), `端口范围：${MIN_PORT} – ${MAX_PORT}`)), h('section', { className: 'adv-tile' }, field('Webhook 路由路径', input(config.path, value => updateConfig({ path: value }), { placeholder: '/webhook', 'aria-label': 'Webhook 路由路径' }), '接收 SmsForwarder POST 的 HTTP 路径。'))),
+    h('h3', { className: 'adv-section-title' }, '自定义过滤规则'), h('p', { className: 'hint' }, '可指定应用、正文或正则。命中就不弹。'), h('div', { className: 'filter-composer' }, h('p', { className: 'filter-composer-title' }, '新建规则'), h('div', { className: 'filter-form' }, field('动作', select('hide', FILTER_ACTION_OPTIONS, undefined, true)), field('匹配字段', select(filterDraft.field, FILTER_FIELD_OPTIONS, value => setFilterDraft(previous => ({ ...previous, field: value })))), field('匹配逻辑', select(filterDraft.match, FILTER_MATCH_OPTIONS, value => setFilterDraft(previous => ({ ...previous, match: value })))), field('关键词 / 正则', input(filterDraft.value, value => setFilterDraft(previous => ({ ...previous, value })), { placeholder: filterDraft.match === 'regex' ? '例如 DSH Desktop.*交流群' : '例如：DSH Desktop 交流群', onKeyDown: enter(addCustomFilter), 'aria-label': '过滤关键词或正则' })), field('仅限应用（可选）', input(filterDraft.appContains, value => setFilterDraft(previous => ({ ...previous, appContains: value })), { placeholder: 'QQ / com.tencent.mobileqq', onKeyDown: enter(addCustomFilter), 'aria-label': '过滤规则应用范围' }))), filterRegexError(filterDraft.match, filterDraft.value) ? h('p', { className: 'filter-warn', role: 'alert' }, filterRegexError(filterDraft.match, filterDraft.value)) : null, h('div', { className: 'filter-add' }, button('添加到规则列表', addCustomFilter, { variant: 'solid', disabled: config.filters.length >= MAX_FILTERS }))),
+    h('div', { className: 'filter-list-head' }, `已生效规则（${config.filters.length}）`, h('span', { className: 'hint' }, '从上到下匹配')), config.filters.length ? h('div', { className: 'filter-list' }, config.filters.map(f => h('div', { key: f.id, className: `filter-item${f.enabled === false ? ' is-off' : ''}${filterIssue(f) ? ' is-warn' : ''}` }, h('div', { className: 'filter-tags' }, h('span', { className: 'filter-tag is-hide' }, '不看'), h('span', { className: 'filter-tag is-muted' }, optionLabel(FILTER_FIELD_OPTIONS, f.field, '标题')), h('span', { className: 'filter-tag is-match' }, optionLabel(FILTER_MATCH_OPTIONS, f.match, '包含文本')), h('span', { className: 'filter-quote' }, `"${f.value || '…'}"`), f.appContains ? h('span', { className: 'filter-scope' }, `仅限 ${f.appContains}`) : null), filterIssue(f) ? h('p', { className: 'filter-warn' }, filterIssue(f)) : null, h(Switch, { size: '1', checked: f.enabled !== false, 'aria-label': `启用 ${filterPreview(f)}`, onCheckedChange: value => updateConfig({ filters: configRef.current.filters.map(item => item.id === f.id ? { ...item, enabled: value } : item) }) }), button('删除', () => updateConfig({ filters: configRef.current.filters.filter(item => item.id !== f.id) }), { size: '1', color: 'red', variant: 'ghost' })))) : h('p', { className: 'filter-empty' }, '还没有自定义规则。常见群名直接在上面「不看这些标题」里加就行。')))))
+  const steps = [
+    { title: '准备条件', items: ['电脑已安装 Catrace，且能在命令行执行 node 命令（sidecar 依赖 Node）', '手机与电脑连接同一 Wi-Fi', '手机安装 SmsForwarder（官方支持 Android 4.4–13，14 以上需实机验证；下载地址见上方）', '在 Catrace 插件列表启用 smsforwarder-notify，回到「概览」确认服务「运行中」', 'Windows 防火墙首次弹窗选「允许访问」；手机连不上时再手动放行入站端口'] },
+    { title: 'SmsForwarder 通用设置', items: ['打开 SmsForwarder → 通用设置，开启需要的转发能力（短信 / 应用通知）', '按系统弹窗逐一授权；加入电池优化白名单，允许后台运行，勿强杀', '转发应用通知：开启「通知使用权」', '开启「启动时异步获取已安装 App 列表」，否则取不到 App 名'] },
+    { title: '新建发送通道（Webhook）', items: ['发送通道 → 新建，类型选 Webhook，方法 POST，通道名称如 catrace', h('div', { className: 'step-copy', key: 'urls' }, h('span', { className: 'step-copy-label' }, 'Webhook Server：选手机能访问的电脑局域网 IP'), ...(urls.length ? urls : [primaryUrl]).map(url => copyRow(url)), !urls.length ? h('p', { className: 'hint' }, 'URL 列表为空：先启用插件，确认服务运行中，再点「刷新状态」。') : null), h('div', { className: 'step-copy', key: 'headers' }, h('span', { className: 'step-copy-label' }, 'Headers：点 + 加一行，Key / Value 分开填'), h('pre', { className: 'mono' }, authHeader), h('div', { className: 'row-inline' }, button('复制 Key', () => void copyText('Authorization')), button('复制 Value', () => void copyText(authHeader.replace(/^Authorization:\s*/i, ''))))), h('div', { className: 'step-copy', key: 'template' }, h('span', { className: 'step-copy-label' }, '消息模板：整段粘贴'), copyRow(template)), '保存后点「测试」，手机显示发送成功、电脑弹出 Toast 即通道 OK'] },
+    { title: '新建转发规则（通道建好后必做）', items: ['仅有发送通道不会转发，必须配置转发规则并绑定通道', '应用通知：转发规则 → 通知转发规则 → 新建', '短信：转发规则 → 短信转发规则 → 新建（可选）', '规则别名随意；发送通道选刚建的 catrace', '匹配字段先选「全部」跑通，之后可改成包名 / 内容过滤', '「启用自定义模版」「启用正则替换」保持关闭，使用通道模板', '打开「启用该条转发规则」，免打扰时段保持 00:00～00:00（相等=不启用）', '保存后点测试，再让手机来一条真实通知 / 短信，电脑应弹 Toast'] },
+  ]
+  const downloadList = h('div', { className: 'dl-list' }, DOWNLOAD_LINKS.map(link =>
+    h('div', { key: link.url, className: 'dl-item' },
+      h('div', { className: 'dl-name' }, h('a', { href: link.url, target: '_blank', rel: 'noopener noreferrer' }, link.name)),
+      h('p', { className: 'dl-note' }, link.note))))
+  const stepList = h('div', { className: 'steps-wrap' }, steps.map((step, index) =>
+    h('div', { key: step.title, className: 'step' },
+      h('span', { className: 'step-num' }, String(index + 1)),
+      h('div', { className: 'step-body' },
+        h('h3', { className: 'step-title' }, step.title),
+        h('ul', { className: 'step-list' }, step.items.map((item, i) =>
+          h('li', { key: i, className: typeof item === 'string' ? undefined : 'step-copy' }, item)))))))
+  const tutorial = h(Fragment, null,
+    section('使用教程', [
+      h('p', { className: 'desc' }, '按官方流程：通用设置 → 发送通道 → 转发规则。通道决定「发到哪」，规则决定「哪些会转发」。'),
+      field('下载 SmsForwarder', downloadList), stepList,
+    ]),
+    section('常见问题', FAQ.map(([question, answer]) =>
+      h('div', { key: question, className: 'faq' }, h('div', { className: 'faq-q' }, question), h('p', { className: 'faq-a' }, answer)))))
+  return h('div', { className: 'sf-settings' }, section('SmsForwarder 通知', [h(Badge, { color: config.enabled ? 'green' : 'gray' }, config.enabled ? '已启用' : '已关闭'), h('p', { className: 'desc' }, '本机 HTTP Webhook 接收 Android SmsForwarder 转发的 App 通知，弹出 Catrace Toast。仅建议可信局域网使用。'), h('p', { className: 'warn' }, '默认监听 0.0.0.0（全部网卡）。务必使用强 Token，勿暴露公网。首次启动防火墙弹窗选「允许访问」；手机连不上时再放行入站端口。')]), feedback ? h('div', { role: feedback.type === 'error' ? 'alert' : 'status', className: `sf-feedback is-${feedback.type}` }, feedback.text) : null, h('div', { className: 'tabs', role: 'tablist', 'aria-label': 'SmsForwarder 设置' }, TABS.map(tab => h('button', { key: tab.id, type: 'button', role: 'tab', className: `tab${activeTab === tab.id ? ' is-active' : ''}`, 'aria-selected': activeTab === tab.id, onClick: () => setActiveTab(tab.id) }, tab.label))), h('div', { className: 'sf-tab-panel', role: 'tabpanel' }, activeTab === 'settings' ? h('fieldset', { disabled: loading, className: 'sf-config-fields' }, connection, blockPanes, advanced) : activeTab === 'tutorial' ? tutorial : overview))
 }
+export { SmsforwarderNotifySettings as Settings }

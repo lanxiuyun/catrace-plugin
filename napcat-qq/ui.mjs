@@ -1,8 +1,5 @@
-/** napcat-qq mini chat window — both sides, same-thread upsert. */
-const { h, ref, computed, watch, onMounted, nextTick } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
+const { createElement: h, useState, useEffect, useRef } = globalThis.__CATRACE_REACT__ || {}
+if (typeof h !== 'function' || typeof useState !== 'function') throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
 
 const STYLE_ID = 'catrace-plugin-napcat-qq-css-v2'
 const CSS = `
@@ -65,7 +62,7 @@ function injectStyles() {
   if (document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
-  style.textContent = CSS
+  style.textContent = plugin.theme.css(CSS)
   document.head.appendChild(style)
 }
 
@@ -79,121 +76,35 @@ async function enqueueOutbox(item) {
   await api.storage.set('outbox', list)
 }
 
-export default {
-  name: 'NapcatQqCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['action'],
-  setup(props, { emit }) {
-    const replyText = ref('')
-    const sending = ref(false)
-    const threadEl = ref(null)
-
-    const payload = computed(() => props.event?.payload || {})
-    const messages = computed(() => {
-      const list = payload.value.messages
-      return Array.isArray(list) ? list : []
-    })
-    const chatType = computed(() => (payload.value.chatType === 'group' ? 'group' : 'private'))
-    const chatId = computed(() => String(payload.value.chatId || payload.value.userId || ''))
-    const title = computed(() => props.event?.title || (chatType.value === 'group' ? `群 ${chatId.value}` : 'QQ'))
-
-    onMounted(injectStyles)
-
-    watch(
-      () => messages.value.length,
-      async () => {
-        await nextTick()
-        const el = threadEl.value
-        if (el) el.scrollTop = el.scrollHeight
-      },
-    )
-
-    async function sendReply() {
-      const text = replyText.value.trim()
-      if (!text || sending.value) return
-      sending.value = true
-      const item = {
-        chatType: chatType.value,
-        chatId: chatId.value,
-        text,
-        at: Date.now(),
-      }
-      try {
-        await enqueueOutbox(item)
-      } catch (e) {
-        console.warn('[napcat-qq] outbox failed', e)
-      }
-      emit('action', 'reply', { text, chatType: item.chatType, chatId: item.chatId })
-      replyText.value = ''
-      sending.value = false
-    }
-
-    function onKeydown(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        void sendReply()
-      }
-    }
-
-    return () => {
-      const rows = messages.value
-      return h('div', { class: 'nq-card' }, [
-        h('div', { class: 'header' }, [
-          h('div', { class: 'avatar' }, 'QQ'),
-          h('div', { class: 'meta' }, [
-            h('p', { class: 'chat-name' }, title.value),
-            h('p', { class: 'sub' }, `${rows.length} 条 · 迷你会话`),
-          ]),
-        ]),
-        h(
-          'div',
-          {
-            class: 'thread',
-            ref: (el) => {
-              threadEl.value = el
-            },
-          },
-          rows.length
-            ? rows.map((m, i) => {
-                const self = !!m.self
-                const prev = i > 0 ? rows[i - 1] : null
-                const name = String(m.speaker || '')
-                const showName = !self && name && (!prev || prev.self || String(prev.speaker || '') !== name)
-                return h('div', { class: ['row', self ? 'is-self' : 'is-peer'], key: String(m.id || i) }, [
-                  h('div', { class: 'col' }, [
-                    showName ? h('div', { class: 'name' }, name) : null,
-                    h('div', { class: 'bubble' }, String(m.text || '')),
-                  ]),
-                ])
-              })
-            : [h('p', { class: 'empty' }, props.event?.body || '暂无消息')],
-        ),
-        h('div', { class: 'reply-box' }, [
-          h('input', {
-            class: 'reply-input',
-            type: 'text',
-            placeholder: '发消息…',
-            value: replyText.value,
-            disabled: sending.value,
-            onInput: (e) => {
-              replyText.value = e.target.value
-            },
-            onKeydown,
-          }),
-          h(
-            'button',
-            {
-              class: 'send-btn',
-              disabled: !replyText.value.trim() || sending.value,
-              onClick: () => void sendReply(),
-            },
-            '发送',
-          ),
-        ]),
-      ])
-    }
-  },
+export default function NapcatQqCard({ event = {}, onAction }) {
+  const [replyText, setReplyText] = useState('')
+  const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  const threadEl = useRef(null)
+  const payload = event.payload || {}
+  const messages = Array.isArray(payload.messages) ? payload.messages : []
+  const chatType = payload.chatType === 'group' ? 'group' : 'private'
+  const chatId = String(payload.chatId || payload.userId || '')
+  const title = event.title || (chatType === 'group' ? `群 ${chatId}` : 'QQ')
+  useEffect(injectStyles, [])
+  useEffect(() => { const el = threadEl.current; if (el) el.scrollTop = el.scrollHeight }, [messages.length])
+  async function sendReply() {
+    const text = replyText.trim()
+    if (!text || sendingRef.current) return
+    sendingRef.current = true
+    setSending(true)
+    const item = { chatType, chatId, text, at: Date.now() }
+    try { await enqueueOutbox(item) }
+    catch (error) { console.warn('[napcat-qq] outbox failed', error) }
+    try { onAction?.('reply', { text, chatType: item.chatType, chatId: item.chatId }); setReplyText('') }
+    finally { sendingRef.current = false; setSending(false) }
+  }
+  return h('div', { className: 'nq-card' },
+    h('div', { className: 'header' }, h('div', { className: 'avatar' }, 'QQ'), h('div', { className: 'meta' }, h('p', { className: 'chat-name' }, title), h('p', { className: 'sub' }, `${messages.length} 条 · 迷你会话`))),
+    h('div', { className: 'thread', ref: threadEl }, messages.length ? messages.map((m, i) => {
+      const self = !!m.self, previous = i ? messages[i - 1] : null, name = String(m.speaker || '')
+      const showName = !self && name && (!previous || previous.self || String(previous.speaker || '') !== name)
+      return h('div', { className: `row ${self ? 'is-self' : 'is-peer'}`, key: String(m.id || i) }, h('div', { className: 'col' }, showName ? h('div', { className: 'name' }, name) : null, h('div', { className: 'bubble' }, String(m.text || ''))))
+    }) : h('p', { className: 'empty' }, event.body || '暂无消息')),
+    h('div', { className: 'reply-box' }, h('input', { className: 'reply-input', type: 'text', placeholder: '发消息…', value: replyText, disabled: sending, onChange: e => setReplyText(e.target.value), onKeyDown: e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) { e.preventDefault(); void sendReply() } } }), h('button', { className: 'send-btn', disabled: !replyText.trim() || sending, onClick: () => void sendReply() }, '发送')))
 }

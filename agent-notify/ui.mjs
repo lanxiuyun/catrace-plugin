@@ -1,8 +1,7 @@
-/** Agent notify toast — one card per sessionId; optional debug dump. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-const { NButton } = globalThis.__CATRACE_NAIVE__ || {}
-if (typeof h !== 'function') throw new Error('Catrace plugin Vue runtime missing')
-if (!NButton) throw new Error('Catrace plugin naive-ui runtime missing')
+/** Agent notification React card; host injects React, Radix and plugin facade. */
+const { createElement: h, useState, useEffect, useRef } = globalThis.__CATRACE_REACT__ || {}
+const { Button } = globalThis.__CATRACE_RADIX__ || {}
+if (typeof h !== 'function' || !Button) throw new Error('Catrace React/Radix runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-css'
 const CSS = `
@@ -310,11 +309,10 @@ const EVENT_THEMES = {
 }
 
 function ensureStyles() {
-  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
-  el.textContent = CSS
-  document.head.appendChild(el)
+  if (typeof document === 'undefined') return
+  let el = document.getElementById(STYLE_ID)
+  if (!el) { el = document.createElement('style'); el.id = STYLE_ID; document.head.appendChild(el) }
+  if (el.textContent !== CSS) el.textContent = plugin.theme.css(CSS)
 }
 
 function themeOf(event) {
@@ -323,13 +321,13 @@ function themeOf(event) {
 
 function themeStyle(t) {
   return {
-    '--accent': t.accent,
-    '--title': t.title,
-    '--body': t.body,
-    '--light-bg': t.lightBg,
-    '--border': t.border,
-    '--badge-bg': t.badgeBg,
-    '--badge-fg': t.badgeFg,
+    '--accent': plugin.theme.css(t.accent),
+    '--title': plugin.theme.css(t.title),
+    '--body': plugin.theme.css(t.body),
+    '--light-bg': plugin.theme.css(t.lightBg),
+    '--border': plugin.theme.css(t.border),
+    '--badge-bg': plugin.theme.css(t.badgeBg),
+    '--badge-fg': plugin.theme.css(t.badgeFg),
   }
 }
 
@@ -500,517 +498,237 @@ function orderedKeys(obj) {
 
 function renderFields(obj, mode) {
   if (obj == null) {
-    return h('div', { class: 'dump-fields' }, [h('div', { class: 'dump-val' }, '没有收到 hook stdin')])
+    return h('div', { className: 'dump-fields' }, [h('div', { className: 'dump-val' }, '没有收到 hook stdin')])
   }
   if (typeof obj !== 'object' || Array.isArray(obj)) {
-    return h('pre', { class: 'dump' }, dumpText({ payload: { raw: obj } }, 'raw'))
+    return h('pre', { className: 'dump' }, dumpText({ payload: { raw: obj } }, 'raw'))
   }
   const skip = mode === 'common' ? COMMON_SKIP : new Set()
   const keys = orderedKeys(obj).filter((k) => !skip.has(k))
   return h(
     'div',
-    { class: 'dump-fields' },
+    { className: 'dump-fields' },
     keys.map((key) => {
       const val = obj[key]
       const text = typeof val === 'string' ? val : JSON.stringify(val, null, 2)
-      return h('div', { class: 'dump-row' }, [
-        h('div', { class: 'dump-key' }, key),
-        h('div', { class: 'dump-val' }, text),
+      return h('div', { className: 'dump-row', key }, [
+        h('div', { className: 'dump-key' }, key),
+        h('div', { className: 'dump-val' }, text),
       ])
     }),
   )
 }
 
-export default {
-  name: 'AgentNotifyCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-    remainingMs: { type: Number, default: 0 },
-    totalMs: { type: Number, default: 0 },
-  },
-  emits: ['close', 'action'],
-  data() {
-    return {
-      copied: false,
-      dumpMode: '',
-      dumpExpanded: false,
-      bodyExpanded: false,
-      bodyClamped: false,
-      timestampNow: Date.now(),
-      timestampTimer: null,
-      gotoFailed: false,
-      gotoBusy: false,
-      permStep: 0,
-      permAnswers: {},
-      permBusy: false,
-      permError: '',
-    }
-  },
-  watch: {
-    'event.payload.requestId'() {
-      this.permStep = 0
-      this.permAnswers = {}
-      this.permBusy = false
-      this.permError = ''
-    },
-    'event.payload.soundNonce': {
-      immediate: true,
-      handler(nonce) {
-        if (nonce) this.playNotifySound()
-      },
-    },
-  },
-  created() {
-    ensureStyles()
-    const p = this.event && this.event.payload
-    const v = p && p.debugView
-    this.dumpMode = v === 'raw' || v === 'common' ? v : 'common'
-    this.dumpExpanded = p && p.debugExpanded === true
-  },
-  mounted() {
-    this.checkBodyClamped()
-    this.timestampTimer = setInterval(() => {
-      this.timestampNow = Date.now()
-    }, 30_000)
-  },
-  updated() {
-    this.checkBodyClamped()
-  },
-  beforeUnmount() {
-    if (this.timestampTimer) clearInterval(this.timestampTimer)
-  },
-  methods: {
-    async playNotifySound() {
-      const payload = (this.event && this.event.payload) || {}
-      const mode = payload.soundMode || 'builtin'
-      if (mode === 'muted') return
-      const volume = Math.min(1, Math.max(0, Number(payload.soundVolume) || 1))
-      try {
-        const audio = plugin && plugin.audio
-        if (!audio || typeof audio.play !== 'function') return
-        let path = ''
-        if (mode === 'custom') {
-          path = String(payload.soundPath || '').trim()
-        } else {
-          const pluginDir = plugin.path && typeof plugin.path.getPluginDir === 'function'
-            ? await plugin.path.getPluginDir()
-            : ''
-          path = `${String(pluginDir || '').replace(/[\\/]+$/, '')}/assets/agent-notify.wav`
-        }
-        if (!path) return
-        await audio.play(path, { volume })
-      } catch (error) {
-        console.warn('[agent-notify] play sound failed', error)
-      }
-    },
-    permAnswer(index) {
-      return this.permAnswers[index] || { selected: [], otherText: '' }
-    },
-    permAnswerText(question) {
-      const answer = this.permAnswers[question.index]
-      if (!answer) return ''
-      const other = String(answer.otherText || '').trim()
-      if (other) return other
-      const labels = (answer.selected || []).filter((key) => key !== OTHER_KEY)
-      return labels.join(', ')
-    },
-    permToggleOption(question, label) {
-      const answer = this.permAnswer(question.index)
-      if (question.multiSelect) {
-        const next = answer.selected.includes(label)
-          ? answer.selected.filter((item) => item !== label)
-          : [...answer.selected.filter((item) => item !== OTHER_KEY), label]
-        this.permAnswers = { ...this.permAnswers, [question.index]: { ...answer, selected: next, otherText: '' } }
-        return
-      }
-      this.permAnswers = {
-        ...this.permAnswers,
-        [question.index]: { selected: [label], otherText: '' },
-      }
-    },
-    permSetOtherText(question, value) {
-      this.permAnswers = {
-        ...this.permAnswers,
-        [question.index]: {
-          selected: [OTHER_KEY],
-          otherText: String(value || ''),
-        },
-      }
-    },
-    permChooseOther(question) {
-      const answer = this.permAnswer(question.index)
-      if (answer.selected.length === 1 && answer.selected[0] === OTHER_KEY) return
-      this.permSetOtherText(question, answer.otherText || '')
-    },
-    collectPermAnswers(questions) {
-      const answers = {}
-      for (const question of questions) {
-        const text = this.permAnswerText(question)
-        if (!text) return null
-        answers[String(question.index)] = text
-      }
-      return answers
-    },
-    async sendPermissionDecision(decision, answers) {
-      const p = (this.event && this.event.payload) || {}
-      if (this.permBusy || p.requestId == null) return
-      this.permError = ''
-      if (decision === 'deny' || !answers) {
-        this.$emit('action', `${decision}:${p.requestId}`)
-        this.$emit('close')
-        return
-      }
-      this.permBusy = true
-      const payload = { id: p.requestId, decision, answers }
-      try {
-        let response = await fetch('http://127.0.0.1:23456/permission-decide', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (response.status === 404) {
-          const query = new URLSearchParams({
-            id: String(p.requestId),
-            decision,
-            answers: JSON.stringify(answers),
-          })
-          response = await fetch(`http://127.0.0.1:23456/permission-decide?${query}`)
-        }
-        const result = await response.json().catch(() => ({}))
-        if (response.status === 404) {
-          throw new Error('sidecar 未加载 /permission-decide，请在插件页点刷新')
-        }
-        if (!response.ok || result.ok !== true) throw new Error(result.error || 'permission decide failed')
-        this.$emit('close')
-      } catch (error) {
-        console.error('[agent-notify] permission decide failed', error)
-        this.permError = error instanceof Error ? error.message : String(error)
-        this.permBusy = false
-      }
-    },
-    async nextOrSubmitPermission(questions) {
-      const question = questions[this.permStep]
-      if (!question || !this.permAnswerText(question)) return
-      if (this.permStep < questions.length - 1) {
-        this.permStep += 1
-        return
-      }
-      const answers = this.collectPermAnswers(questions)
-      if (!answers) return
-      await this.sendPermissionDecision('allow', answers)
-    },
-    checkBodyClamped() {
-      const el = this.$refs.bodyEl
-      if (!el) return
-      const clamped = !this.bodyExpanded && el.scrollHeight > el.clientHeight + 1
-      if (clamped !== this.bodyClamped) this.bodyClamped = clamped
-    },
-    gotoFailedMark() {
-      this.gotoFailed = true
-      const beep = plugin && plugin.shell && plugin.shell.beep
-      if (beep) Promise.resolve(beep()).catch(() => {})
-    },
-    async gotoSession() {
-      if (this.gotoBusy) return
-      const p = (this.event && this.event.payload) || {}
-      const entry = p.entry || (Array.isArray(p.entries) ? p.entries[0] : null) || {}
-      const chain = Array.isArray(entry.pidChain)
-        ? entry.pidChain.filter((n) => Number.isFinite(n) && n > 0)
-        : []
-      if (!chain.length) {
-        this.gotoFailedMark()
-        return
-      }
-      this.gotoBusy = true
-      try {
-        const get = plugin && plugin.http && plugin.http.get
-        let ok = false
-        if (get) {
-          const response = await get(
-            `http://127.0.0.1:23456/focus?pids=${encodeURIComponent(chain.join(','))}`,
-          )
-          try {
-            ok = response && response.status === 200 && JSON.parse(response.body).ok === true
-          } catch {
-            ok = false
-          }
-        }
-        if (ok) this.$emit('close')
-        else this.gotoFailedMark()
-      } catch {
-        this.gotoFailedMark()
-      } finally {
-        this.gotoBusy = false
-      }
-    },
-    copyDump() {
-      const text = dumpText(this.event, this.dumpMode || 'common')
-      const done = () => {
-        this.copied = true
-        setTimeout(() => {
-          this.copied = false
-        }, 1200)
-      }
-      const clip = plugin && plugin.clipboard && plugin.clipboard.writeText
-      const p = clip ? clip(text) : navigator.clipboard.writeText(text)
-      Promise.resolve(p).then(done).catch(() => {})
-    },
-    renderDump() {
-      const p = (this.event && this.event.payload) || {}
-      if (!p.debug && p.debugView !== 'common' && p.debugView !== 'raw') return null
-      const mode = this.dumpMode || p.debugView || 'common'
-      const controls = this.dumpExpanded
-        ? h('div', { class: 'dump-tools' }, [
-            h('div', { class: 'dump-tabs' }, [
-              h(NButton, {
-                size: 'tiny',
-                secondary: true,
-                type: mode === 'common' ? 'primary' : 'default',
-                onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'common' },
-              }, { default: () => '常用' }),
-              h(NButton, {
-                size: 'tiny',
-                secondary: true,
-                type: mode === 'raw' ? 'primary' : 'default',
-                onClick: (ev) => { ev.stopPropagation(); this.dumpMode = 'raw' },
-              }, { default: () => '原始' }),
-            ]),
-            h(NButton, {
-              size: 'tiny',
-              onClick: (ev) => { ev.stopPropagation(); this.copyDump() },
-            }, { default: () => this.copied ? '已复制' : '复制' }),
-          ])
-        : null
-      return h('div', { class: 'dump-wrap' }, [
-        h('div', {
-          class: 'dump-bar',
-          role: 'button',
-          tabindex: 0,
-          onClick: () => { this.dumpExpanded = !this.dumpExpanded },
-          onKeydown: (ev) => {
-            if (ev.key === 'Enter' || ev.key === ' ') {
-              ev.preventDefault()
-              this.dumpExpanded = !this.dumpExpanded
-            }
-          },
-        }, [
-          h('span', { class: 'dump-toggle' }, [
-            h('span', { class: 'dump-arrow', 'aria-hidden': 'true' }, this.dumpExpanded ? '▾' : '▸'),
-            '调试字段',
-          ]),
-          controls,
-        ]),
-        this.dumpExpanded ? renderFields(dumpObject(this.event, mode), mode) : null,
-      ])
-    },
-  },
-  render() {
-    const event = this.event || {}
-    const p = event.payload || {}
-    const dump = this.renderDump()
-    const isPerm = (event.eventType || event.event_type) === 'agent-notify.permission' || p.requestId != null
-
-    if (isPerm) {
-      const permEntry = p.entry || {}
-      const permission = permEntry.permission || {}
-      const permAgent = agentBadge(permEntry.agentId || p.agentId)
-      const permTitle = permEntry.sessionTitle || p.sessionTitle || permEntry.projectName || p.projectName || projectName(p.cwd || permEntry.cwd) || 'AI 助手'
-      const permCwd = p.cwd || permEntry.cwd || ''
-      const toolName = permission.toolName || p.toolName || 'tool'
-      const questions = permissionQuestions(permission.toolInput)
-      const question = questions[this.permStep] || questions[0]
-      const isLast = questions.length > 0 && this.permStep >= questions.length - 1
-      const currentComplete = question ? !!this.permAnswerText(question) : false
-      const allComplete = questions.length > 0 && questions.every((item) => !!this.permAnswerText(item))
-      const answer = question ? this.permAnswer(question.index) : { selected: [], otherText: '' }
-      const permissionBody = questions.length && question
-        ? h('div', { class: 'question-card' }, [
-            h('div', { class: 'question-text' }, question.question),
-            h('div', { class: 'option-list' }, [
-              ...question.options.map((option) => h('button', {
-                class: ['option-item', answer.selected.includes(option.label) ? 'is-on' : ''],
-                type: 'button',
-                onClick: (ev) => { ev.stopPropagation(); this.permToggleOption(question, option.label) },
-              }, [
-                h('span', { class: 'option-radio', 'aria-hidden': 'true' }),
-                h('span', { class: 'option-copy' }, [
-                  h('span', { class: 'option-item-label' }, option.label),
-                  option.description ? h('span', { class: 'option-item-description' }, option.description) : null,
-                ]),
-              ])),
-              h('div', {
-                class: ['option-item', 'option-item-other', answer.selected.includes(OTHER_KEY) ? 'is-on' : ''],
-                onMousedown: (ev) => { ev.stopPropagation(); this.permChooseOther(question) },
-              }, [
-                h('textarea', {
-                  class: 'option-other-input',
-                  value: answer.otherText,
-                  placeholder: '输入你的回答',
-                  rows: 2,
-                  onClick: (ev) => ev.stopPropagation(),
-                  onFocus: () => this.permChooseOther(question),
-                  onInput: (ev) => this.permSetOtherText(question, ev.target.value),
-                }),
-              ]),
-            ]),
-          ])
-        : permissionInputSummary(permission.toolInput)
-          ? h('div', { class: 'tool-block' }, [
-              h('span', { class: 'tool-name' }, toolName),
-              h('pre', { class: 'permission-raw' }, permissionInputSummary(permission.toolInput)),
-            ])
-          : h('div', { class: 'tool-block' }, [h('span', { class: 'tool-name' }, toolName)])
-      const footer = questions.length
-        ? h('div', { class: 'footer' }, [
-            h(NButton, {
-              size: 'small',
-              type: 'error',
-              secondary: true,
-              disabled: this.permBusy,
-              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
-            }, { default: () => '拒绝' }),
-            h('div', { class: 'footer-actions' }, [
-              questions.length > 1
-                ? h('span', { class: 'question-progress' }, `${this.permStep + 1} / ${questions.length}`)
-                : null,
-              questions.length > 1
-                ? h(NButton, {
-                    size: 'small',
-                    disabled: this.permStep <= 0 || this.permBusy,
-                    onClick: (ev) => { ev.stopPropagation(); if (this.permStep > 0) this.permStep -= 1 },
-                  }, { default: () => '上一题' })
-                : null,
-              h(NButton, {
-                size: 'small',
-                type: 'primary',
-                loading: this.permBusy && isLast,
-                disabled: this.permBusy || !currentComplete || (isLast && !allComplete),
-                onClick: (ev) => { ev.stopPropagation(); this.nextOrSubmitPermission(questions) },
-              }, { default: () => (isLast ? '提交' : '下一题') }),
-            ]),
-          ])
-        : h('div', { class: 'footer' }, [
-            h(NButton, {
-              size: 'small',
-              type: 'error',
-              secondary: true,
-              disabled: this.permBusy,
-              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('deny') },
-            }, { default: () => '拒绝' }),
-            h(NButton, {
-              size: 'small',
-              type: 'primary',
-              loading: this.permBusy,
-              disabled: this.permBusy,
-              onClick: (ev) => { ev.stopPropagation(); this.sendPermissionDecision('allow') },
-            }, { default: () => '允许' }),
-          ])
-      return h('div', { class: 'perm-card', style: themeStyle(themeOf('PermissionRequest')) }, [
-        h('div', { class: 'header' }, [
-          h('div', { class: 'header-left' }, [
-            h('span', { class: 'agent-badge', title: permAgent.name, style: { background: permAgent.color } },
-              permAgent.img
-                ? h('img', { src: permAgent.img, alt: '', style: { width: '100%', height: '100%', 'border-radius': 'inherit', display: 'block' } })
-                : permAgent.icon
-                  ? h('svg', { viewBox: '0 0 24 24', fill: 'currentColor', width: '1rem', height: '1rem', 'aria-hidden': 'true' }, [h('path', { d: permAgent.icon })])
-                  : permAgent.label),
-            h('h2', { class: 'title' }, permTitle),
-            h('span', { class: 'chip event-chip' }, questions.length ? '需要你回答' : '等待你批准'),
-          ]),
-          h('button', {
-            class: 'close-btn',
-            type: 'button',
-            disabled: this.permBusy,
-            'aria-label': '关闭并拒绝权限请求',
-            onClick: (ev) => {
-              ev.stopPropagation()
-              this.sendPermissionDecision('deny')
-            },
-          }, '×'),
-        ]),
-        h('div', { class: 'project-row', title: permCwd || undefined }, [
-          h('span', { class: 'project-path' }, permCwd || '未知项目路径'),
-        ]),
-        permissionBody,
-        dump,
-        this.permError ? h('div', { class: 'perm-error' }, this.permError) : null,
-        footer,
-      ])
-    }
-
-    const entry = p.entry || (Array.isArray(p.entries) ? p.entries[0] : null) || {}
-    const sessionId = p.sessionId || entry.sessionId || ''
-    const theme = themeOf(entry.event)
-    const title = entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
-    const body = bodyPreview(entry)
-    const timestamp = formatRelativeTimestamp(entry.timestamp, this.timestampNow)
-    const exactTimestamp = formatExactTimestamp(entry.timestamp)
-    const badge = agentBadge(entry.agentId)
-    const gotoLabel = this.gotoFailed ? '未能定位窗口' : this.gotoBusy ? '正在前往…' : '前往会话'
-    const bodyInteractive = this.bodyClamped || this.bodyExpanded
-    const bodyProps = {
-      ref: 'bodyEl',
-      class: [
-        'body-text',
-        bodyInteractive ? 'is-interactive' : '',
-        this.bodyExpanded ? 'is-expanded' : this.bodyClamped ? 'is-clamped' : '',
-      ],
-    }
-    if (bodyInteractive) {
-      bodyProps.title = this.bodyExpanded ? '点击收起' : '点击展开'
-      bodyProps.onClick = (ev) => {
-        ev.stopPropagation()
-        this.bodyExpanded = !this.bodyExpanded
-      }
-    }
-
-    return h('div', { class: 'agent-toast', style: themeStyle(theme) }, [
-      h('div', { class: 'header' }, [
-          h('div', { class: 'header-left' }, [
-          h('span', { class: 'agent-badge', title: badge.name, style: { background: badge.color } },
-            badge.img
-              ? h('img', { src: badge.img, alt: '', style: { width: '100%', height: '100%', 'border-radius': 'inherit', display: 'block' } })
-            : badge.icon
-              ? h('svg', { viewBox: '0 0 24 24', fill: 'currentColor', width: '1rem', height: '1rem', 'aria-hidden': 'true' }, [h('path', { d: badge.icon })])
-              : badge.label),
-          h('h2', { class: 'title' }, title),
-          h('span', { class: 'chip event-chip' }, EVENT_LABEL[entry.event] || entry.event || ''),
-        ]),
-        h('button', {
-          class: 'close-btn',
-          type: 'button',
-          'aria-label': '关闭卡片',
-          onClick: (ev) => {
-            ev.stopPropagation()
-            this.$emit('close')
-          },
-        }, '×'),
-      ]),
-      h('div', { class: 'project-row', title: entry.cwd || undefined }, [
-        h('span', { class: 'project-path' }, entry.cwd || '未知项目路径'),
-      ]),
-      dump,
-      h('p', bodyProps, body),
-      this.totalMs > 0
-        ? h('div', { class: ['progress-track', this.isHovered ? 'is-paused' : ''] }, [
-            h('div', { class: 'progress-fill' }),
-          ])
-        : null,
-      h('div', { class: 'footer' }, [
-        timestamp ? h('span', { class: 'timestamp', title: exactTimestamp || undefined }, timestamp) : h('span'),
-        h(NButton, {
-          size: 'small',
-          type: this.gotoFailed ? 'error' : 'primary',
-          loading: this.gotoBusy,
-          disabled: this.gotoBusy,
-          title: this.gotoBusy ? '正在定位会话窗口' : '聚焦该会话所在的应用或终端窗口',
-          onClick: (ev) => {
-            ev.stopPropagation()
-            this.gotoSession()
-          },
-        }, { default: () => gotoLabel }),
-      ]),
-    ])
-  },
+function AgentSessionCard({entry,onClose,gotoSession,button,badgeFor,view,isHovered,totalMs,dump}) {
+  const bodyRef=useRef(null)
+  const [expanded,setExpanded]=useState(false)
+  const [clamped,setClamped]=useState(false)
+  const title=entry.sessionTitle || entry.projectName || projectName(entry.cwd) || 'AI 助手'
+  const body=bodyPreview(entry)
+  useEffect(() => {
+    const el=bodyRef.current
+    const measure=() => setClamped(!!el && !expanded && el.scrollHeight > el.clientHeight+1)
+    measure()
+    const observer=typeof ResizeObserver === 'function' && el ? new ResizeObserver(measure) : null
+    observer?.observe(el)
+    return () => observer?.disconnect()
+  },[body,expanded])
+  const interactive=clamped || expanded
+  return h('div',{className:'agent-toast',style:themeStyle(themeOf(entry.event))},
+    h('div',{className:'header'},h('div',{className:'header-left'},badgeFor(entry),h('h2',{className:'title'},title),h('span',{className:'chip event-chip'},EVENT_LABEL[entry.event] || entry.event || '')),
+      h('button',{className:'close-btn',type:'button','aria-label':'关闭卡片',onClick:ev => {ev.stopPropagation();onClose?.()}},'×')),
+    h('div',{className:'project-row',title:entry.cwd || undefined},h('span',{className:'project-path'},entry.cwd || '未知项目路径')),
+    dump,
+    h('p',{ref:bodyRef,className:`body-text${interactive ? ' is-interactive' : ''}${expanded ? ' is-expanded' : clamped ? ' is-clamped' : ''}`,
+      title:interactive ? expanded ? '点击收起' : '点击展开' : undefined,
+      onClick:interactive ? ev => {ev.stopPropagation();setExpanded(value => !value)} : undefined,
+    },body),
+    totalMs>0 ? h('div',{className:`progress-track${isHovered ? ' is-paused' : ''}`},h('div',{className:'progress-fill'})) : null,
+    h('div',{className:'footer'},h('span',{className:'timestamp',title:formatExactTimestamp(entry.timestamp) || undefined},formatRelativeTimestamp(entry.timestamp,view.timestampNow)),
+      button(view.gotoFailed ? '未能定位窗口' : view.gotoBusy ? '正在前往…' : '前往会话',() => void gotoSession(entry),{
+        color:view.gotoFailed ? 'red' : 'blue',loading:view.gotoBusy,disabled:view.gotoBusy,title:'聚焦该会话所在的应用或终端窗口',
+      })))
 }
+
+export default function AgentNotifyCard({ event = {}, isHovered = false, totalMs = 0, onClose, onAction }) {
+  const p = event.payload || {}
+  const [view,setView] = useState(() => ({
+    copied:false,dumpMode:['raw','common'].includes(p.debugView) ? p.debugView : 'common',
+    dumpExpanded:p.debugExpanded === true,
+    timestampNow:Date.now(),gotoFailed:false,gotoBusy:false,permStep:0,permAnswers:{},permBusy:false,permError:'',
+  }))
+  const patch = change => setView(previous => ({...previous,...change}))
+  const alive = useRef(true)
+  const eventRef = useRef(event)
+  eventRef.current = event
+  const permissionOperation = useRef(false)
+  const gotoOperation = useRef(false)
+  const copiedTimer = useRef(null)
+  const permissionEpoch = useRef(0)
+  useEffect(() => {
+    alive.current = true
+    ensureStyles()
+    const timer=setInterval(() => patch({timestampNow:Date.now()}),30000)
+    return () => { alive.current=false;clearInterval(timer);if(copiedTimer.current) clearTimeout(copiedTimer.current) }
+  },[])
+  useEffect(() => {
+    permissionEpoch.current += 1
+    permissionOperation.current = false
+    patch({permStep:0,permAnswers:{},permBusy:false,permError:''})
+  },[p.requestId])
+  useEffect(() => {
+    if (!p.soundNonce) return
+    void (async () => {
+      const mode=p.soundMode || 'builtin'
+      if (mode === 'muted' || !plugin.audio?.play) return
+      try {
+        const dir=mode === 'custom' ? '' : await plugin.path.getPluginDir()
+        const path=mode === 'custom' ? String(p.soundPath || '').trim() : `${String(dir || '').replace(/[\\/]+$/,'')}/assets/agent-notify.wav`
+        const volume=Number(p.soundVolume)
+        if(path) await plugin.audio.play(path,{volume:Number.isFinite(volume) ? Math.min(1,Math.max(0,volume)) : 1})
+      } catch(error) { console.warn('[agent-notify] play sound failed',error) }
+    })()
+  },[p.soundNonce])
+  const answerFor=index => view.permAnswers[index] || {selected:[],otherText:''}
+  const answerText=question => {
+    const answer=answerFor(question.index)
+    return String(answer.otherText || '').trim() || answer.selected.filter(key => key !== OTHER_KEY).join(', ')
+  }
+  function chooseOption(question,label) {
+    setView(previous => {
+      const answer=previous.permAnswers[question.index] || {selected:[],otherText:''}
+      const selected=question.multiSelect
+        ? answer.selected.includes(label) ? answer.selected.filter(item => item !== label) : [...answer.selected.filter(item => item !== OTHER_KEY),label]
+        : [label]
+      return {...previous,permAnswers:{...previous.permAnswers,[question.index]:{selected,otherText:''}}}
+    })
+  }
+  function setOther(question,text) {
+    setView(previous => ({...previous,permAnswers:{...previous.permAnswers,[question.index]:{selected:[OTHER_KEY],otherText:String(text || '')}}}))
+  }
+  async function sendDecision(decision,answers) {
+    if(permissionOperation.current || p.requestId == null) return
+    patch({permError:''})
+    if(decision === 'deny' || !answers) {
+      onAction?.(`${decision}:${p.requestId}`)
+      onClose?.()
+      return
+    }
+    permissionOperation.current=true
+    patch({permBusy:true})
+    const epoch=permissionEpoch.current
+    try {
+      let response=await fetch('http://127.0.0.1:23456/permission-decide',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.requestId,decision,answers}),
+      })
+      if(response.status === 404) {
+        const query=new URLSearchParams({id:String(p.requestId),decision,answers:JSON.stringify(answers)})
+        response=await fetch(`http://127.0.0.1:23456/permission-decide?${query}`)
+      }
+      const result=await response.json().catch(() => ({}))
+      if(response.status === 404) throw new Error('插件后台没有权限回答接口，请关闭再开启插件')
+      if(!response.ok || result.ok !== true) throw new Error(result.error || 'permission decide failed')
+      if(alive.current && epoch === permissionEpoch.current) onClose?.()
+    } catch(error) {
+      console.error('[agent-notify] permission decide failed',error)
+      if(alive.current && epoch === permissionEpoch.current) patch({permError:error instanceof Error ? error.message : String(error),permBusy:false})
+    } finally { if(epoch === permissionEpoch.current) permissionOperation.current=false }
+  }
+  function nextOrSubmit(questions) {
+    const question=questions[view.permStep]
+    if(!question || !answerText(question)) return
+    if(view.permStep < questions.length-1) { patch({permStep:view.permStep+1});return }
+    const answers={}
+    for(const item of questions) { const answer=answerText(item);if(!answer)return;answers[String(item.index)]=answer }
+    void sendDecision('allow',answers)
+  }
+  function markGotoFailed() {
+    if(alive.current) patch({gotoFailed:true})
+    if(plugin.shell?.beep) Promise.resolve(plugin.shell.beep()).catch(() => {})
+  }
+  async function gotoSession(entry) {
+    if(gotoOperation.current) return
+    const chain=Array.isArray(entry.pidChain) ? entry.pidChain.filter(n => Number.isFinite(n) && n > 0) : []
+    if(!chain.length) { markGotoFailed();return }
+    gotoOperation.current=true
+    patch({gotoBusy:true,gotoFailed:false})
+    try {
+      const response=await plugin.http.get(`http://127.0.0.1:23456/focus?pids=${encodeURIComponent(chain.join(','))}`)
+      let ok=false
+      try { ok=response?.status === 200 && JSON.parse(response.body).ok === true } catch {}
+      if(ok && alive.current) onClose?.()
+      else markGotoFailed()
+    } catch { markGotoFailed() }
+    finally { gotoOperation.current=false;if(alive.current)patch({gotoBusy:false}) }
+  }
+  async function copyDump() {
+    try {
+      const text=dumpText(eventRef.current,view.dumpMode)
+      if(plugin.clipboard?.writeText) await plugin.clipboard.writeText(text)
+      else await navigator.clipboard.writeText(text)
+      if(!alive.current)return
+      patch({copied:true})
+      if(copiedTimer.current)clearTimeout(copiedTimer.current)
+      copiedTimer.current=setTimeout(() => { if(alive.current)patch({copied:false}) },1200)
+    } catch(error) { console.warn('[agent-notify] copy failed',error) }
+  }
+  const button=(label,action,options={}) => h(Button,{size:'2',variant:'soft',...options,onClick:ev => {ev.stopPropagation();action()}},label)
+  const badgeFor=entry => {
+    const badge=agentBadge(entry.agentId)
+    return h('span',{className:'agent-badge',title:badge.name,style:{background:badge.color}},
+      badge.img ? h('img',{src:badge.img,alt:'',style:{width:'100%',height:'100%',borderRadius:'inherit',display:'block'}})
+        : badge.icon ? h('svg',{viewBox:'0 0 24 24',fill:'currentColor',width:'1rem',height:'1rem','aria-hidden':true},h('path',{d:badge.icon})) : badge.label)
+  }
+  function renderDump() {
+    if(!p.debug && !['common','raw'].includes(p.debugView))return null
+    return h('div',{className:'dump-wrap'},
+      h('div',{className:'dump-bar'},
+        h('button',{className:'dump-toggle',type:'button','aria-expanded':view.dumpExpanded,onClick:() => patch({dumpExpanded:!view.dumpExpanded})},
+          h('span',{className:'dump-arrow','aria-hidden':true},view.dumpExpanded ? '▾' : '▸'),'调试字段'),
+        view.dumpExpanded ? h('div',{className:'dump-tools'},h('div',{className:'dump-tabs'},
+          button('常用',() => patch({dumpMode:'common'}),{size:'1',color:view.dumpMode === 'common' ? 'blue' : 'gray'}),
+          button('原始',() => patch({dumpMode:'raw'}),{size:'1',color:view.dumpMode === 'raw' ? 'blue' : 'gray'})),
+          button(view.copied ? '已复制' : '复制',() => void copyDump(),{size:'1'})) : null),
+      view.dumpExpanded ? renderFields(dumpObject(event,view.dumpMode),view.dumpMode) : null)
+  }
+  const isPermission=(event.eventType || event.event_type) === 'agent-notify.permission' || p.requestId != null
+  if(isPermission) {
+    const entry=p.entry || {}
+    const permission=entry.permission || {}
+    const title=entry.sessionTitle || p.sessionTitle || entry.projectName || p.projectName || projectName(p.cwd || entry.cwd) || 'AI 助手'
+    const cwd=p.cwd || entry.cwd || ''
+    const toolName=permission.toolName || p.toolName || 'tool'
+    const questions=permissionQuestions(permission.toolInput)
+    const question=questions[view.permStep] || questions[0]
+    const answer=question ? answerFor(question.index) : {selected:[],otherText:''}
+    const isLast=view.permStep >= questions.length-1
+    const complete=question && !!answerText(question)
+    const allComplete=questions.every(item => !!answerText(item))
+    const permissionBody=question ? h('div',{className:'question-card'},
+      h('div',{className:'question-text'},question.question),
+      h('div',{className:'option-list'},...question.options.map(option => h('button',{
+        key:option.label,className:`option-item${answer.selected.includes(option.label) ? ' is-on' : ''}`,type:'button',
+        disabled:view.permBusy,'aria-pressed':answer.selected.includes(option.label),onClick:ev => {ev.stopPropagation();chooseOption(question,option.label)},
+      },h('span',{className:'option-radio','aria-hidden':true}),h('span',{className:'option-copy'},h('span',{className:'option-item-label'},option.label),option.description ? h('span',{className:'option-item-description'},option.description) : null))),
+      h('div',{className:`option-item option-item-other${answer.selected.includes(OTHER_KEY) ? ' is-on' : ''}`},h('textarea',{
+        className:'option-other-input',value:answer.otherText,placeholder:'输入你的回答',rows:2,disabled:view.permBusy,
+        onClick:ev => ev.stopPropagation(),onFocus:() => {if(!answer.selected.includes(OTHER_KEY))setOther(question,answer.otherText)},onChange:ev => setOther(question,ev.target.value),
+      }))))
+      : h('div',{className:'tool-block'},h('span',{className:'tool-name'},toolName),permissionInputSummary(permission.toolInput) ? h('pre',{className:'permission-raw'},permissionInputSummary(permission.toolInput)) : null)
+    return h('div',{className:'perm-card',style:themeStyle(themeOf('PermissionRequest'))},
+      h('div',{className:'header'},h('div',{className:'header-left'},badgeFor({...entry,agentId:entry.agentId || p.agentId}),h('h2',{className:'title'},title),h('span',{className:'chip event-chip'},questions.length ? '需要你回答' : '等待你批准')),
+        h('button',{className:'close-btn',type:'button',disabled:view.permBusy,'aria-label':'关闭并拒绝权限请求',onClick:ev => {ev.stopPropagation();void sendDecision('deny')}},'×')),
+      h('div',{className:'project-row',title:cwd || undefined},h('span',{className:'project-path'},cwd || '未知项目路径')),
+      permissionBody,renderDump(),view.permError ? h('div',{className:'perm-error',role:'alert'},view.permError) : null,
+      h('div',{className:'footer'},button('拒绝',() => void sendDecision('deny'),{color:'red',disabled:view.permBusy}),
+        questions.length ? h('div',{className:'footer-actions'},
+          questions.length>1 ? h('span',{className:'question-progress'},`${view.permStep+1} / ${questions.length}`) : null,
+          questions.length>1 ? button('上一题',() => patch({permStep:Math.max(0,view.permStep-1)}),{disabled:view.permBusy || view.permStep<=0}) : null,
+          button(isLast ? '提交' : '下一题',() => nextOrSubmit(questions),{variant:'solid',loading:view.permBusy && isLast,disabled:view.permBusy || !complete || (isLast && !allComplete)}))
+        : button('允许',() => void sendDecision('allow'),{variant:'solid',disabled:view.permBusy,loading:view.permBusy})))
+  }
+  const entries=Array.isArray(p.entries) && p.entries.length ? p.entries : [p.entry || {}]
+  const renderSession=(entry,index) => h(AgentSessionCard,{entry,key:entry.sessionId || index,onClose,gotoSession,button,badgeFor,view,isHovered,totalMs,dump:index === 0 ? renderDump() : null})
+  return entries.length === 1 ? renderSession(entries[0],0) : h('div',{className:'agent-notify-stack',style:{display:'flex',flexDirection:'column',gap:'.5rem'}},...entries.map(renderSession))
+}
+export { AgentNotifyCard as Card }

@@ -1,8 +1,5 @@
-/** pywechat-reply toast card — chat name, sender, message body, quick reply. */
-const { h, ref, onMounted, onBeforeUnmount } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
+const { createElement: h, useState, useEffect, useRef } = globalThis.__CATRACE_REACT__ || {}
+if (typeof h !== 'function' || typeof useState !== 'function') throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
 
 const STYLE_ID = 'catrace-plugin-pywechat-reply-css-v1'
 const CSS = `
@@ -108,75 +105,26 @@ function injectStyles() {
   if (document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
-  style.textContent = CSS
+  style.textContent = plugin.theme.css(CSS)
   document.head.appendChild(style)
 }
 
-export default {
-  name: 'PywechatReplyCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['action'],
-  setup(props, { emit }) {
-    const event = props.event || {}
-    const payload = event.payload || {}
-    const chatName = event.title || payload.chatName || '微信'
-    const sender = payload.sender || ''
-    const body = event.body || ''
-    const replyText = ref('')
-    const sending = ref(false)
-
-    onMounted(injectStyles)
-
-    function sendReply() {
-      const text = replyText.value.trim()
-      if (!text || sending.value) return
-      sending.value = true
-      emit('action', 'reply', { text })
-    }
-
-    function onKeydown(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        sendReply()
-      }
-    }
-
-    return () =>
-      h('div', { class: 'pwr-card' }, [
-        h('div', { class: 'header' }, [
-          h('div', { class: 'avatar' }, '微'),
-          h('div', { class: 'meta' }, [
-            h('p', { class: 'chat-name' }, chatName),
-            sender && sender !== chatName ? h('p', { class: 'sender' }, sender) : null,
-          ]),
-        ]),
-        body ? h('p', { class: 'body' }, body) : null,
-        h('div', { class: 'reply-box' }, [
-          h('input', {
-            class: 'reply-input',
-            type: 'text',
-            placeholder: '输入回复…',
-            value: replyText.value,
-            disabled: sending.value,
-            onInput: (e) => {
-              replyText.value = e.target.value
-            },
-            onKeydown,
-          }),
-          h(
-            'button',
-            {
-              class: 'send-btn',
-              disabled: !replyText.value.trim() || sending.value,
-              onClick: sendReply,
-            },
-            '发送',
-          ),
-        ]),
-        h('p', { class: 'hint' }, '通过 pywechat127 操控微信 PC，发送会抢焦点'),
-      ])
-  },
+export default function PywechatReplyCard({ event = {}, onAction }) {
+  const payload = event.payload || {}, chatName = event.title || payload.chatName || '微信', sender = payload.sender || ''
+  const [replyText, setReplyText] = useState('')
+  const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  useEffect(injectStyles, [])
+  function sendReply() {
+    const text = replyText.trim()
+    if (!text || sendingRef.current) return
+    sendingRef.current = true
+    setSending(true)
+    onAction?.('reply', { text })
+  }
+  return h('div', { className: 'pwr-card' },
+    h('div', { className: 'header' }, h('div', { className: 'avatar' }, '微'), h('div', { className: 'meta' }, h('p', { className: 'chat-name' }, chatName), sender && sender !== chatName ? h('p', { className: 'sender' }, sender) : null)),
+    event.body ? h('p', { className: 'body' }, event.body) : null,
+    h('div', { className: 'reply-box' }, h('input', { className: 'reply-input', type: 'text', placeholder: '输入回复…', value: replyText, disabled: sending, onChange: e => setReplyText(e.target.value), onKeyDown: e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) { e.preventDefault(); sendReply() } } }), h('button', { className: 'send-btn', disabled: !replyText.trim() || sending, onClick: sendReply }, '发送')),
+    h('p', { className: 'hint' }, '通过 pywechat127 操控微信 PC，发送会抢焦点'))
 }

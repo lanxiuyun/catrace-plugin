@@ -1,10 +1,9 @@
 /** notify-demo toast card — 渲染「发送通知」发布出来的事件。
- * 合同：props.event (BusEvent)、props.isHovered?；emits close / action(actionId)。
+ * 合同：props.event (BusEvent)、props.isHovered?；callbacks onClose / onAction(actionId)。
  */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
+const React = globalThis.__CATRACE_REACT__
+if (!React?.createElement) throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
+const { createElement: h, useEffect } = React
 
 const STYLE_ID = 'catrace-plugin-notify-demo-css'
 const CSS = `
@@ -42,7 +41,7 @@ function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = plugin.theme.css(CSS)
   document.head.appendChild(el)
 }
 
@@ -50,53 +49,30 @@ function bellIcon() {
   return h(
     'svg',
     {
-      class: 'badge',
+      className: 'badge',
       width: 16,
       height: 16,
       viewBox: '0 0 24 24',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': 2,
-      'stroke-linecap': 'round',
-      'stroke-linejoin': 'round',
+      strokeWidth: 2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
     },
     [
-      h('path', { d: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9' }),
-      h('path', { d: 'M13.73 21a2 2 0 0 1-3.46 0' }),
+      h('path', { key: 'bell', d: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9' }),
+      h('path', { key: 'clapper', d: 'M13.73 21a2 2 0 0 1-3.46 0' }),
     ],
   )
 }
 
-export default {
-  name: 'NotifyDemoCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const payload = event.payload || {}
-    return h('div', { class: 'notify-card' }, [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          bellIcon(),
-          h('h2', { class: 'title' }, event.title || '间隔通知'),
-        ]),
-        h('button', {
-          class: 'x',
-          type: 'button',
-          'aria-label': 'Close',
-          onClick: () => this.$emit('close'),
-        }, '×'),
-      ]),
-      h('p', { class: 'body' }, event.body || ''),
-      payload.count != null
-        ? h('div', { class: 'meta' }, `第 ${payload.count} 条通知`)
-        : null,
-    ])
-  },
+export default function NotifyDemoCard({ event = {}, onClose, onAction }) {
+  useEffect(ensureStyles, [])
+  const payload = event.payload || {}
+  return h('div', { className: 'notify-card' },
+    h('div', { className: 'hdr' },
+      h('div', { className: 'left' }, bellIcon(), h('h2', { className: 'title' }, event.title || '间隔通知')),
+      h('button', { className: 'x', type: 'button', 'aria-label': 'Close', onClick: () => onClose?.() }, '×')),
+    h('p', { className: 'body' }, event.body || ''),
+    payload.count != null ? h('div', { className: 'meta' }, `第 ${payload.count} 条通知`) : null)
 }

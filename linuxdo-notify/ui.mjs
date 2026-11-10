@@ -1,10 +1,8 @@
-/** linuxdo-notify toast card — topic + type + excerpt + open link. */
-const { h } = globalThis.__CATRACE_VUE__ || {}
-if (typeof h !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
-
-const STYLE_ID = 'catrace-plugin-linuxdo-notify-css'
+const React = globalThis.__CATRACE_REACT__;
+if (!React?.createElement || !React?.useState)
+    throw new Error('Catrace plugin React runtime missing');
+const { createElement: h, useState, useRef, useEffect } = React;
+const STYLE_ID = 'catrace-plugin-linuxdo-notify-css';
 const CSS = `
 .ld-card {
   display: flex; flex-direction: column; width: 100%; min-height: 0;
@@ -65,123 +63,103 @@ const CSS = `
 .ld-card .btn.ghost { background: var(--bg); color: var(--title); }
 .ld-card .btn.primary { background: #ff6a00; color: #fff; }
 .ld-card .btn:hover { filter: brightness(0.97); }
-`
-
+`;
 function ensureStyles() {
-  if (typeof document === 'undefined') return
-  if (document.getElementById(STYLE_ID)) return
-  const el = document.createElement('style')
-  el.id = STYLE_ID
-  el.textContent = CSS
-  document.head.appendChild(el)
+    if (typeof document === 'undefined')
+        return;
+    if (document.getElementById(STYLE_ID))
+        return;
+    const el = document.createElement('style');
+    el.id = STYLE_ID;
+    el.textContent = plugin.theme.css(CSS);
+    document.head.appendChild(el);
 }
-
 function formatTime(iso) {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ''
-    return d.toLocaleString()
-  } catch {
-    return ''
-  }
+    if (!iso)
+        return '';
+    try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime()))
+            return '';
+        return d.toLocaleString();
+    }
+    catch {
+        return '';
+    }
 }
-
-export default {
-  name: 'LinuxdoNotifyCard',
-  props: {
-    event: { type: Object, required: true },
-    isHovered: { type: Boolean, default: false },
-  },
-  emits: ['close', 'action'],
-  created() {
-    ensureStyles()
-  },
-  render() {
-    const event = this.event || {}
-    const payload = event.payload || {}
-    const actions = event.actions || []
-    const typeLabel = payload.type_label || payload.notification_type || ''
-    const when = formatTime(payload.created_at || payload.updated_at)
-    const who = payload.acting_username || payload.username || ''
-
+export default function LinuxdoNotifyCard({ event: incomingEvent = {}, isHovered = false, onClose, onAction }) {
+    useEffect(ensureStyles, []);
+    const event = incomingEvent || {};
+    const payload = event.payload || {};
+    const actions = event.actions || [];
+    const typeLabel = payload.type_label || payload.notification_type || '';
+    const when = formatTime(payload.created_at || payload.updated_at);
+    const who = payload.acting_username || payload.username || '';
     const children = [
-      h('div', { class: 'hdr' }, [
-        h('div', { class: 'left' }, [
-          h('span', { class: 'badge' }, 'LDO'),
-          h('h2', { class: 'title' }, event.title || 'LINUX DO'),
-        ]),
-        h(
-          'button',
-          {
-            class: 'x',
+        h('div', {
+            key: 'header',
+            className: 'hdr'
+        }, h('div', {
+            className: 'left'
+        }, h('span', {
+            className: 'badge'
+        }, 'LDO'), h('h2', {
+            className: 'title'
+        }, event.title || 'LINUX DO')), h('button', {
+            className: 'x',
             type: 'button',
             'aria-label': 'Close',
-            onClick: () => this.$emit('close'),
-          },
-          '×',
-        ),
-      ]),
-    ]
-
+            onClick: () => onClose?.()
+        }, '×')),
+    ];
     if (!event.sticky) {
-      children.push(
-        h('div', {
-          class: ['bar', this.isHovered ? 'paused' : ''],
-        }),
-      )
+        children.push(h('div', {
+            key: 'progress',
+            className: ['bar', isHovered ? 'paused' : ''].filter(Boolean).join(" ")
+        }));
     }
-
-    const topicTitle = payload.topic_title || ''
-    const snippet = payload.excerpt || ''
+    const topicTitle = payload.topic_title || '';
+    const snippet = payload.excerpt || '';
     if (topicTitle || snippet || event.body) {
-      if (snippet || topicTitle) {
-        children.push(
-          h('div', { class: 'body' }, [
-            topicTitle ? h('p', { class: 'subj' }, topicTitle) : null,
-            snippet
-              ? h('p', { class: 'snippet' }, who ? `${who}: ${snippet}` : snippet)
-              : event.body && !topicTitle
-                ? h('p', { class: 'snippet' }, event.body)
-                : null,
-          ]),
-        )
-      } else {
-        children.push(h('p', { class: 'body' }, event.body || ''))
-      }
+        if (snippet || topicTitle) {
+            children.push(h('div', {
+                key: 'content',
+                className: 'body'
+            }, topicTitle ? h('p', {
+                className: 'subj'
+            }, topicTitle) : null, snippet
+                ? h('p', {
+                    className: 'snippet'
+                }, who ? `${who}: ${snippet}` : snippet) : event.body && !topicTitle
+                ? h('p', {
+                    className: 'snippet'
+                }, event.body) : null));
+        }
+        else {
+            children.push(h('p', {
+                key: 'content',
+                className: 'body'
+            }, event.body || ''));
+        }
     }
-
     if (typeLabel || when || who) {
-      children.push(
-        h('div', { class: 'meta' }, [
-          typeLabel ? h('span', typeLabel) : null,
-          who && !snippet ? h('span', `@${who}`) : null,
-          when ? h('span', when) : null,
-        ]),
-      )
+        children.push(h('div', {
+            key: 'metadata',
+            className: 'meta'
+        }, typeLabel ? h('span', null, typeLabel) : null, who && !snippet ? h('span', null, `@${who}`) : null, when ? h('span', null, when) : null));
     }
-
     if (actions.length) {
-      children.push(
-        h(
-          'div',
-          { class: 'acts' },
-          actions.map((a, i) =>
-            h(
-              'button',
-              {
-                key: a.id,
-                type: 'button',
-                class: ['btn', a.id === 'open' || i === 0 ? 'primary' : 'ghost'],
-                onClick: () => this.$emit('action', a.id),
-              },
-              a.label,
-            ),
-          ),
-        ),
-      )
+        children.push(h('div', {
+            key: 'actions',
+            className: 'acts'
+        }, actions.map((a, i) => h('button', {
+            key: a.id,
+            type: 'button',
+            className: ['btn', a.id === 'open' || i === 0 ? 'primary' : 'ghost'].filter(Boolean).join(" "),
+            onClick: () => onAction?.(a.id)
+        }, a.label))));
     }
-
-    return h('div', { class: 'ld-card' }, children)
-  },
+    return h('div', {
+        className: 'ld-card'
+    }, children);
 }

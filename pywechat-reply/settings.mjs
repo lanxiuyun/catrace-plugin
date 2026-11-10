@@ -1,20 +1,8 @@
-/** pywechat-reply settings — risk notice, dependency help, polling config, test toast. */
-const vue = globalThis.__CATRACE_VUE__ || {}
-const naive = globalThis.__CATRACE_NAIVE__ || {}
-const { h, ref, onMounted } = vue
-const { NButton, NInput, NSwitch, useMessage } = naive
+const { createElement: h, useState, useEffect, useRef } = globalThis.__CATRACE_REACT__ || {}
+if (typeof h !== 'function' || typeof useState !== 'function') throw new Error('Catrace React runtime missing (__CATRACE_REACT__)')
+const { Button, TextField, Switch } = globalThis.__CATRACE_RADIX__ || {}
+if (!Button || !TextField || !Switch) throw new Error('Catrace Radix runtime missing (__CATRACE_RADIX__)')
 
-if (typeof h !== 'function' || typeof ref !== 'function') {
-  throw new Error('Catrace plugin Vue runtime missing (__CATRACE_VUE__.h)')
-}
-if (!NButton || !NInput || !NSwitch || !useMessage) {
-  throw new Error('Catrace plugin naive runtime missing (__CATRACE_NAIVE__)')
-}
-if (!plugin || !plugin.config || !plugin.events || !plugin.setEnabled) {
-  throw new Error('Catrace plugin API missing (plugin facade)')
-}
-
-const PLUGIN_ID = 'pywechat-reply'
 const STYLE_ID = 'catrace-plugin-pywechat-reply-settings-css-v1'
 const CSS = `
 .pwr-settings {
@@ -59,7 +47,7 @@ function injectStyles() {
   if (document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
-  style.textContent = CSS
+  style.textContent = plugin.theme.css(CSS)
   document.head.appendChild(style)
 }
 
@@ -69,110 +57,47 @@ function clampInt(value, min, max, fallback) {
   return Math.min(max, Math.max(min, Math.round(n)))
 }
 
-export default {
-  name: 'PywechatReplySettings',
-  props: {
-    context: { type: Object, default: () => ({}) },
-  },
-  setup(props) {
-    const { context } = props || {}
-    const message = useMessage()
-    const configRef = ref({})
-    const pollMs = ref(8000)
-    const debug = ref(false)
-
-    onMounted(async () => {
-      injectStyles()
-      try {
-        const cfg = (await plugin.config.get()) || {}
-        configRef.value = cfg
-        pollMs.value = clampInt(cfg.pollIntervalMs, 500, 60000, 8000)
-        debug.value = Boolean(cfg.debug)
-      } catch (e) {
-        console.warn('[pywechat-reply] failed to load config', e)
-      }
-    })
-
-    async function saveConfig() {
-      const cfg = {
-        ...configRef.value,
-        pollIntervalMs: pollMs.value,
-        debug: debug.value,
-      }
-      try {
-        await plugin.config.set(cfg)
-        configRef.value = cfg
-        message.success('配置已保存')
-      } catch (e) {
-        message.error(`保存失败: ${e}`)
-      }
-    }
-
-    function sendTestToast() {
-      plugin.events
-        .publish({
-          eventType: 'pywechat-reply.message',
-          kind: 'pywechat-reply',
-          title: '测试聊天',
-          body: '这是一条测试消息，点击回复可在输入框里打字。',
-          level: 'info',
-          actions: [
-            { id: 'reply', label: '回复' },
-            { id: 'dismiss', label: '忽略' },
-          ],
-          payload: {
-            chatName: '测试聊天',
-            sender: '测试发送人',
-            messageId: `test-${Date.now()}`,
-          },
-          dedupeKey: `pywechat-reply:test`,
-        })
-        .then(() => message.success('测试 Toast 已发送'))
-        .catch((e) => message.error(`发送失败: ${e}`))
-    }
-
-    return () =>
-      h('div', { class: 'pwr-settings' }, [
-        h('div', { class: 'card warn' }, [
-          h('h2', null, '使用风险提示'),
-          h('p', null, '本插件通过 pywechat127（pyweixin）模拟操作微信 PC，不是官方 API。'),
-          h('p', null, '高频自动操作或发送敏感内容可能导致微信风控、限制登录甚至封号。请仅自用，勿用于商业或违法违规用途。'),
-        ]),
-        h('div', { class: 'card' }, [
-          h('h2', null, '依赖安装'),
-          h('p', null, '启用前请 pip 安装 pywechat127，且微信 PC 已登录。sidecar 用的 python 必须能 import pyweixin：'),
-          h('div', { class: 'mono' }, 'pip install pywechat127'),
-          h('p', { class: 'hint' }, '微信 4.x 走 pyweixin；3.9 才走 pywechat。Catrace 的 python 要和你 pip 的是同一套。'),
-        ]),
-        h('div', { class: 'card' }, [
-          h('h2', null, '轮询设置'),
-          h('div', { class: 'row' }, [
-            h('div', { class: 'field' }, [
-              h('span', { class: 'label' }, '轮询间隔（毫秒）'),
-              h('span', { class: 'hint' }, '轮询会操作微信窗口、抢焦点。建议 8000ms 以上。'),
-            ]),
-            h(NInput, {
-              value: String(pollMs.value),
-              onUpdateValue: (v) => {
-                pollMs.value = clampInt(v, 500, 60000, 8000)
-              },
-              style: { width: '8rem' },
-            }),
-          ]),
-          h('div', { class: 'row' }, [
-            h('span', { class: 'label' }, '调试模式'),
-            h(NSwitch, {
-              value: debug.value,
-              onUpdateValue: (v) => {
-                debug.value = Boolean(v)
-              },
-            }),
-          ]),
-          h('div', { class: 'row' }, [
-            h(NButton, { type: 'primary', onClick: saveConfig }, () => '保存配置'),
-            h(NButton, { onClick: sendTestToast }, () => '发送测试 Toast'),
-          ]),
-        ]),
-      ])
-  },
+export default function PywechatReplySettings() {
+  const [config, setConfig] = useState({})
+  const [pollMs, setPollMs] = useState(8000)
+  const [debug, setDebug] = useState(false)
+  const [feedback, setFeedback] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    injectStyles()
+    let alive = true
+    void plugin.config.get().then((cfg) => {
+      if (!alive) return
+      const next = cfg || {}
+      setConfig(next)
+      setPollMs(clampInt(next.pollIntervalMs, 500, 60000, 8000))
+      setDebug(Boolean(next.debug))
+    }).catch((error) => console.warn('[pywechat-reply] failed to load config', error))
+    return () => { alive = false }
+  }, [])
+  async function saveConfig() {
+    const cfg = { ...config, pollIntervalMs: pollMs, debug }
+    // Only the host switch owns the top-level enable flag; nested business flags stay intact.
+    delete cfg.enabled
+    setBusy(true)
+    try { await plugin.config.set(cfg); setConfig(cfg); setFeedback({ text: '配置已保存' }) }
+    catch (error) { setFeedback({ error: true, text: `保存失败: ${error}` }) }
+    finally { setBusy(false) }
+  }
+  async function sendTestToast() {
+    setBusy(true)
+    try {
+      await plugin.events.publish({ eventType: 'pywechat-reply.message', kind: 'pywechat-reply', title: '测试聊天', body: '这是一条测试消息，点击回复可在输入框里打字。', level: 'info', actions: [{ id: 'reply', label: '回复' }, { id: 'dismiss', label: '忽略' }], payload: { chatName: '测试聊天', sender: '测试发送人', messageId: `test-${Date.now()}` }, dedupeKey: 'pywechat-reply:test' })
+      setFeedback({ text: '测试 Toast 已发送' })
+    } catch (error) { setFeedback({ error: true, text: `发送失败: ${error}` }) }
+    finally { setBusy(false) }
+  }
+  return h('div', { className: 'pwr-settings' },
+    h('div', { className: 'card warn' }, h('h2', null, '使用风险提示'), h('p', null, '本插件通过 pywechat127（pyweixin）模拟操作微信 PC，不是官方 API。'), h('p', null, '高频自动操作或发送敏感内容可能导致微信风控、限制登录甚至封号。请仅自用，勿用于商业或违法违规用途。')),
+    h('div', { className: 'card' }, h('h2', null, '依赖安装'), h('p', null, '启用前请 pip 安装 pywechat127，且微信 PC 已登录。sidecar 用的 python 必须能 import pyweixin：'), h('div', { className: 'mono' }, 'pip install pywechat127'), h('p', { className: 'hint' }, '微信 4.x 走 pyweixin；3.9 才走 pywechat。Catrace 的 python 要和你 pip 的是同一套。')),
+    h('div', { className: 'card' }, h('h2', null, '轮询设置'),
+      h('div', { className: 'row' }, h('label', { className: 'field', htmlFor: 'pwr-poll' }, h('span', { className: 'label' }, '轮询间隔（毫秒）'), h('span', { className: 'hint' }, '轮询会操作微信窗口、抢焦点。建议 8000ms 以上。')), h(TextField.Root, { id: 'pwr-poll', type: 'number', min: 500, max: 60000, value: String(pollMs), onChange: event => setPollMs(clampInt(event.target.value, 500, 60000, 8000)), style: { width: '8rem' } })),
+      h('label', { className: 'row' }, h('span', { className: 'label' }, '调试模式'), h(Switch, { checked: debug, onCheckedChange: setDebug })),
+      h('div', { className: 'row' }, h(Button, { disabled: busy, onClick: saveConfig }, '保存配置'), h(Button, { disabled: busy, variant: 'soft', onClick: sendTestToast }, '发送测试 Toast')),
+      feedback ? h('p', { role: feedback.error ? 'alert' : 'status' }, feedback.text) : null))
 }

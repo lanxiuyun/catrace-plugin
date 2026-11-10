@@ -1,7 +1,8 @@
 {
   "id": "timer",
   "name": "定时提醒",
-  "version": "2026.10.08",
+  "version": "2026.11.09",
+  "uiFramework": "react",
   "description": "自定义间隔或定点提醒",
   "main": "ui.mjs",
   "background": "background.mjs",
