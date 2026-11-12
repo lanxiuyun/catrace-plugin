@@ -42,7 +42,7 @@ function harness(api={}) {
     NumberFieldRoot:'HeroNumberFieldRoot',NumberFieldGroup:'HeroNumberFieldGroup',NumberFieldInput:'HeroNumberFieldInput',
     NumberFieldIncrementButton:'HeroNumberFieldIncrementButton',NumberFieldDecrementButton:'HeroNumberFieldDecrementButton',
     SwitchRoot:'HeroSwitchRoot',SwitchContent:'HeroSwitchContent',SwitchControl:'HeroSwitchControl',SwitchThumb:'HeroSwitchThumb',
-    TextArea:'HeroTextArea',ToggleButton:'HeroToggleButton',TooltipRoot:'HeroTooltipRoot',TooltipContent:'HeroTooltipContent',
+    TextArea:'HeroTextArea',ToggleButton:'HeroToggleButton',ToggleButtonGroup:'HeroToggleButtonGroup',ToggleButtonGroupSeparator:'HeroToggleButtonGroupSeparator',TooltipRoot:'HeroTooltipRoot',TooltipContent:'HeroTooltipContent',
   }
   globalThis.__CATRACE_CREATE_PLUGIN_API__=() => ({
     config:{get:async () => ({}),set:async () => {}},sidecar:{request:async () => ({contract:7,config:{},flat:[]})},
@@ -105,7 +105,7 @@ function text(node) {
 }
 const click=node => node.props.onClick?.({stopPropagation(){},preventDefault(){}})
 const button=(tree,label) => nodes(tree,node => node.type==='HeroButton' || node.type==='RadixButton' || node.type==='button').find(node => text(node.props.children)===label)
-const chips=tree => nodes(tree,node => typeof node.props?.['aria-pressed']==='boolean' && String(node.props.className || '').includes('__chip'))
+const toggleGroups=tree => nodes(tree,node => node.type==='HeroToggleButtonGroup')
 const controls=(tree,type) => nodes(tree,node => node.type===type)
 
 async function settingsHarness(t,api={}) {
@@ -176,12 +176,20 @@ test('React settings: all appearance keys and custom CSS are loaded, edited, sav
     sidecar:{request:async (method,params) => {rpc.push({method,params});return {contract:7,config:{},flat:[{group:'整体',selector:'[class*="_header"]',desc:'官方顶栏'}]}}},
   })
   let tree=h.render()
-  assert.equal(chips(tree).length,4);assert.equal(controls(tree,'HeroToggleButton').length,4);assert.equal(controls(tree,'HeroSwitchRoot').length,2)
-  const chipByLabel=label => chips(h.render()).find(node => text(node.props.children)===label)
+  assert.equal(toggleGroups(tree).length,1);assert.equal(controls(tree,'HeroToggleButton').length,4);assert.equal(controls(tree,'HeroSwitchRoot').length,2)
+  const groupByLabel=label => toggleGroups(h.render()).find(node => text(node).includes(label))
   assert.ok(!text(tree).includes('对话/轨迹 标签'))
-  chipByLabel('官方顶栏').props.onChange(true);tree=h.render();assert.ok(text(tree).includes('对话/轨迹 标签'))
+  // 显示项是多选 ToggleButtonGroup：点亮「官方顶栏」后出现「顶栏内部」组
+  const topGroup=toggleGroups(tree)[0]
+  assert.ok(text(topGroup).includes('左侧栏'));assert.ok(text(topGroup).includes('官方顶栏'))
+  topGroup.props.onSelectionChange(new Set([...topGroup.props.selectedKeys,'showHeader']));tree=h.render()
+  assert.ok(text(tree).includes('对话/轨迹 标签'))
   assert.ok(!text(tree).includes('「…」更多操作'))
-  chipByLabel('顶栏右侧图标').props.onChange(true);tree=h.render();assert.equal(chips(tree).length,11)
+  const headerGroup=groupByLabel('顶栏右侧图标')
+  headerGroup.props.onSelectionChange(new Set([...headerGroup.props.selectedKeys,'showHeaderIcons']));tree=h.render()
+  assert.equal(toggleGroups(tree).length,3)
+  assert.equal(controls(tree,'HeroToggleButton').length,11)
+  assert.equal(controls(tree,'HeroToggleButtonGroupSeparator').length,8)
   // 数字输入是 HeroUI 默认 NumberField：三个字段、secondary、−/+ 步进范围正确；越界值不落盘。
   const numRoots=controls(tree,'HeroNumberFieldRoot')
   assert.equal(numRoots.length,3)
@@ -194,7 +202,7 @@ test('React settings: all appearance keys and custom CSS are loaded, edited, sav
   for(const input of controls(tree,'HeroNumberFieldInput'))assert.equal(typeof input.props.onBlur,'function')
   numByKey('noticePollMs').props.onChange(3000)
   numByKey('httpPort').props.onChange(99999) // 越界：不写表单（等失焦夹回）
-  for(const chip of chips(tree))if(chip.props['aria-pressed'])chip.props.onChange(false)
+  for(const group of toggleGroups(h.render()))group.props.onSelectionChange(new Set())
   for(const control of controls(h.render(),'HeroSwitchRoot'))control.props.onChange(false)
   const cssInput=controls(h.render(),'HeroTextArea')[0]
   assert.ok(cssInput);cssInput.props.onChange({target:{value:'/* marker */'}})

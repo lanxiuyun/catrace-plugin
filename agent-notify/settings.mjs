@@ -6,9 +6,9 @@ const {
   Button, Chip, Input,
   NumberFieldDecrementButton, NumberFieldGroup, NumberFieldIncrementButton, NumberFieldInput, NumberFieldRoot,
   SliderFill, SliderRoot, SliderThumb, SliderTrack,
-  ToggleButton, ToggleButtonGroup,
+  ToggleButton, ToggleButtonGroup, ToggleButtonGroupSeparator,
 } = HeroUI
-if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !NumberFieldRoot) throw new Error('Catrace React/HeroUI runtime missing')
+if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGroupSeparator || !NumberFieldRoot) throw new Error('Catrace React/HeroUI runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
 const CSS = `
@@ -72,7 +72,8 @@ function numberField({ value, min, max, step = 1, label, isDisabled, onChange })
       h(NumberFieldInput, null),
       h(NumberFieldIncrementButton, { 'aria-label':'增加' })))
 }
-/** Single-select segmented control; Selection from react-aria is a Set of keys. */
+/** Single-select segmented control; Selection from react-aria is a Set of keys.
+ *  HeroUI 的分隔线要放进除第一项外的每个 ToggleButton 里（官方 anatomy），否则会少掉中间的细线。 */
 function segments(value, options, onValueChange, disabled) {
   return h(ToggleButtonGroup,{
     size:'sm',
@@ -84,7 +85,8 @@ function segments(value, options, onValueChange, disabled) {
       const next = keys instanceof Set ? [...keys][0] : Array.isArray(keys) ? keys[0] : keys
       if (next != null) onValueChange(String(next))
     },
-  },...options.map(([id,label]) => h(ToggleButton,{id,key:id},label)))
+  },...options.map(([id,label], index) => h(ToggleButton,{id,key:id},
+    index > 0 ? h(ToggleButtonGroupSeparator,{key:'separator'}) : null, label)))
 }
 function statusChip(installed) {
   return h(Chip,{size:'sm',variant:'soft',color:installed ? 'success' : 'default'},installed ? '已安装' : '未安装')
@@ -235,10 +237,10 @@ export default function AgentNotifySettings() {
       row('提示音模式',segments(config.soundMode,[['builtin','内置'],['custom','自定义'],['muted','静音']],soundMode => update({soundMode}),!ready)),
       config.soundMode !== 'muted' ? row('提示音音量',h('div',{className:'sound-volume'},h(SliderRoot,{className:'an-slider',value:config.soundVolume,minValue:0,maxValue:1,step:.05,isDisabled:!ready,onChange:value => { if (typeof value === 'number') update({soundVolume:value},200) }},h(SliderTrack,null,h(SliderFill),h(SliderThumb))),h('span',{className:'ed-unit'},`${Math.round(config.soundVolume*100)}%`))) : null,
       config.soundMode === 'custom' ? row('音频文件路径',h('div',{className:'sound-path'},h(Input,{variant:'secondary',className:'an-sound-input',value:config.soundPath,placeholder:'选择或输入本地音频文件',isDisabled:!ready,onChange:e => update({soundPath:e.target.value},500),onBlur:() => { if (dirty.current) void persist() }}),h(Button,{size:'sm',variant:'secondary',isDisabled:!ready,onClick:() => void pickSoundFile()},'选择文件'))) : null,
-      config.soundMode !== 'muted' ? row('试听',h(Button,{size:'sm',variant:'secondary',isDisabled:!ready,onClick:() => void playPreview()},'预览')) : null,
+      config.soundMode !== 'muted' ? row('试听',h(Button,{size:'sm',variant:'tertiary',isDisabled:!ready,onClick:() => void playPreview()},'预览')) : null,
     ]),
     section('调试卡片','弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',[
-      h('div',{className:'preview-row'},...[['stop','任务完成'],['working','调用工具中'],['tool','批准工具'],['ask','回答问题'],['ask-multi','多题问答']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'secondary',isDisabled:!!previewBusy,onClick:() => void preview(kind)},label))),
+      h('div',{className:'preview-row'},...[['stop','任务完成'],['working','调用工具中'],['tool','批准工具'],['ask','回答问题'],['ask-multi','多题问答']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'tertiary',isDisabled:!!previewBusy,onClick:() => void preview(kind)},label))),
     ]))
 }
 export { AgentNotifySettings as Settings }

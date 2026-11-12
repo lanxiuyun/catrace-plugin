@@ -1,7 +1,7 @@
 {
   "id": "pastedrop",
   "name": "PasteDrop 剪贴板存图",
-  "version": "2026.11.11",
+  "version": "2026.11.12",
   "uiFramework": "react",
   "description": "在桌面或资源管理器里按 Ctrl+V，把剪贴板图片直接存成 PNG 文件",
   "icon": "icon.svg",

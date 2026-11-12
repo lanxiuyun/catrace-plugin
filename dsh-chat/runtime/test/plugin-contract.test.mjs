@@ -74,7 +74,7 @@ test('manifest：声明的脚本都在插件目录内且存在', () => {
 
 test('ui/settings: React namespaces only, self-contained ESM and function exports', () => {
   assert.equal(manifest.uiFramework, 'react')
-  assert.equal(manifest.version, '2026.11.11')
+  assert.equal(manifest.version, '2026.11.12')
   for (const file of ['ui.mjs', 'settings.mjs']) {
     const source = read(file)
     assert.doesNotMatch(source, /^\s*import\s|\bimport\s*\(/m, `${file} must not import sibling or bare modules`)
@@ -293,10 +293,11 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   // 3) 改完要看到效果：外观改动在下次展开时生效（卡片正文有这句说明），不再是自动重开
   assert.match(settings, /下次展开状态卡时生效/, '外观改动要说明"下次展开生效"（否则用户以为设置没用）')
   assert.match(read('ui.mjs'), /setGuiUrl\(''\)/, 'ui.mjs 收起要清 iframe 地址，保证下次展开生效')
-  // 4) 用标签云呈现：点亮 = 显示，悬停有说明（HeroUI 扁平 ToggleButton + Tooltip）
-  assert.match(settings, /'aria-pressed':Boolean\(form\[item\.key\]\)/, '显示项应做成可点标签（toggle）')
-  assert.match(settings, /isSelected:Boolean\(form\[item\.key\]\)/, '标签选中态由 isSelected 受控')
-  assert.match(settings, /onChange:selected => update\(\{\[item\.key\]:Boolean\(selected\)\}\)/, '标签必须绑定状态更新')
+  // 4) 用多选 toggle 组呈现：点亮 = 显示，悬停有说明（HeroUI 扁平 ToggleButtonGroup + ToggleButton + Tooltip）
+  assert.match(settings, /h\(ToggleButtonGroup,\{/, '显示项应做成 HeroUI ToggleButtonGroup（多选）')
+  assert.match(settings, /selectionMode:'multiple'/, '显示项是多选 toggle 组')
+  assert.match(settings, /onSelectionChange\(keys\)/, '标签组必须绑定状态更新')
+  assert.match(settings, /h\(ToggleButtonGroupSeparator/, '组内分隔线要放进 ToggleButton（官方 anatomy）')
   assert.match(settings, /h\(TooltipRoot/, '标签要有 hover 说明')
   assert.match(settings, /h\(TooltipContent/, 'tooltip 文案放 TooltipContent（HeroUI 自带限宽换行）')
   const main = read('runtime/main.mjs')
@@ -334,7 +335,7 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   assert.match(settings, /'小窗外观'/, '卡片标题应为「小窗外观」')
   assert.ok(!/└/.test(settings), '不要用 └ 前缀凑层级（用分组小标题）')
   assert.ok(!/\*\*点亮/.test(settings), '说明文案里不要出现 markdown 星号（宿主不渲染 markdown）')
-  assert.match(settings, /dsh-chat-settings__chip/, '显示项保留 dsh-chat-settings__chip 测试钩子 class')
+  assert.match(settings, /dsh-chat-settings__toggle-group/, '显示项分组保留 dsh-chat-settings__toggle-group 测试钩子 class')
   assert.match(settings, /dsh-chat-settings__block/, '全宽块要自造（自定义 CSS 区用）')
   // 行排版自造（field）：宿主 SettingRow 只保证 ≈4rem 右侧余量，desc 一长就把输入框压成「23…」（实测截图）
   assert.match(settings, /dsh-chat-settings__field/, '输入/标签行要用自造的 field 排版（说明整行在下）')
@@ -345,15 +346,16 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   assert.match(settings, /恢复推荐/, '应有「恢复推荐」快捷按钮')
   assert.match(settings, /插入示例/, '自定义 CSS 区应有「插入示例」')
   assert.match(settings, /清空/, '自定义 CSS 区应有「清空」')
-  // 曾经踩过的两个坑，钉死：
-  // 1) `.dsh-chat-settings__tags` 被写了两遍，后一条 gap:0 盖掉前一条 → chip 之间没间距
-  const tagsRules = settings.match(/\.dsh-chat-settings__tags\s*\{[^}]*\}/g) || []
-  assert.equal(tagsRules.length, 1, `__tags 规则只能有一条（实际 ${tagsRules.length} 条，多出来的会互相覆盖）`)
-  assert.match(tagsRules[0], /gap:\s*0\.5rem/, 'chip 之间必须有间距')
+  // 曾经踩过的坑，钉死：
+  // 1) 分组容器只能写一条规则，且不能把卡片撑破
+  const toggleGroupRules = settings.match(/\.dsh-chat-settings__toggle-group\s*\{[^}]*\}/g) || []
+  assert.equal(toggleGroupRules.length, 1, `__toggle-group 规则只能有一条（实际 ${toggleGroupRules.length} 条，多出来的会互相覆盖）`)
+  assert.match(toggleGroupRules[0], /max-width:\s*100%/, '标签组要限制在卡片宽度内')
   // 2) 多行输入用 HeroUI 扁平 TextArea（不能掉进复合入口）
   assert.match(settings, /h\(TextArea/, '多行输入使用 HeroUI TextArea')
-  // 3) 选中/未选中状态交给 HeroUI ToggleButton 的 isSelected，不再自绘 chip 皮肤
-  assert.match(settings, /h\(ToggleButton,\{[^}]*isSelected:/, '显示项用 HeroUI 扁平 ToggleButton 承载选中态')
+  // 3) 选中态交给 ToggleButtonGroup 的 selectedKeys，不再逐个 ToggleButton 自己 isSelected
+  assert.match(settings, /h\(ToggleButtonGroup,\{[\s\S]{0,260}selectedKeys/, '显示项用 ToggleButtonGroup 的 selectedKeys 受控')
+  assert.ok(!/isSelected:Boolean\(form\[item\.key\]\)/.test(settings), '不要再用逐个 ToggleButton 的 isSelected')
   assert.ok(!/\.dsh-chat-settings__chip\s*\{/.test(settings), '不要再自绘 chip 皮肤（HeroUI 负责控件外观）')
   // 4) class 速查表：不给清单用户不知道改什么
   assert.match(main, /guiClasses: methodGuiClasses/, 'sidecar 必须提供 class 速查 RPC')

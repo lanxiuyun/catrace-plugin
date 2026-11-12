@@ -5,9 +5,9 @@ const {
   Button, Chip, Input,
   NumberFieldDecrementButton, NumberFieldGroup, NumberFieldIncrementButton, NumberFieldInput, NumberFieldRoot,
   SwitchContent, SwitchControl, SwitchRoot, SwitchThumb,
-  TextArea, ToggleButton, TooltipContent, TooltipRoot,
+  TextArea, ToggleButton, ToggleButtonGroup, ToggleButtonGroupSeparator, TooltipContent, TooltipRoot,
 } = globalThis.__CATRACE_HEROUI__ || {}
-if (typeof h !== 'function' || !Button || !Input || !NumberFieldRoot || !SwitchRoot || !ToggleButton) throw new Error('Catrace React/HeroUI runtime missing')
+if (typeof h !== 'function' || !Button || !Input || !NumberFieldRoot || !SwitchRoot || !ToggleButton || !ToggleButtonGroup) throw new Error('Catrace React/HeroUI runtime missing')
 
 const STYLE_ID = 'dsh-chat-settings-style'
 
@@ -65,7 +65,7 @@ const SETTINGS_CSS = `
 /* 小窗外观：chip 分组（只有间距/换行，选中态由 HeroUI 负责） */
 .dsh-chat-settings__group { padding: 0.375rem 0 0.25rem; }
 .dsh-chat-settings__group-title { font-size: 0.75rem; font-weight: 600; color: var(--ct-text-muted, #8a94a6); padding: 0.375rem 0 0.125rem; }
-.dsh-chat-settings__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+.dsh-chat-settings__toggle-group { max-width: 100%; padding: 0.25rem 0; }
 /* 全宽块（自定义 CSS 区这类内容用） */
 .dsh-chat-settings__block { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
 .dsh-chat-settings__block-desc { font-size: 0.75rem; color: var(--ct-text-muted, #8a94a6); line-height: 1.5; overflow-wrap: anywhere; }
@@ -315,12 +315,27 @@ export default function DshChatSettings() {
     if(item.group!==currentGroup){currentGroup=item.group;classRows.push(h('div',{className:'dsh-chat-settings__cls-group',key:`group:${currentGroup}`},currentGroup))}
     classRows.push(h('div',{className:'dsh-chat-settings__cls-row',key:item.selector},h('code',{className:'dsh-chat-settings__cls-selector'},item.selector),h('span',{className:'dsh-chat-settings__cls-desc'},item.desc),button('插入',() => insertCss(item.selector),{variant:'tertiary',isDisabled:!ready})))
   }
-  const appearanceButton = item => h(TooltipRoot,{key:item.key,delay:300},
-    h(ToggleButton,{size:'sm',variant:'default',className:'dsh-chat-settings__chip',isSelected:Boolean(form[item.key]),'aria-pressed':Boolean(form[item.key]),isDisabled:!ready,onChange:selected => update({[item.key]:Boolean(selected)})},item.label),
-    h(TooltipContent,null,`${item.label}：${item.tip}。点亮 = 在小窗里显示`))
-  const appearanceGroups = groups.filter(group => group.visible!==false).map((group,index) => h('div',{className:'dsh-chat-settings__group',key:index},
-    group.title ? h('div',{className:'dsh-chat-settings__group-title'},group.title) : null,
-    h('div',{className:'dsh-chat-settings__tags'},...group.items.map(appearanceButton))))
+  /** 显示项：HeroUI 多选 ToggleButtonGroup（组内分隔线按官方 anatomy 放进除首项外的每个 ToggleButton）。 */
+function appearanceGroup(group, form, ready, update) {
+  const selectedKeys=group.items.filter(item => Boolean(form[item.key])).map(item => item.key)
+  return h(ToggleButtonGroup,{
+    className:'dsh-chat-settings__toggle-group',
+    'aria-label':group.title ? group.title.replace(/[：:]\s*$/,'') : '小窗元素显示',
+    size:'sm',
+    selectionMode:'multiple',
+    selectedKeys,
+    isDisabled:!ready,
+    onSelectionChange(keys) {
+      const next=keys instanceof Set ? keys : new Set(Array.isArray(keys) ? keys : [])
+      update(Object.fromEntries(group.items.map(item => [item.key,next.has(item.key)])))
+    },
+  },...group.items.map((item,itemIndex) => h(TooltipRoot,{key:item.key,delay:300},
+    h(ToggleButton,{id:item.key},itemIndex>0 ? h(ToggleButtonGroupSeparator,{key:'separator'}) : null,item.label),
+    h(TooltipContent,null,`${item.label}：${item.tip}。点亮 = 在小窗里显示`))))
+}
+const appearanceGroups = groups.filter(group => group.visible!==false).map((group,index) => h('div',{className:'dsh-chat-settings__group',key:index},
+  group.title ? h('div',{className:'dsh-chat-settings__group-title'},group.title) : null,
+  appearanceGroup(group,form,ready,update)))
   const classHelp = guiClasses.length
     ? [h('div',{className:'dsh-chat-settings__cls-note',key:'cls-note'},'官方 class 带构建哈希前缀，用 [class*="_语义名"] 匹配；点「插入」添加规则骨架。'),...classRows]
     : [alert('warning',`class 速查表没加载出来${guiClassesError ? `：${guiClassesError}` : ''}。请确认后台已运行当前代码。`,{action:smallButton('重试',() => void loadGuiClasses())})]
@@ -347,7 +362,7 @@ export default function DshChatSettings() {
     ],[smallButton('刷新',() => {void loadStatus();void loadNoticeStatus();void loadGuiClasses()})]),
     card('状态通知','DSH 开始干活时弹可折叠状态卡；点正文原地展开官方界面，等你审批时自动展开。进行中、等你处理、已完成、处理失败均常驻，点 × 或下一轮开始时收场。',form.noticeEnabled ? [
       field('检查间隔(ms)',numberInput('noticePollMs'),`500–30000，当前 ${form.noticePollMs}`),
-      field('测试卡',[['running','进行中'],['done','已完成'],['waiting','等你处理'],['error','处理失败']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'secondary',onClick:() => void sendNoticeDemo(kind)},label)),'发一张测试卡到右下角，观察折叠和展开。'),
+      field('测试卡',[['running','进行中'],['done','已完成'],['waiting','等你处理'],['error','处理失败']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'tertiary',onClick:() => void sendNoticeDemo(kind)},label)),'发一张测试卡到右下角，观察折叠和展开。'),
       h('div',{className:'dsh-chat-settings__muted'},summary),
     ] : [],[switchInput('noticeEnabled')]),
     card('小窗外观','点亮 = 在小窗里显示，灰掉 = 隐藏。悬停看说明；改动在下次展开状态卡时生效。',[

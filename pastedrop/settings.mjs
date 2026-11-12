@@ -320,7 +320,7 @@ export default function PasteDropSettings() {
         }, h(Button, {
             type: 'button',
             size: 'sm',
-            variant: 'secondary',
+            variant: 'tertiary',
             isDisabled: !!state.busy,
             'aria-busy': state.busy === 'status',
             onClick: refreshStatus

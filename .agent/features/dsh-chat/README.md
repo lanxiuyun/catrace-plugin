@@ -280,13 +280,16 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
 注意这是"**显示型**"开关（true = 显示），但**不参与** `cropFlagsFor()` 的取反映射（故 `CROP_MAPPED_KEYS` 少它一个），
 只参与 `SHOW_KEYS`/`guiSignature`。
 
-### 设置页：显示项用「标签云」，语义是 true = 显示
+### 设置页：显示项用多选 ToggleButtonGroup，语义是 true = 显示
 
 配置键 `showRail/showHeader/showTabs/showHeaderIcons/showHeaderTitle/showHeaderChips/showComposerStatus/showMessageMeta`
 （true = 在小窗里显示该元素），反代用 `cropFlagsFor(config)` 取反生成隐藏规则。
-设置页把它们渲染成一排**可点标签**（HeroUI 扁平 `ToggleButton` + `TooltipRoot/TooltipContent`）：
-点亮 = 显示，点一下切换，悬停出说明；「官方顶栏」关掉时它的子标签整组不渲染，免得用户点了没反应。
-控件一律从宿主注入的 `globalThis.__CATRACE_HEROUI__` 扁平导出取（`Button/Input/TextArea/SwitchRoot/...`），
+设置页把它们渲染成一个**多选 toggle 组**（HeroUI 扁平 `ToggleButtonGroup` + `ToggleButton` + `ToggleButtonGroupSeparator`，
+每项用 `TooltipRoot/TooltipContent` 出说明）：`selectionMode="multiple"` + `selectedKeys` 受控，
+点亮 = 显示，点一下切换；「官方顶栏」关掉时它的子组整组不渲染，免得用户点了没反应。
+**不能用一排独立 `ToggleButton`**：独立 toggle 和旁边的操作按钮长得一样，用户分不清哪个是开关、哪个是按钮；
+组容器 + 分隔线才能让人看出这是"一组可选控件"。分隔线按官方 anatomy 放进除首项外的每个 `ToggleButton` 里。
+控件一律从宿主注入的 `globalThis.__CATRACE_HEROUI__` 扁平导出取（`Button/Input/TextArea/SwitchRoot/ToggleButtonGroup/...`），
 不再 `import`、也不用 `Switch.Content` 这类复合静态属性。
 清单只有一处真相（`config.mjs` 的 `SHOW_KEYS`）：设置页渲染/保存、`cropFlagsFor`、`guiSignature` 都从它取，
 并有测试锁住"任一开关都必须改变反代签名"（漏一个就是"设置没用"这类 bug）。

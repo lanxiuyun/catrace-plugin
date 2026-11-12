@@ -35,7 +35,8 @@ HeroUI 既有 `Switch`（带 `.Content` / `.Control` / `.Thumb` 静态属性）�
 | 自绘 tab / 旧分段 tab | `TabsRoot` + `TabListContainer` + `TabList` + `Tab`（`TabIndicator` 放 `Tab` 内）+ `TabPanel` | **不能省 `TabListContainer`**：HeroUI 默认的灰色底轨画在它上面，漏了会变成一条铺满的白底 tab；选中态、`aria-label` 与 `role=tab/tabpanel` 由组件自带，不要自绘 tab 皮肤 |
 | Radix `Button` / 原生 `button` | `Button` | `size="sm"`；`onClick`、`isDisabled`（不是 `disabled`） |
 | Radix `Switch` / 原生 checkbox 开关 | `SwitchRoot` + `SwitchContent` + `SwitchControl` + `SwitchThumb` | `isSelected` / `onChange`，标签用 `Label` 放进 `SwitchContent` |
-| Radix `SegmentedControl` | `ToggleButtonGroup` + `ToggleButton` | `selectionMode="single"`、`selectedKeys={[value]}`、`onSelectionChange` 收到 `Set`，取第一个 key |
+| Radix `SegmentedControl` | `ToggleButtonGroup` + `ToggleButton`（+ `ToggleButtonGroupSeparator`） | `selectionMode="single"`、`selectedKeys={[value]}`、`onSelectionChange` 收到 `Set`，取第一个 key；**分隔线要放进除第一项外的每个 `ToggleButton` 里**（官方 anatomy），不写的话按钮会糊成一块、和 HeroUI 文档里的样式不一样 |
+| 多选开关组 / 可点亮标签 | `ToggleButtonGroup`（`selectionMode="multiple"`）+ `ToggleButton`（+ `ToggleButtonGroupSeparator`） | 一组独立开关不要渲染成一排裸 `ToggleButton`：它们和旁边的操作按钮外观一样，用户分不清「开关」和「按钮」；用组容器 + 分隔线，选中态交给组的 `selectedKeys` 受控 |
 | Radix `Select` / 原生 `select` | `SelectRoot` + `SelectTrigger` + `SelectValue` + `SelectIndicator` + `SelectPopover` + `ListBox` + `ListBoxItem` | `variant="secondary"`；每个 item 给 `id` 与 `textValue` |
 | Radix `Slider` | `SliderRoot` + `SliderTrack` + `SliderFill` + `SliderThumb` | `value` 是数字，`onChange` 先判断 `typeof value === 'number'` |
 | Radix `Badge` / 原生小胶囊 | `Chip` | `size="sm" variant="soft"`，`color` 取 `default` / `accent` / `success` / `warning` / `danger` |
@@ -47,6 +48,7 @@ HeroUI 既有 `Switch`（带 `.Content` / `.Control` / `.Thumb` 静态属性）�
 - 控件默认 `size="sm"`（32px），只有提示条里的行内小动作可以更小。
 - 单行输入、多行输入、下拉统一 `variant="secondary"`（白卡上有浅灰底，深色下自动适配）；不要在插件里覆写 `--field-*`。
 - 蓝色只给可操作 / 当前状态的控件：主操作 `variant="primary"`，普通次操作 `variant="secondary"` / `variant="tertiary"`，危险操作 `variant="danger-soft"`。
+- 按钮层级统一：`primary` 只给保存 / 提交类主操作（一屏最多一个）；`secondary` 给会改变状态或数据的动作（安装 Hook、立即拉取、添加、重试）；`tertiary` 给查看 / 预览 / 刷新 / 复制 / 显示隐藏这类辅助动作；`danger-soft` 给破坏性动作（卸载、删除、重置基线、清空）；确认弹窗里的最终确认键用 `danger`。列表行里的状态由 `Chip` 承担，按钮保持安静。
 
 ## 布局仍然归插件
 

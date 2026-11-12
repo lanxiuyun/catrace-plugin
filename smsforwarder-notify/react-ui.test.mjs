@@ -93,7 +93,7 @@ const eventFor = (messages, extra = {}) => ({ id: 'event', revision: 1, sticky: 
 test('standalone manifest selects React with the requested date version', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'))
   assert.equal(manifest.uiFramework, 'react')
-  assert.equal(manifest.version, '2026.11.11')
+  assert.equal(manifest.version, '2026.11.12')
   assert.equal(manifest.sidecar.command, 'node')
 })
 

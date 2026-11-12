@@ -566,7 +566,7 @@ export default function GithubNotifySettings() {
                 === 'poll'
         }, '立即拉取'), h(Button, {
             size: 'sm',
-            variant: 'secondary',
+            variant: 'tertiary',
             onClick: sendTest,
             isDisabled: !!state.busy && state.busy
                 !== 'test' || state.busy
