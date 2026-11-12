@@ -48,23 +48,23 @@
 
 ## 3. React UI 合同
 
-宿主加载模块前注入按插件 id 绑定的 `plugin`。模块使用宿主的同一个 React 实例：
+宿主加载模块前注入按插件 id 绑定的 `plugin`。模块使用宿主的同一个 React 实例和 HeroUI 组件库（设置页控件统一 HeroUI，规范见 [HeroUI 设置页约定](.agent/features/shared-ui/hero-ui-settings.md)）：
 
 ```js
-const { createElement: h, useState, useEffect } = globalThis.__CATRACE_REACT__
-const { Button } = globalThis.__CATRACE_RADIX__
+const { createElement: h, useState } = globalThis.__CATRACE_REACT__
+const { Button, Input } = globalThis.__CATRACE_HEROUI__
 
-export default function Card({ event, isHovered, remainingMs, totalMs, onClose, onAction }) {
-  return h('section', { className: 'my-plugin-card' },
-    h('h3', null, event.title),
-    h('p', null, event.body),
-    h(Button, { onClick: () => onAction?.('ack') }, '知道了'),
-    h('button', { type: 'button', onClick: onClose, 'aria-label': '关闭' }, '×'))
+export default function Settings() {
+  const [token,setToken] = useState('')
+  return h('section',{className:'my-plugin-card'},
+    h(Input,{variant:'secondary',value:token,onChange:event => setToken(event.target.value),'aria-label':'Token'}),
+    h(Button,{size:'sm',variant:'primary',onClick:() => save(token)},'保存'))
 }
 ```
 
 - Card 导出 `default` / `Card` / `card`；设置面板导出 `default` / `Settings` / `settings`，使用普通 React 函数组件与 hooks。
-- `__CATRACE_REACT__` 是 React 命名空间；`__CATRACE_RADIX__` 是 Radix Themes 命名空间，宿主提供主题上下文。也可使用原生 React 表单控件。
+- `__CATRACE_REACT__` 是 React 命名空间；`__CATRACE_HEROUI__` 是 HeroUI v3 命名空间，组件样式与深浅色由宿主页面提供，插件不用自带控件皮肤。用扁平导出（`SwitchRoot` / `SwitchContent` / `SelectRoot` / `SelectTrigger` …），不用 `Switch.Content` 这类复合静态属性。
+- `__CATRACE_RADIX__` 是 Radix Themes 命名空间，只为尚未迁移的旧卡片 / 旧设置页保留；新代码不要再用。宿主没有 `__CATRACE_HEROUI__` 时设置页应显式抛错，不要静默退回原生控件。
 - Card props 为 `event`、`isHovered`、`remainingMs`、`totalMs`，动作通过 `onClose()` / `onAction(actionId)` 回调。业务动作在后台 / sidecar 中处理。
 - Blob 模块必须自包含：不能 bare import 包，也不能相对 import 兄弟文件。需要拆分源码时，先构建为单文件 ESM，再交付清单入口。
 - effects 清理监听、计时器、观察器和请求；异步返回检查卸载 / 请求世代，不覆盖新的会话或表单草稿。
@@ -73,6 +73,9 @@ export default function Card({ event, isHovered, remainingMs, totalMs, onClose, 
 ## 4. 布局与状态
 
 - settings 根只提供业务内容，页面边距、最大宽度、详情导航和主开关由宿主管理。
+- 控件统一 HeroUI：输入 / 多行输入 / 下拉默认 `variant="secondary"`，按钮 `size="sm"`（主操作 `primary`、次操作 `secondary` / `tertiary`、危险 `danger-soft`），开关 / 复选框用 `isSelected` + `onChange`，分段选择用 `ToggleButtonGroup` + `ToggleButton`。详见 [HeroUI 设置页约定](.agent/features/shared-ui/hero-ui-settings.md)。
+- 不要用 Tailwind utility class（`flex` / `gap-2` / `w-full` 等）：宿主的 Tailwind 只扫描宿主源码，插件里写的工具类不会生成。
+- 不要用 `.card` / `.badge` / `.header` / `.progress-bar` 这类 HeroUI 全局裸类名贴在原生 div 上；插件自有 class 一律加插件前缀。
 - class / style id 使用插件前缀；尺寸用 rem（1px 边框、blur、SVG viewBox 除外）。样式注入要支持同 document 的内容更新。
 - 使用 `--ct-*` 主题 token；数据中的颜色值、文件路径、正则不能当 CSS 变量处理。
 - 自动隐藏进度条使用 CSS animation + `--toast-auto-hide-ms`，hover 与宿主暂停状态同源，恢复不重写 totalMs。

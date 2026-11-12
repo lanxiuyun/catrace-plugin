@@ -21,7 +21,7 @@ const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
  */
 const read = (name) => readFileSync(join(ROOT, name), 'utf8').replace(/\r\n/g, '\n')
 
-/** UI is self-contained ESM using the host's React and Radix namespaces. */
+/** UI is self-contained ESM using the host's React instance; the card stays on Radix, settings use HeroUI. */
 /** 宿主保留 kind，插件不得占用 */
 const RESERVED_KINDS = ['rest', 'water', 'agent', 'permission', 'update', 'rest-timer', 'sdk']
 
@@ -74,15 +74,28 @@ test('manifest：声明的脚本都在插件目录内且存在', () => {
 
 test('ui/settings: React namespaces only, self-contained ESM and function exports', () => {
   assert.equal(manifest.uiFramework, 'react')
-  assert.equal(manifest.version, '2026.11.09')
+  assert.equal(manifest.version, '2026.11.11')
   for (const file of ['ui.mjs', 'settings.mjs']) {
     const source = read(file)
     assert.doesNotMatch(source, /^\s*import\s|\bimport\s*\(/m, `${file} must not import sibling or bare modules`)
     assert.doesNotMatch(source, /__CATRACE_VUE__|__CATRACE_NAIVE__|onUpdate:|\bsetup\s*\(/)
     assert.match(source, /globalThis\.__CATRACE_REACT__/)
-    assert.match(source, /globalThis\.__CATRACE_RADIX__/)
     assert.match(source, /export default function/)
     assert.doesNotMatch(source, /template:\s*`/)
+  }
+  // 卡片还没迁移，继续用宿主注入的 Radix；设置页必须改用同一份 HeroUI。
+  assert.match(read('ui.mjs'), /globalThis\.__CATRACE_RADIX__/, '卡片仍从宿主 Radix 命名空间取组件')
+  const settings = read('settings.mjs')
+  assert.match(settings, /globalThis\.__CATRACE_HEROUI__/, '设置页必须从宿主 HeroUI 命名空间取组件')
+  assert.doesNotMatch(settings, /__CATRACE_RADIX__/, '设置页不得再用 Radix')
+  // HeroUI 一律扁平导出：不能用 Switch.Content / Select.Trigger 这类复合静态属性。
+  assert.doesNotMatch(
+    settings,
+    /\b(?:Switch|Select|Tooltip|Slider|Checkbox|Alert|NumberField)\.(?:Content|Control|Thumb|Root|Group|Input|Trigger|Value|Indicator|Popover|Item|Description|IncrementButton|DecrementButton)\b/,
+    '不要用 HeroUI 复合静态属性',
+  )
+  for (const name of ['Button', 'Input', 'TextArea', 'NumberFieldRoot', 'NumberFieldGroup', 'NumberFieldInput', 'NumberFieldIncrementButton', 'NumberFieldDecrementButton', 'SwitchRoot', 'SwitchContent', 'SwitchControl', 'SwitchThumb', 'ToggleButton', 'TooltipRoot', 'TooltipContent', 'Chip', 'AlertRoot']) {
+    assert.match(settings, new RegExp(`\\b${name}\\b`), `设置页应使用 HeroUI 扁平组件 ${name}`)
   }
 })
 
@@ -148,14 +161,26 @@ test('小窗卡片：走 standalone 外壳，且宽度不超过宿主 22.5rem �
 
 test('React inputs are controlled and numeric edits stay strings until blur/save', () => {
   const source = read('settings.mjs')
-  assert.ok((source.match(/h\(TextField\.Root/g) || []).length >= 2)
-  assert.match(source, /h\(TextArea/)
+  // 单行 / 多行输入统一 secondary 灰底。
+  assert.match(source, /h\(Input,\{[^}]*variant:'secondary'/, '单行输入用 HeroUI Input（secondary）')
+  assert.match(source, /h\(TextArea,\{[^}]*variant:'secondary'/, '多行输入用 HeroUI TextArea（secondary）')
+  // 数字输入用 HeroUI 默认 NumberField：Group 包住 Input 与左右 −/+ 按钮，值仍是字符串。
+  assert.match(source, /h\(NumberFieldRoot,\{[^}]*variant:'secondary'/, '数字输入用 HeroUI NumberField（secondary）')
+  assert.match(source, /h\(NumberFieldGroup,/, 'NumberField 用 Group 包住输入与步进按钮')
+  assert.match(source, /h\(NumberFieldDecrementButton,\{'aria-label':'减少'\}\)/, '数字输入左侧要有 − 按钮')
+  assert.match(source, /h\(NumberFieldInput,\{onBlur:/, '数字输入的 onBlur 仍触发保存')
+  assert.match(source, /h\(NumberFieldIncrementButton,\{'aria-label':'增加'\}\)/, '数字输入右侧要有 + 按钮')
+  assert.match(source, /Number\.isFinite\(next\)/, '数字 onChange 只接受有限数')
+  assert.match(source, /String\(Math\.round\(next\)\)/, '数字仍写回字符串，compose/clamp 不变')
+  assert.match(source, /formatOptions:\{useGrouping:false\}/, '数字格式关掉千分位')
   assert.ok((source.match(/onChange:/g) || []).length >= 3)
   assert.ok((source.match(/\bvalue:/g) || []).length >= 3)
   assert.match(source, /function clamp\(/)
   assert.match(source, /onBlur/)
   assert.match(source, /scheduleSave|saveNow/)
-  assert.match(source, /onCheckedChange:/)
+  // HeroUI 的开关是扁平 SwitchRoot：受控 isSelected + onChange（不再是 Radix 的 onCheckedChange）。
+  assert.match(source, /h\(SwitchRoot,\{[^}]*isSelected:/, '开关用 HeroUI 扁平 SwitchRoot')
+  assert.match(source, /isDisabled:!ready/, '禁用态用 HeroUI 的 isDisabled')
 })
 
 test('默认值必须与 sidecar 的 lib/config.mjs 一致（防两处漂移）', () => {
@@ -268,12 +293,12 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   // 3) 改完要看到效果：外观改动在下次展开时生效（卡片正文有这句说明），不再是自动重开
   assert.match(settings, /下次展开状态卡时生效/, '外观改动要说明"下次展开生效"（否则用户以为设置没用）')
   assert.match(read('ui.mjs'), /setGuiUrl\(''\)/, 'ui.mjs 收起要清 iframe 地址，保证下次展开生效')
-  // 4) 用标签云呈现：点亮 = 显示，悬停有说明
-  assert.match(settings, /'aria-pressed':Boolean\(form\[item\.key\]\)/, '显示项应做成可点标签（checkable）')
-  assert.match(settings, /onClick:\(\) => update/, '标签必须绑定 onUpdate:checked')
-  assert.match(settings, /h\(Tooltip/, '标签要有 hover 说明')
-  // tooltip 必须限宽换行：说明是长句，不限宽会拉成一条横线撑出窗口被裁（用户实测截图）
-  assert.match(settings, /maxWidth:'17rem',whiteSpace:'normal',overflowWrap:'anywhere'/, 'chip 的 tooltip 要限宽并允许换行')
+  // 4) 用标签云呈现：点亮 = 显示，悬停有说明（HeroUI 扁平 ToggleButton + Tooltip）
+  assert.match(settings, /'aria-pressed':Boolean\(form\[item\.key\]\)/, '显示项应做成可点标签（toggle）')
+  assert.match(settings, /isSelected:Boolean\(form\[item\.key\]\)/, '标签选中态由 isSelected 受控')
+  assert.match(settings, /onChange:selected => update\(\{\[item\.key\]:Boolean\(selected\)\}\)/, '标签必须绑定状态更新')
+  assert.match(settings, /h\(TooltipRoot/, '标签要有 hover 说明')
+  assert.match(settings, /h\(TooltipContent/, 'tooltip 文案放 TooltipContent（HeroUI 自带限宽换行）')
   const main = read('runtime/main.mjs')
   assert.match(main, /cropFlagsFor\(config\)/, 'sidecar 必须用 config 模块的 cropFlagsFor 生成裁剪项（单一真相）')
   // 宿主不会把新配置推给运行中的 sidecar，所以设置页必须自己 push
@@ -309,7 +334,7 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   assert.match(settings, /'小窗外观'/, '卡片标题应为「小窗外观」')
   assert.ok(!/└/.test(settings), '不要用 └ 前缀凑层级（用分组小标题）')
   assert.ok(!/\*\*点亮/.test(settings), '说明文案里不要出现 markdown 星号（宿主不渲染 markdown）')
-  assert.match(settings, /dsh-chat-settings__chip/, 'chip 描边要用自己的 CSS 类（checkable 的 NTag 会忽略 bordered）')
+  assert.match(settings, /dsh-chat-settings__chip/, '显示项保留 dsh-chat-settings__chip 测试钩子 class')
   assert.match(settings, /dsh-chat-settings__block/, '全宽块要自造（自定义 CSS 区用）')
   // 行排版自造（field）：宿主 SettingRow 只保证 ≈4rem 右侧余量，desc 一长就把输入框压成「23…」（实测截图）
   assert.match(settings, /dsh-chat-settings__field/, '输入/标签行要用自造的 field 排版（说明整行在下）')
@@ -325,12 +350,11 @@ test('设置页：所有布尔开关必须"能存也能读"（漏了就等于「
   const tagsRules = settings.match(/\.dsh-chat-settings__tags\s*\{[^}]*\}/g) || []
   assert.equal(tagsRules.length, 1, `__tags 规则只能有一条（实际 ${tagsRules.length} 条，多出来的会互相覆盖）`)
   assert.match(tagsRules[0], /gap:\s*0\.5rem/, 'chip 之间必须有间距')
-  // 2) naive-ui 没有 NInput.Textarea（多行必须 type:'textarea'），否则会掉进兜底分支丢 placeholder
-  assert.ok(!/h\(NInput\.Textarea/.test(settings), '不要用 NInput.Textarea（naive-ui 里不存在）')
-  assert.match(settings, /h\(TextArea/, '多行输入使用 Radix TextArea')
-  // 3) 未选中的 chip 必须有可见描边（checkable 的 NTag 会忽略 bordered，得自己画）
-  assert.match(settings, /\.dsh-chat-settings__chip:not\(\.is-on\)\s*\{[^}]*border:\s*1px solid/, '未选中 chip 要有自己的描边')
-  assert.match(settings, /\.dsh-chat-settings__chip:not\(\.is-on\)\s*\{[^}]*background:/, '未选中 chip 要有底色（否则看起来像纯文字）')
+  // 2) 多行输入用 HeroUI 扁平 TextArea（不能掉进复合入口）
+  assert.match(settings, /h\(TextArea/, '多行输入使用 HeroUI TextArea')
+  // 3) 选中/未选中状态交给 HeroUI ToggleButton 的 isSelected，不再自绘 chip 皮肤
+  assert.match(settings, /h\(ToggleButton,\{[^}]*isSelected:/, '显示项用 HeroUI 扁平 ToggleButton 承载选中态')
+  assert.ok(!/\.dsh-chat-settings__chip\s*\{/.test(settings), '不要再自绘 chip 皮肤（HeroUI 负责控件外观）')
   // 4) class 速查表：不给清单用户不知道改什么
   assert.match(main, /guiClasses: methodGuiClasses/, 'sidecar 必须提供 class 速查 RPC')
   assert.match(settings, /call\('guiClasses'\)/, '设置页应拉取 class 速查表')

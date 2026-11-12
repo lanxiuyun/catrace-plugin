@@ -1,4 +1,4 @@
-﻿# PasteDrop worker — Windows PowerShell 常驻进程（内含 Add-Type C# 全局键盘钩子）。
+# PasteDrop worker — Windows PowerShell 常驻进程（内含 Add-Type C# 全局键盘钩子）。
 #
 # 为什么 PowerShell：全局低级键盘钩子（WH_KEYBOARD_LL）需要 Win32 消息循环，
 # Node 纯 JS 做不到；而 PowerShell 是 Windows 标配，无需安装任何额外依赖
@@ -12,7 +12,7 @@
 # 超时由 Node taskkill 兜底。
 #
 # 配置来自环境变量（Node sidecar spawn 时注入）：
-#   CATRACE_PD_SAVE_SCOPE    both | desktop | explorer
+#   CATRACE_PD_SAVE_SCOPE    both（固定值；保留参数只为兼容旧 sidecar，桌面上已没有「保存位置」设置项）
 #   CATRACE_PD_NAME_PREFIX   文件名前缀
 #   CATRACE_PD_SAVE_FORMAT   auto | png | jpg
 

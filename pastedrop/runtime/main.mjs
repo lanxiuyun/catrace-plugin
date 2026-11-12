@@ -54,8 +54,6 @@ const pluginId = process.env.CATRACE_PLUGIN_ID || 'pastedrop'
 const isWindows = process.platform === 'win32'
 
 const DEFAULT_CONFIG = {
-  /** both = 桌面 + 资源管理器当前文件夹（PasteDrop 原生行为） */
-  saveScope: 'both',
   namePrefix: 'PasteDrop',
   /** auto = 原始 PNG 或无损转 PNG；png / jpg 强制格式 */
   saveFormat: 'auto',
@@ -90,9 +88,6 @@ function respond(requestId, ok, result, error) {
 
 function normalizeConfig(input = {}) {
   const next = { ...config }
-  if (input.saveScope === 'desktop' || input.saveScope === 'explorer' || input.saveScope === 'both') {
-    next.saveScope = input.saveScope
-  }
   if (typeof input.namePrefix === 'string') next.namePrefix = input.namePrefix.trim() || 'PasteDrop'
   if (input.saveFormat === 'auto' || input.saveFormat === 'png' || input.saveFormat === 'jpg') {
     next.saveFormat = input.saveFormat
@@ -103,7 +98,8 @@ function normalizeConfig(input = {}) {
 function workerEnv() {
   return {
     ...process.env,
-    CATRACE_PD_SAVE_SCOPE: config.saveScope,
+    /** 拦截范围固定为桌面 + 资源管理器当前文件夹（PasteDrop 原生行为），不再提供设置项。 */
+    CATRACE_PD_SAVE_SCOPE: 'both',
     CATRACE_PD_NAME_PREFIX: config.namePrefix,
     CATRACE_PD_SAVE_FORMAT: config.saveFormat,
   }
@@ -291,7 +287,6 @@ function stopWorker() {
 }
 
 function applyHostConfig(input) {
-  const prevScope = config.saveScope
   const prevPrefix = config.namePrefix
   const prevFormat = config.saveFormat
   config = normalizeConfig(input)
@@ -303,7 +298,6 @@ function applyHostConfig(input) {
   }
 
   const workerRelevantChanged =
-    config.saveScope !== prevScope ||
     config.namePrefix !== prevPrefix ||
     config.saveFormat !== prevFormat
 

@@ -159,11 +159,9 @@ DSH Desktop（本机 web 服务）──反代──┘                         
 消息与费用」分组，逐行给出**选择器 + 一句说明 + 「插入」按钮**（点一下就把规则骨架写进输入框）。
 清单在 `runtime/lib/gui-classes.mjs`，并有测试锁住"不许与实现漂移"（`buildCropCss` 用到的语义后缀必须在表里）。
 
-版式上的两个实现约束（宿主/Naive 的脾气，改 UI 前先看）：
-- `NTag` 在 `checkable` 时**忽略 `bordered`**（边框层条件是 `!checkable`），未选中就是透明底 → chip 的"描边"
-  由我们自己的 `.dsh-chat-settings__chip` 画。
-- 宿主的 `SettingRow` 只有 `title`/`desc` + 默认 slot，slot 落在**右列**，**没有整行模式** → 全宽内容要自造块
-  （`.dsh-chat-settings__block`）。
+版式上的约束（2026-11 起设置页控件统一 HeroUI，旧 NTag/SettingRow 说法已失效）：
+- 显示项标签云用 HeroUI `ToggleButton`（`isSelected` 承载选中态，`aria-pressed` 仍保留），不要再自绘 chip 描边皮肤；HeroUI 的选中/未选中底色由宿主样式负责。
+- 分组小标题 + 白色卡片的布局仍由本插件自己的 `dsh-chat-settings__*` class 负责；宿主不再提供 `SettingRow`，全宽内容用插件自造的 `__block`，不要依赖宿主布局类。
 
 ### 改设置要不要重启插件？
 

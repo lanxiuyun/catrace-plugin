@@ -10,7 +10,7 @@ const flush=async () => {for(let i=0;i<40;i++)await Promise.resolve()}
 const read=file => readFileSync(join(ROOT,file),'utf8').replace(/\r\n/g,'\n')
 
 function harness(api={}) {
-  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
+  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_HEROUI__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
   const before=new Map(globals.map(key => [key,{present:Object.hasOwn(globalThis,key),value:globalThis[key]}]))
   const instances=new Map()
   const timeouts=new Map()
@@ -35,6 +35,15 @@ function harness(api={}) {
     },
   }
   globalThis.__CATRACE_RADIX__={Button:'RadixButton',Badge:'RadixBadge',Switch:'RadixSwitch',TextField:{Root:'RadixTextField'},TextArea:'RadixTextArea',Tooltip:'RadixTooltip'}
+  // 设置页走宿主注入的 HeroUI 扁平导出；stub 成字符串组件类型即可按类型断言。
+  globalThis.__CATRACE_HEROUI__={
+    AlertRoot:'HeroAlert',AlertIndicator:'HeroAlertIndicator',AlertContent:'HeroAlertContent',AlertDescription:'HeroAlertDescription',
+    Button:'HeroButton',Chip:'HeroChip',Input:'HeroInput',
+    NumberFieldRoot:'HeroNumberFieldRoot',NumberFieldGroup:'HeroNumberFieldGroup',NumberFieldInput:'HeroNumberFieldInput',
+    NumberFieldIncrementButton:'HeroNumberFieldIncrementButton',NumberFieldDecrementButton:'HeroNumberFieldDecrementButton',
+    SwitchRoot:'HeroSwitchRoot',SwitchContent:'HeroSwitchContent',SwitchControl:'HeroSwitchControl',SwitchThumb:'HeroSwitchThumb',
+    TextArea:'HeroTextArea',ToggleButton:'HeroToggleButton',TooltipRoot:'HeroTooltipRoot',TooltipContent:'HeroTooltipContent',
+  }
   globalThis.__CATRACE_CREATE_PLUGIN_API__=() => ({
     config:{get:async () => ({}),set:async () => {}},sidecar:{request:async () => ({contract:7,config:{},flat:[]})},
     dialog:{pickFolder:async () => null},shell:{openExternal:async () => {}},theme:{css:css => css},...api,
@@ -95,7 +104,7 @@ function text(node) {
   return [node.props?.className,node.props?.title,node.props?.placeholder,text(node.props?.children)].filter(Boolean).join(' ')
 }
 const click=node => node.props.onClick?.({stopPropagation(){},preventDefault(){}})
-const button=(tree,label) => nodes(tree,node => node.type==='RadixButton' || node.type==='button').find(node => text(node.props.children)===label)
+const button=(tree,label) => nodes(tree,node => node.type==='HeroButton' || node.type==='RadixButton' || node.type==='button').find(node => text(node.props.children)===label)
 const chips=tree => nodes(tree,node => typeof node.props?.['aria-pressed']==='boolean' && String(node.props.className || '').includes('__chip'))
 const controls=(tree,type) => nodes(tree,node => node.type===type)
 
@@ -167,28 +176,42 @@ test('React settings: all appearance keys and custom CSS are loaded, edited, sav
     sidecar:{request:async (method,params) => {rpc.push({method,params});return {contract:7,config:{},flat:[{group:'整体',selector:'[class*="_header"]',desc:'官方顶栏'}]}}},
   })
   let tree=h.render()
-  assert.equal(chips(tree).length,4);assert.equal(controls(tree,'RadixSwitch').length,2)
+  assert.equal(chips(tree).length,4);assert.equal(controls(tree,'HeroToggleButton').length,4);assert.equal(controls(tree,'HeroSwitchRoot').length,2)
   const chipByLabel=label => chips(h.render()).find(node => text(node.props.children)===label)
   assert.ok(!text(tree).includes('对话/轨迹 标签'))
-  click(chipByLabel('官方顶栏'));tree=h.render();assert.ok(text(tree).includes('对话/轨迹 标签'))
+  chipByLabel('官方顶栏').props.onChange(true);tree=h.render();assert.ok(text(tree).includes('对话/轨迹 标签'))
   assert.ok(!text(tree).includes('「…」更多操作'))
-  click(chipByLabel('顶栏右侧图标'));tree=h.render();assert.equal(chips(tree).length,11)
-  for(const chip of chips(tree))if(chip.props['aria-pressed'])click(chip)
-  for(const control of controls(tree,'RadixSwitch'))control.props.onCheckedChange(false)
-  const cssInput=controls(h.render(),'RadixTextArea')[0]
+  chipByLabel('顶栏右侧图标').props.onChange(true);tree=h.render();assert.equal(chips(tree).length,11)
+  // 数字输入是 HeroUI 默认 NumberField：三个字段、secondary、−/+ 步进范围正确；越界值不落盘。
+  const numRoots=controls(tree,'HeroNumberFieldRoot')
+  assert.equal(numRoots.length,3)
+  const numByKey=key => controls(h.render(),'HeroNumberFieldRoot').find(node => node.props['aria-label']===key)
+  const portField=numByKey('httpPort')
+  assert.equal(portField.props.value,23457);assert.equal(portField.props.variant,'secondary')
+  assert.equal(portField.props.minValue,0);assert.equal(portField.props.maxValue,65535);assert.equal(portField.props.step,1)
+  assert.equal(numByKey('noticePollMs').props.step,100)
+  assert.equal(numByKey('noticePollMs').props.minValue,500);assert.equal(numByKey('noticePollMs').props.maxValue,30000)
+  for(const input of controls(tree,'HeroNumberFieldInput'))assert.equal(typeof input.props.onBlur,'function')
+  numByKey('noticePollMs').props.onChange(3000)
+  numByKey('httpPort').props.onChange(99999) // 越界：不写表单（等失焦夹回）
+  for(const chip of chips(tree))if(chip.props['aria-pressed'])chip.props.onChange(false)
+  for(const control of controls(h.render(),'HeroSwitchRoot'))control.props.onChange(false)
+  const cssInput=controls(h.render(),'HeroTextArea')[0]
   assert.ok(cssInput);cssInput.props.onChange({target:{value:'/* marker */'}})
   await h.timers()
   assert.ok(saved.length>0)
   const last=saved.at(-1)
   const expected=['showRail','showHeader','showTabs','showHeaderIcons','showHeaderMore','showHeaderPanel','showHeaderTitle','showHeaderChips','showComposerStatus','showMessageMeta','showHeaderLabels','compactSpacing','noticeEnabled']
   for(const key of expected)assert.equal(last[key],false,`must persist ${key}=false`)
+  assert.equal(last.noticePollMs,3000,'NumberField 改动要能落盘')
+  assert.equal(last.httpPort,23457,'越界数字不应落盘')
   assert.equal(last.customCss,'/* marker */')
   const block=read('settings.mjs').match(/const DEFAULTS = \{([\s\S]*?)\n\}/)[1]
   const keys=[...block.matchAll(/^\s*([A-Za-z]\w*):/gm)].map(match => match[1])
   assert.ok(keys.length>=10);for(const key of keys)assert.ok(key in last,`missing default key ${key}`)
   assert.deepEqual(rpc.filter(call => call.method==='applyConfig').at(-1).params.config,last)
   const count=saved.length
-  controls(h.render(),'RadixTextArea')[0].props.onChange({target:{value:'/* marker */'}})
+  controls(h.render(),'HeroTextArea')[0].props.onChange({target:{value:'/* marker */'}})
   await h.timers();assert.equal(saved.length,count,'same normalized config must not write again')
   click(button(h.render(),'插入'));await h.timers();assert.match(saved.at(-1).customCss,/\[class\*="_header"\] \{/)
   click(button(h.render(),'清空'));await h.timers();assert.equal(saved.at(-1).customCss,'')
@@ -199,13 +222,19 @@ test('React settings: status, polling controls, notices, appearance and CSS help
   const tree=h.render(),output=text(tree)
   for(const keyword of ['运行状态','小窗外观','状态通知','测试卡','状态卡端口','小窗页面端口','DSH 数据目录','运行环境','处理失败','紧凑留白','全部显示','恢复推荐','自定义样式（CSS）与 class 速查'])assert.ok(output.includes(keyword),keyword)
   for(const removed of ['对话（向 DSH 提问）','DSH 会话','跟随最新','固定到镜像卡','展开默认','显示条数','轮询间隔','打开小窗','小窗标题','启用即弹出','GUI 复用状态','已连上 DSH','本机服务','本机端口','官方界面端口','DSH 主目录','巡检间隔','后台服务','完成后停留','刷新状态'])assert.ok(!output.includes(removed),removed)
-  for(const input of controls(tree,'RadixTextField')) {assert.equal(typeof input.props.onChange,'function');assert.equal(typeof input.props.onBlur,'function');assert.ok('value' in input.props)}
+  for(const input of controls(tree,'HeroInput')) {assert.equal(typeof input.props.onChange,'function');assert.equal(typeof input.props.onBlur,'function');assert.ok('value' in input.props)}
+  // 数字输入：HeroUI 扁平 NumberField（Root 受控 value/onChange，Input 负责 onBlur 保存）。
+  const numRoots=controls(tree,'HeroNumberFieldRoot')
+  assert.equal(numRoots.length,3)
+  for(const num of numRoots) {assert.equal(num.props.variant,'secondary');assert.equal(typeof num.props.onChange,'function');assert.ok('value' in num.props);assert.equal(typeof num.props.minValue,'number');assert.equal(typeof num.props.maxValue,'number')}
+  for(const input of controls(tree,'HeroNumberFieldInput'))assert.equal(typeof input.props.onBlur,'function')
+  for(const type of ['HeroNumberFieldGroup','HeroNumberFieldDecrementButton','HeroNumberFieldIncrementButton'])assert.ok(controls(tree,type).length>=3,type)
 })
 
 test('React settings: unmount flushes dirty config and stops polling',async t => {
   const saved=[]
   const h=await settingsHarness(t,{config:{get:async () => ({}),set:async config => saved.push(config)}})
-  controls(h.render(),'RadixTextArea')[0].props.onChange({target:{value:'/* pending */'}})
+  controls(h.render(),'HeroTextArea')[0].props.onChange({target:{value:'/* pending */'}})
   await h.dispose()
   assert.equal(saved.at(-1).customCss,'/* pending */')
 })

@@ -10,7 +10,7 @@ const flush=async () => {for(let i=0;i<40;i++)await Promise.resolve()}
 const read=file => readFileSync(join(ROOT,file),'utf8').replace(/\r\n/g,'\n')
 
 function harness(api={}) {
-  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
+  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_HEROUI__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
   const before=new Map(globals.map(key => [key,{present:Object.hasOwn(globalThis,key),value:globalThis[key]}]))
   const instances=new Map()
   const timeouts=new Map()
@@ -35,6 +35,7 @@ function harness(api={}) {
     },
   }
   globalThis.__CATRACE_RADIX__={Button:'RadixButton',Badge:'RadixBadge',Switch:'RadixSwitch',TextField:{Root:'RadixTextField'},TextArea:'RadixTextArea',Tooltip:'RadixTooltip',Slider:'RadixSlider',SegmentedControl:{Root:'RadixSegments',Item:'RadixSegment'}}
+  globalThis.__CATRACE_HEROUI__={AlertRoot:'HeroAlert',AlertIndicator:'HeroAlertIndicator',AlertContent:'HeroAlertContent',AlertDescription:'HeroAlertDescription',Button:'HeroButton',Chip:'HeroChip',Input:'HeroInput',NumberFieldRoot:'HeroNumberField',NumberFieldGroup:'HeroNumberFieldGroup',NumberFieldInput:'HeroNumberFieldInput',NumberFieldIncrementButton:'HeroNumberFieldIncrement',NumberFieldDecrementButton:'HeroNumberFieldDecrement',SliderRoot:'HeroSlider',SliderTrack:'HeroSliderTrack',SliderFill:'HeroSliderFill',SliderThumb:'HeroSliderThumb',ToggleButton:'HeroToggleButton',ToggleButtonGroup:'HeroToggleButtonGroup'}
   globalThis.__CATRACE_CREATE_PLUGIN_API__=() => ({
     config:{get:async () => ({}),set:async () => {}},sidecar:{request:async () => ({contract:7,config:{},flat:[]})},
     dialog:{pickFolder:async () => null},shell:{openExternal:async () => {}},theme:{css:css => css},...api,
@@ -96,7 +97,7 @@ function text(node) {
 }
 const click=node => node.props.onClick?.({stopPropagation(){},preventDefault(){}})
 const labelText=node => node==null || node===false ? '' : Array.isArray(node) ? node.map(labelText).join('') : typeof node==='object' ? labelText(node.props?.children) : String(node)
-const button=(tree,label) => nodes(tree,node => node.type==='RadixButton' || node.type==='button').find(node => labelText(node.props.children)===label)
+const button=(tree,label) => nodes(tree,node => node.type==='HeroButton' || node.type==='RadixButton' || node.type==='button').find(node => labelText(node.props.children)===label)
 const chips=tree => nodes(tree,node => typeof node.props?.['aria-pressed']==='boolean' && String(node.props.className || '').includes('__chip'))
 const controls=(tree,type) => nodes(tree,node => node.type===type)
 
@@ -111,9 +112,9 @@ test('Agent React surfaces are self-contained functions, with reactive settings 
   h.render(mod.default);await flush()
   let tree=h.render(mod.default)
   for(const label of ['Agent 联动','事件通知策略','调试','提示音','任务完成','调用工具中','批准工具','回答问题','多题问答','Claude Code','Kimi'])assert.ok(text(tree).includes(label),label)
-  assert.equal(controls(tree,'RadixSlider')[0].props.value[0],0)
-  const segment=controls(tree,'RadixSegments')[0]
-  segment.props.onValueChange('raw');await flush()
+  assert.equal(controls(tree,'HeroSlider')[0].props.value,0)
+  const segment=controls(tree,'HeroToggleButtonGroup')[0]
+  segment.props.onSelectionChange(new Set(['raw']));await flush()
   assert.equal(saved.at(-1).debugView,'raw');assert.equal(saved.at(-1).showDebug,true)
   assert.equal(saved.at(-1).customMarker,'keep')
   assert.equal(Object.keys(saved.at(-1).eventModes).length,9)

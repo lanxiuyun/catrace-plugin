@@ -91,10 +91,11 @@
 
 ## 卡片可读性 / 设置页可编辑性（都是踩过的坑）
 
-1. **受控输入必须接 `onUpdate:value`**。设置页第一版用 `value` + `onChange`：Naive 的 NInput 有 `value`
+1. **受控输入必须接状态更新**。设置页第一版用 `value` + `onChange`：Naive 的 NInput 有 `value`
    就是受控，不接 update 就等于「打字打不进去」——用户的原话是「设置完全没办法调整」。
-   现在：文本字段 `onUpdate:value` 写回本地表单 → 500ms debounce → `plugin.config.set(整包)`；
-   数值字段先存**字符串**，失焦/保存时再钳制（边打字边钳制会把「12」变「6」）。
+   现在设置页走宿主注入的 HeroUI：`Input` / `TextArea` 用 `value` + `onChange` 写回本地表单 →
+   500ms debounce → `plugin.config.set(整包)`；数值字段先存**字符串**，失焦/保存时再钳制
+   （边打字边钳制会把「12」变「6」）。
 2. **`overflow-y: auto` 会隐式把 `overflow-x` 也算成 `auto`**。第一版消息区只写了 `overflow-y: auto`，
    于是任何不可断的长文本（工具参数里的绝对路径、长 JSON、长 URL）都会顶出一条横向滚动条
    （用户截图里那条长横线）。现在所有滚动容器显式 `overflow-x: hidden` + `overflow-wrap: anywhere`，
@@ -283,8 +284,10 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
 
 配置键 `showRail/showHeader/showTabs/showHeaderIcons/showHeaderTitle/showHeaderChips/showComposerStatus/showMessageMeta`
 （true = 在小窗里显示该元素），反代用 `cropFlagsFor(config)` 取反生成隐藏规则。
-设置页把它们渲染成一排**可点标签**（`NTag checkable` + `NTooltip`）：点亮 = 显示，点一下切换，悬停出说明；
-「官方顶栏」关掉时它的四个子标签自动变灰（禁用），免得用户点了没反应。
+设置页把它们渲染成一排**可点标签**（HeroUI 扁平 `ToggleButton` + `TooltipRoot/TooltipContent`）：
+点亮 = 显示，点一下切换，悬停出说明；「官方顶栏」关掉时它的子标签整组不渲染，免得用户点了没反应。
+控件一律从宿主注入的 `globalThis.__CATRACE_HEROUI__` 扁平导出取（`Button/Input/TextArea/SwitchRoot/...`），
+不再 `import`、也不用 `Switch.Content` 这类复合静态属性。
 清单只有一处真相（`config.mjs` 的 `SHOW_KEYS`）：设置页渲染/保存、`cropFlagsFor`、`guiSignature` 都从它取，
 并有测试锁住"任一开关都必须改变反代签名"（漏一个就是"设置没用"这类 bug）。
 
@@ -335,15 +338,17 @@ TTL 试到 168h 接受、720h 被拒 —— 说明宿主 `cookieMaxAgeDays` 默�
 |---|---|---|
 | 分组 | 主组 4 项 + 「**顶栏内部：**」+ 「**顶栏右侧图标内部：**」两个分组小标题；**不用 `└` 前缀**（显丑） | 用户明确否掉前缀符号 |
 | 依赖 | 父项未点亮时子组直接不渲染，控件使用 React 受控状态与原生事件 | 防止无效子项操作 |
-| chip 描边 | 未选中为描边淡底，选中为主题实底，使用原生 button 与 aria-pressed | 保持可见选中与键盘操作 |
+| 控件库 | 设置页全部用宿主注入的 HeroUI（`Input` / `TextArea` / `NumberFieldRoot` / `SwitchRoot` / `ToggleButton` / `Chip` / `AlertRoot`），卡片仍用 Radix | 与宿主插件详情页同一套外壳与控件语言 |
+| 选中态 | 显示项用 HeroUI 扁平 `ToggleButton`（`isSelected` + `aria-pressed`），选中/未选中外观由宿主 HeroUI 皮肤负责，插件不自绘 chip 皮肤 | 保持可见选中与键盘操作 |
 | 说明 | 卡片顶部一句总说明，选项细节放 Tooltip 或原生 title | 行里只保留紧凑选项 |
 | 全宽块 | 自定义 CSS 使用独立标题、说明、全宽 textarea 与示例 / 清空按钮 | 避免挤到窄控件列 |
 | class 速查 | `runtime/lib/gui-classes.mjs` 里 5 组 35 个选择器（布局/顶栏/左栏/对话区/消息与费用），每行「插入」按钮写入规则骨架；由 sidecar `guiClasses` RPC 供给 | 用户原话：「应该将所有的样式 class 都列出来一下，否则改的人都不知道应该怎么改」 |
 | 速查表不许漂移 | 测试从 `gui-proxy.mjs` 里抽出所有 `[class*="_x"]` 语义名，逐个断言在速查表里能查到（含 `[class*="_titleRow"] [class*="_label"]` 这种两段式，要 matchAll 全收） | 这条测试当场抓出漏掉的 `_label` |
 | 取不到数据要说话 | 速查表 RPC 失败时**把原因显示出来**（"多半是插件在跑旧代码"），不要静默不渲染 | 第一次上线时就踩了：sidecar 是旧的、`guiClasses` 不存在，界面什么都不显示，用户以为没做 |
 | 契约版本自检 | `runtime/main.mjs` 与 `settings.mjs` 各有一个 `CONTRACT_VERSION`（**改/加 RPC 方法时两边一起 +1**）；`status` 报出该值，不一致就在设置页顶部显示「侧车在跑旧代码，关掉再打开」 | 这是本插件最高频的困惑源（改代码后不重开插件） |
-| chip 间距 | `.dsh-chat-settings__tags` **只允许一条规则**（`gap: .5rem`）。曾经写了两条，后面那条 `gap: 0 0` 把前面盖掉 → chip 挤成一坨、看着像句子 | 用户反馈"你不来点 gap 之类的？" |
-| 多行输入 | 使用 React TextArea / 原生 textarea，value 与 onChange 受控 | 保持完整 CSS 文本和可调整高度 |
+| 显示项间距 | `.dsh-chat-settings__tags` **只允许一条规则**（`gap: .5rem`）。曾经写了两条，后面那条 `gap: 0 0` 把前面盖掉 → 标签挤成一坨、看着像句子 | 用户反馈"你不来点 gap 之类的？" |
+| 多行输入 | 使用 HeroUI TextArea（`variant="secondary"`），value 与 onChange 受控 | 保持完整 CSS 文本和可调整高度 |
+| 数字输入 | 使用 HeroUI 默认 NumberField（`NumberFieldRoot + Group + Input + Decrement/IncrementButton`，`variant="secondary"`、`formatOptions={{useGrouping:false}}`）；`value` 是数字、`onChange` 只收有限数并写回字符串，`onBlur` 夹回 min/max 后保存 | 用户实机反馈：数字框要有 −/+ 步进、灰底与页内其他输入一致 |
 | 断言 | 源码断言先剥注释，功能断言用 React 元素 / hook 回归 | 避免断言命中说明文字 |
 | 快捷操作 | 卡头右侧「全部显示」「恢复推荐」（`恢复推荐` = 回到 `DEFAULTS`） | 11 项手点太累 |
 | 文案 | 描述里**不写 markdown**（宿主 `card()` 不渲染 md，`**x**` 会原样显示成星号） | 上一版就是这么丑的 |

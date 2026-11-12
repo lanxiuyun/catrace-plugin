@@ -28,17 +28,29 @@ function harness(file, plugin = {}, exports = '') {
     },
   }
   React.useLayoutEffect = React.useEffect
-  const part = name => Object.fromEntries(['Root', 'Trigger', 'Content', 'Item', 'Title', 'Description', 'Action', 'Cancel'].map(key => [key, `${name}.${key}`]))
+  // Settings use the host's flat HeroUI exports; stub them as string component types.
   const context = {
     __CATRACE_REACT__: React,
-    __CATRACE_RADIX__: { Button: 'Button', TextField: part('TextField'), Switch: 'Switch', Badge: 'Badge', Select: part('Select'), AlertDialog: part('AlertDialog') },
+    __CATRACE_HEROUI__: {
+      AlertContent: 'HeroAlertContent', AlertDescription: 'HeroAlertDescription', AlertIndicator: 'HeroAlertIndicator', AlertRoot: 'HeroAlertRoot',
+      AlertDialogBackdrop: 'HeroAlertDialogBackdrop', AlertDialogBody: 'HeroAlertDialogBody', AlertDialogCloseTrigger: 'HeroAlertDialogCloseTrigger',
+      AlertDialogContainer: 'HeroAlertDialogContainer', AlertDialogDialog: 'HeroAlertDialogDialog', AlertDialogFooter: 'HeroAlertDialogFooter',
+      AlertDialogHeader: 'HeroAlertDialogHeader', AlertDialogHeading: 'HeroAlertDialogHeading', AlertDialogIcon: 'HeroAlertDialogIcon', AlertDialogRoot: 'HeroAlertDialogRoot',
+      Button: 'HeroButton', Chip: 'HeroChip', Input: 'HeroInput',
+      ListBox: 'HeroListBox', ListBoxItem: 'HeroListBoxItem',
+      NumberFieldDecrementButton: 'HeroNumberFieldDecrementButton', NumberFieldGroup: 'HeroNumberFieldGroup', NumberFieldIncrementButton: 'HeroNumberFieldIncrementButton',
+      NumberFieldInput: 'HeroNumberFieldInput', NumberFieldRoot: 'HeroNumberFieldRoot',
+      SelectIndicator: 'HeroSelectIndicator', SelectPopover: 'HeroSelectPopover', SelectRoot: 'HeroSelectRoot', SelectTrigger: 'HeroSelectTrigger', SelectValue: 'HeroSelectValue',
+      SwitchContent: 'HeroSwitchContent', SwitchControl: 'HeroSwitchControl', SwitchRoot: 'HeroSwitchRoot', SwitchThumb: 'HeroSwitchThumb',
+      Tab: 'HeroTab', TabIndicator: 'HeroTabIndicator', TabList: 'HeroTabList', TabListContainer: 'HeroTabListContainer', TabPanel: 'HeroTabPanel', TabsRoot: 'HeroTabsRoot',
+    },
     plugin, console, Date, Set, Uint8Array, crypto: globalThis.crypto,
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id },
     clearTimeout(id) { timers.delete(id) },
     window: { addEventListener: (name, callback) => listeners.set(name, callback), removeEventListener: name => listeners.delete(name) },
   }
   const source = readFileSync(new URL(file, import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /__CATRACE_VUE__|__CATRACE_NAIVE__|\$forceUpdate|\$nextTick|\$emit|\bimport\s/)
+  assert.doesNotMatch(source, /__CATRACE_VUE__|__CATRACE_NAIVE__|__CATRACE_RADIX__|\$forceUpdate|\$nextTick|\$emit|\bimport\s/)
   const code = source.replace('export default function ', 'function ').replace(/^export \{[^\n]+\}\s*$/gm, '')
   const name = file === './ui.mjs' ? 'SmsforwarderNotifyCard' : 'SmsforwarderNotifySettings'
   runInNewContext(`${code}\nglobalThis.testing = { Component: ${name}${exports ? `, ${exports}` : ''} }`, context)
@@ -67,14 +79,21 @@ function nodes(tree) {
 }
 function text(tree) { return typeof tree === 'string' ? tree : tree?.props?.children?.map(text).join('') || '' }
 function find(tree, predicate) { const found = nodes(tree).find(predicate); assert.ok(found, 'Expected element not found'); return found }
-function click(tree, label) { const node = find(tree, node => ['button', 'Button'].includes(node.type) && text(node) === label); node.props.onClick({ stopPropagation() {}, preventDefault() {} }); return node }
+function click(tree, label) { const node = find(tree, node => ['button', 'Button', 'HeroButton'].includes(node.type) && text(node) === label); node.props.onClick({ stopPropagation() {}, preventDefault() {} }); return node }
+// Tabs are HeroUI Tabs: Tab carries the key, TabsRoot owns the controlled selection.
+function selectTab(h, label) {
+  const tab = find(h.tree, node => node.type === 'HeroTab' && text(node) === label)
+  const root = find(h.tree, node => node.type === 'HeroTabsRoot')
+  root.props.onSelectionChange(tab.props.id)
+  return h.render()
+}
 const message = (id, minute = 0) => ({ id, text: `message ${id}`, speaker: 'Alice', receivedAt: 1700000000000 + minute * 60000 })
 const eventFor = (messages, extra = {}) => ({ id: 'event', revision: 1, sticky: true, payload: { noticeKind: 'chat', title: 'Chat', appName: 'QQ', packageName: 'com.tencent.mobileqq', threadKey: 'chat:abc', messages, threadCount: messages.length, ...extra }, actions: [{ id: 'block-app' }, { id: 'block-title' }] })
 
 test('standalone manifest selects React with the requested date version', () => {
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'))
   assert.equal(manifest.uiFramework, 'react')
-  assert.equal(manifest.version, '2026.11.09')
+  assert.equal(manifest.version, '2026.11.11')
   assert.equal(manifest.sidecar.command, 'node')
 })
 
@@ -155,16 +174,38 @@ test('settings retain tabs, RPC status, connection, filters, chat, tutorial and 
   const h = harness('./settings.mjs', plugin)
   h.render(); await h.flush()
   assert.ok(text(h.tree).includes('运行中'))
-  click(h.tree, '设置')
+  selectTab(h, '设置')
+  assert.equal(find(h.tree, node => node.type === 'HeroTabsRoot').props.selectedKey, 'settings')
+  assert.equal(find(h.tree, node => node.type === 'HeroTabList').props['aria-label'], 'SmsForwarder 设置')
+  assert.ok(nodes(h.tree).some(node => node.type === 'HeroTabListContainer' && (node.props.children || []).some(child => child?.type === 'HeroTabList')), 'tab list must sit in the HeroUI container')
+  assert.ok(nodes(h.tree).some(node => node.type === 'HeroTabPanel' && node.props.id === 'settings' && node.props['aria-label'] === 'SmsForwarder 设置面板'))
+  assert.ok(!text(h.tree).includes('运行中'), 'only the selected tab panel renders content')
   assert.ok(text(h.tree).includes('不看这些应用'))
   assert.ok(text(h.tree).includes('短信标题'))
   const token = find(h.tree, node => node.props['aria-label'] === 'Token')
   token.props.onChange({ target: { value: 'new-secret' } })
   h.render()
+  const cardSeconds = find(h.tree, node => node.props['aria-label'] === '卡片停留秒数')
+  assert.equal(cardSeconds.props.value, 10)
+  assert.equal(cardSeconds.props.minValue, 0)
+  assert.equal(cardSeconds.props.maxValue, 600)
+  const dedupe = find(h.tree, node => node.props['aria-label'] === '相同通知最短间隔秒数')
+  assert.equal(dedupe.props.value, 5)
+  assert.equal(dedupe.props.maxValue, 300)
   const port = find(h.tree, node => node.props['aria-label'] === 'Webhook 监听端口')
-  port.props.onChange({ target: { value: '19000' } })
+  assert.equal(port.props.value, 17890)
+  assert.equal(port.props.minValue, 1024)
+  assert.equal(port.props.maxValue, 65535)
+  assert.equal(port.props.variant, 'secondary')
+  assert.equal(port.props.step, 1)
+  assert.equal(port.props.formatOptions.useGrouping, false)
+  const portControls = nodes(port)
+  assert.equal(portControls.filter(node => node.type === 'HeroNumberFieldInput').length, 1)
+  assert.equal(portControls.filter(node => node.type === 'HeroNumberFieldDecrementButton' && node.props['aria-label'] === '减少').length, 1)
+  assert.equal(portControls.filter(node => node.type === 'HeroNumberFieldIncrementButton' && node.props['aria-label'] === '增加').length, 1)
+  port.props.onChange(19000)
   h.render()
-  click(h.tree, '教程')
+  selectTab(h, '教程')
   assert.ok(text(h.tree).includes('新建转发规则'))
   assert.ok(text(h.tree).includes('消息模板'))
   h.unmount()
@@ -178,23 +219,23 @@ test('filter controls validate regex, persist scopes, toggle rules and remove ap
   let stored = { token: 'secret', appBlacklist: ['Blocked'], appBlacklistPaused: ['Blocked'], mmsTitleBlacklist: ['短信标题'], filters: [] }
   const plugin = { config: { async get() { return stored }, async set(next) { stored = next } }, events: {} }
   const h = harness('./settings.mjs', plugin)
-  h.render(); await h.flush(); click(h.tree, '设置')
+  h.render(); await h.flush(); selectTab(h, '设置')
   const change = (label, value) => { find(h.tree, node => node.props['aria-label'] === label).props.onChange({ target: { value } }); h.render() }
   change('过滤关键词或正则', 'spam')
   change('过滤规则应用范围', 'QQ')
   click(h.tree, '添加到规则列表'); await h.tick(400)
   assert.equal(stored.filters[0].value, 'spam')
   assert.equal(stored.filters[0].appContains, 'QQ')
-  const ruleSwitch = find(h.tree, node => node.type === 'Switch' && String(node.props['aria-label']).startsWith('启用 不看'))
-  ruleSwitch.props.onCheckedChange(false); await h.tick(400)
+  const ruleSwitch = find(h.tree, node => node.type === 'HeroSwitchRoot' && String(node.props['aria-label']).startsWith('启用 不看'))
+  ruleSwitch.props.onChange(false); await h.tick(400)
   assert.equal(stored.filters[0].enabled, false)
   find(h.tree, node => node.props['aria-label'] === '移除 Blocked').props.onClick(); await h.tick(400)
   assert.equal(stored.appBlacklist.length, 0)
   assert.equal(stored.appBlacklistPaused.length, 0)
   find(h.tree, node => node.props['aria-label'] === '移除 短信标题 · 锁屏短信').props.onClick(); await h.tick(400)
   assert.equal(stored.mmsTitleBlacklist.length, 0)
-  const selects = nodes(h.tree).filter(node => node.type === 'Select.Root')
-  selects[2].props.onValueChange('regex'); h.render()
+  const selects = nodes(h.tree).filter(node => node.type === 'HeroSelectRoot')
+  selects[2].props.onChange('regex'); h.render()
   change('过滤关键词或正则', '[')
   click(h.tree, '添加到规则列表'); await h.tick(400)
   assert.equal(stored.filters.length, 1)
@@ -211,7 +252,7 @@ test('unmount flush preserves host disable and nested rule activation', async ()
     sidecar: { async request(method) { rpc.push(method); return method === 'getWebhookInfo' ? { token: 'generated-live' } : { running: true } } },
   }
   const h = harness('./settings.mjs', plugin)
-  h.render(); await h.flush(); click(h.tree, '设置')
+  h.render(); await h.flush(); selectTab(h, '设置')
   // Initialization's generated Token persistence must also omit host activation.
   assert.ok(writes.length > 0)
   assert.ok(writes.every(value => !Object.hasOwn(value, 'enabled')))
@@ -230,11 +271,51 @@ test('cross-window blacklist refresh preserves in-progress connection drafts', a
   let stored = { token: 'old', appBlacklist: [] }
   const plugin = { config: { async get() { return stored }, async set(value) { stored = value } }, events: {} }
   const h = harness('./settings.mjs', plugin)
-  h.render(); await h.flush(); click(h.tree, '设置')
+  h.render(); await h.flush(); selectTab(h, '设置')
   find(h.tree, node => node.props['aria-label'] === 'Token').props.onChange({ target: { value: 'draft' } })
   stored = { token: 'old', appBlacklist: ['Blocked from Toast'] }
   await h.listeners.get('catrace:plugin-config-changed')({ detail: { pluginId: 'smsforwarder-notify' } })
   assert.equal(find(h.tree, node => node.props['aria-label'] === 'Token').props.value, 'draft')
   assert.ok(text(h.tree).includes('Blocked from Toast'))
+  h.unmount()
+})
+
+test('destructive actions open the shared AlertDialog and only 确认 runs them', async () => {
+  const rpc = []
+  let stored = { token: 'secret' }
+  let liveToken = 'secret'
+  const plugin = {
+    config: { async get() { return stored }, async set(next) { stored = next } },
+    events: {},
+    sidecar: {
+      async request(method) {
+        rpc.push(method)
+        if (method === 'getWebhookInfo') return { token: liveToken }
+        if (method === 'regenerateToken') { liveToken = 'fresh-token'; return { token: liveToken } }
+        return { running: true }
+      },
+    },
+  }
+  const h = harness('./settings.mjs', plugin)
+  h.render(); await h.flush(); selectTab(h, '设置')
+  const dialogOpen = () => nodes(h.tree).some(node => node.type === 'HeroAlertDialogRoot' && node.props.isOpen === true)
+  assert.equal(dialogOpen(), false, 'the alert dialog starts closed')
+  click(h.tree, '重新生成')
+  assert.equal(dialogOpen(), true, '重新生成 opens the shared dialog')
+  assert.ok(text(h.tree).includes('重新生成会使手机端旧 Token 立即失效，确认？'))
+  assert.ok(text(h.tree).includes('取消'))
+  assert.ok(text(h.tree).includes('确认'))
+  click(h.tree, '取消'); await h.flush()
+  assert.equal(dialogOpen(), false, '取消 closes the dialog')
+  assert.ok(!rpc.includes('regenerateToken'), '取消 must not run the destructive action')
+  // The same single dialog serves the chat-history button.
+  click(h.tree, '清空聊天记录')
+  assert.ok(text(h.tree).includes('清空本机保存的全部会话气泡？'))
+  click(h.tree, '取消'); await h.flush()
+  assert.ok(!rpc.includes('clearChatHistory'), '取消 must not clear the chat history')
+  click(h.tree, '重新生成')
+  click(h.tree, '确认'); await h.flush()
+  assert.ok(rpc.includes('regenerateToken'), '确认 runs the destructive action')
+  assert.equal(stored.token, 'fresh-token')
   h.unmount()
 })

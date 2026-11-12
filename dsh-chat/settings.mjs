@@ -1,7 +1,13 @@
-/** DSH settings: React controls, saved configuration and sidecar status. */
-const { createElement: h, useState, useRef, useEffect } = globalThis.__CATRACE_REACT__ || {}
-const { Button, Badge, Switch, TextField, TextArea, Tooltip } = globalThis.__CATRACE_RADIX__ || {}
-if (typeof h !== 'function' || !Button) throw new Error('Catrace React/Radix runtime missing')
+/** DSH settings: Host-injected React + HeroUI controls, saved configuration and sidecar status. */
+const { createElement: h, useEffect, useRef, useState } = globalThis.__CATRACE_REACT__ || {}
+const {
+  AlertContent, AlertDescription, AlertIndicator, AlertRoot,
+  Button, Chip, Input,
+  NumberFieldDecrementButton, NumberFieldGroup, NumberFieldIncrementButton, NumberFieldInput, NumberFieldRoot,
+  SwitchContent, SwitchControl, SwitchRoot, SwitchThumb,
+  TextArea, ToggleButton, TooltipContent, TooltipRoot,
+} = globalThis.__CATRACE_HEROUI__ || {}
+if (typeof h !== 'function' || !Button || !Input || !NumberFieldRoot || !SwitchRoot || !ToggleButton) throw new Error('Catrace React/HeroUI runtime missing')
 
 const STYLE_ID = 'dsh-chat-settings-style'
 
@@ -41,55 +47,46 @@ const LIMITS = {
   guiPort: { min: 0, max: 65535 },
 }
 
+/**
+ * 只保留插件自己的排版：控件皮肤（按钮 / 输入 / 开关 / 标签 / 提示条）由宿主的
+ * `@heroui/styles` 提供，这里不再自绘。设置根不带 padding / max-width / 居中，
+ * 交给宿主插件详情页外壳。
+ */
 const SETTINGS_CSS = `
 .dsh-chat-settings { display: flex; flex-direction: column; gap: 1rem; font-size: 0.8125rem; min-width: 0; }
 .dsh-chat-settings__card {
-  border: 1px solid var(--ct-border, rgba(0,0,0,0.08)); border-radius: 0.75rem;
-  padding: 0.25rem 1rem 0.75rem; display: flex; flex-direction: column;
-  background: var(--ct-surface, #fff); min-width: 0;
+  background: var(--ct-surface, #fff); border: 1px solid var(--ct-border-card, var(--ct-border, rgba(0,0,0,0.08)));
+  border-radius: 1rem; padding: 0.5rem 1rem 0.75rem; display: flex; flex-direction: column; min-width: 0;
 }
-.dsh-chat-settings__head { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0 0.25rem; }
-.dsh-chat-settings__head-title { font-weight: 600; font-size: 0.875rem; color: var(--ct-text, #2e1065); }
-.dsh-chat-settings__head-actions { margin-left: auto; display: flex; align-items: center; gap: 0.25rem; }
-.dsh-chat-settings__head-desc { color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem; padding-bottom: 0.375rem; line-height: 1.5; }
-/* 小窗外观：chip 分组 */
+.dsh-chat-settings__head { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0 0.25rem; }
+.dsh-chat-settings__head-title { font-weight: 700; font-size: 0.8125rem; color: var(--ct-text-muted, #8a94a6); letter-spacing: 0.02rem; }
+.dsh-chat-settings__head-actions { margin-left: auto; display: flex; align-items: center; gap: 0.375rem; }
+.dsh-chat-settings__head-desc { color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem; padding-bottom: 0.5rem; line-height: 1.5; }
+/* 小窗外观：chip 分组（只有间距/换行，选中态由 HeroUI 负责） */
 .dsh-chat-settings__group { padding: 0.375rem 0 0.25rem; }
-.dsh-chat-settings__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.5rem; padding: 0.25rem 0 0.375rem; }
-/* 外观 chip 的描边与底色在浅色和深色主题下都保持可辨。 */
-.dsh-chat-settings__chip {
-  border-radius: 999px !important;
-  padding: 0.125rem 0.625rem !important;
-  line-height: 1.6 !important;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
-}
-.dsh-chat-settings__chip:not(.is-on) {
-  border: 1px solid rgba(124, 58, 237, 0.38) !important;
-  background: rgba(124, 58, 237, 0.07) !important;
-  color: var(--ct-text, #2e1065) !important;
-}
-.dsh-chat-settings__chip:not(.is-on):hover { border-color: rgba(124, 58, 237, 0.8) !important; background: rgba(124, 58, 237, 0.14) !important; }
-.dsh-chat-settings__chip.is-on { border: 1px solid transparent !important; }
+.dsh-chat-settings__group-title { font-size: 0.75rem; font-weight: 600; color: var(--ct-text-muted, #8a94a6); padding: 0.375rem 0 0.125rem; }
+.dsh-chat-settings__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
 /* 全宽块（自定义 CSS 区这类内容用） */
-.dsh-chat-settings__block { display: flex; flex-direction: column; gap: 0.375rem; }
-.dsh-chat-settings__block-title { font-weight: 600; font-size: 0.8125rem; color: var(--ct-text, #2e1065); }
+.dsh-chat-settings__block { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
 .dsh-chat-settings__block-desc { font-size: 0.75rem; color: var(--ct-text-muted, #8a94a6); line-height: 1.5; overflow-wrap: anywhere; }
-.dsh-chat-settings__block-actions { display: flex; gap: 0.375rem; }
+.dsh-chat-settings__block-actions { display: flex; gap: 0.5rem; }
 /* class 速查表 */
-.dsh-chat-settings__cls-note { font-size: 0.75rem; color: var(--ct-text-muted, #8a94a6); line-height: 1.5; padding-bottom: 0.375rem; }
-.dsh-chat-settings__cls-note.is-warn { color: #b45309; background: rgba(245, 158, 11, 0.08); border-radius: 0.375rem; padding: 0.5rem 0.625rem; margin-top: 0.5rem; }
+.dsh-chat-settings__cls-note { font-size: 0.75rem; color: var(--ct-text-muted, #8a94a6); line-height: 1.5; padding: 0.25rem 0; overflow-wrap: anywhere; }
 .dsh-chat-settings__cls-group { font-size: 0.75rem; font-weight: 600; color: var(--ct-text-muted, #8a94a6); padding: 0.5rem 0 0.125rem; }
 .dsh-chat-settings__cls-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.125rem 0; min-width: 0; }
 .dsh-chat-settings__cls-selector { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.6875rem; color: var(--ct-text, #2e1065); flex: 0 0 auto; }
 .dsh-chat-settings__cls-desc { font-size: 0.6875rem; color: var(--ct-text-muted, #8a94a6); flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.dsh-chat-settings__code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; overflow-wrap: anywhere; }
 .dsh-chat-settings__muted { color: var(--ct-text-muted, #8a94a6); font-size: 0.75rem; overflow-wrap: anywhere; }
 /* 带输入框的行：标题/控件一行，说明整行长在下面（对窄面板安全，见 settings.mjs 的 field() 注释） */
-.dsh-chat-settings__field { padding: 0.625rem 0; display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.dsh-chat-settings__field { padding: 0.625rem 0; display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .dsh-chat-settings__field-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-width: 0; }
 .dsh-chat-settings__field-title { font-size: 0.875rem; font-weight: 600; color: var(--ct-text, #2e1065); min-width: 0; }
 .dsh-chat-settings__field-control { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .dsh-chat-settings__field-desc { font-size: 0.75rem; color: var(--ct-text-muted, #8a94a6); line-height: 1.5; overflow-wrap: anywhere; }
+/* 控件宽度归插件 CSS（HeroUI 输入框默认不撑满） */
+.dsh-chat-settings__num { width: 9rem; min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.dsh-chat-settings__path { width: 20rem; min-width: 7rem; max-width: 100%; flex: 0 1 auto; }
+.dsh-chat-settings__css { width: 100%; resize: vertical; }
 .dsh-chat-settings__fold { min-width: 0; }
 .dsh-chat-settings__fold > summary {
   cursor: pointer; list-style: none; color: var(--ct-text-muted, #8a94a6); font-size: 0.6875rem;
@@ -237,25 +234,47 @@ export default function DshChatSettings() {
     try { await call('noticeDemo',{status:kind});message(`已发送「${{running:'进行中',done:'已完成',waiting:'等你处理',error:'处理失败'}[kind]}」测试卡到右下角`) }
     catch(error){message(`发送测试卡失败：${errorText(error)}`,true)}
   }
-  const button=(label,onClick,options={}) => h(Button,{size:'2',variant:'soft',...options,onClick},label)
-  const smallButton=(label,onClick) => button(label,onClick,{size:'1',variant:'ghost'})
-  const tag=(label,color='gray') => h(Badge,{color},label)
+  const button=(label,onClick,options={}) => h(Button,{size:'sm',variant:'secondary',...options,onClick},label)
+  const smallButton=(label,onClick) => button(label,onClick,{variant:'tertiary'})
+  const tag=(label,color='default') => h(Chip,{size:'sm',variant:'soft',color},label)
+  /** HeroUI Alert：错误提示保留 role="alert"，普通反馈用 role="status"。 */
+  const alert=(statusValue,textValue,options={}) => h(AlertRoot,{status:statusValue,role:options.role},
+    h(AlertIndicator),
+    h(AlertContent,null,h(AlertDescription,null,textValue)),
+    options.action || null)
   const field=(title,control,desc) => h('div',{className:'dsh-chat-settings__field',key:title},
     h('div',{className:'dsh-chat-settings__field-head'},h('div',{className:'dsh-chat-settings__field-title'},title),h('div',{className:'dsh-chat-settings__field-control'},...(Array.isArray(control) ? control : [control]))),
     desc ? h('div',{className:'dsh-chat-settings__field-desc'},desc) : null)
   const card=(title,desc,children,actions=[]) => h('section',{className:'dsh-chat-settings__card',key:title},
     h('div',{className:'dsh-chat-settings__head'},h('div',{className:'dsh-chat-settings__head-title'},title),h('div',{className:'dsh-chat-settings__head-actions'},...actions)),
     desc ? h('div',{className:'dsh-chat-settings__head-desc'},desc) : null,...children)
-  const textInput=(key,placeholder='',width='16rem') => h(TextField.Root,{
-    value:form[key],placeholder,size:'2',disabled:!ready,style:{width,minWidth:'7rem',flex:'0 1 auto'},
+  const textInput=(key,placeholder='',className='dsh-chat-settings__path') => h(Input,{
+    value:form[key],placeholder,variant:'secondary',className,disabled:!ready,
     onChange:event => update({[key]:event.target.value}),onBlur:() => {if(dirty.current)void saveNow()},
   })
-  const numberInput=key => h(TextField.Root,{
-    value:form[key],size:'2',inputMode:'numeric',disabled:!ready,style:{width:'8rem',flex:'0 1 auto'},
-    onChange:event => update({[key]:event.target.value.replace(/[^\d]/g,'')}),
-    onBlur:() => {const next=String(clamp(formRef.current[key],key));formRef.current={...formRef.current,[key]:next};setForm(formRef.current);if(dirty.current)void saveNow()},
-  })
-  const switchInput=key => h(Switch,{checked:Boolean(form[key]),disabled:!ready,'aria-label':key,onCheckedChange:value => update({[key]:value})})
+  /** HeroUI 默认数字输入：−/+ 步进 + secondary 灰底；值仍写回字符串，compose/clamp 不变。 */
+  const numberInput=key => {
+    const current=Number(form[key])
+    return h(NumberFieldRoot,{
+      variant:'secondary',className:'dsh-chat-settings__num',
+      value:Number.isFinite(current) ? current : null,
+      minValue:LIMITS[key].min,maxValue:LIMITS[key].max,step:key==='noticePollMs' ? 100 : 1,
+      formatOptions:{useGrouping:false},isDisabled:!ready,'aria-label':key,
+      onChange:next => {
+        if(!Number.isFinite(next))return
+        // 越界值先不落盘：react-aria 失焦时会夹回 min/max 再走一次 onChange。
+        if(next < LIMITS[key].min || next > LIMITS[key].max)return
+        update({[key]:String(Math.round(next))})
+      },
+    },
+      h(NumberFieldGroup,null,
+        h(NumberFieldDecrementButton,{'aria-label':'减少'}),
+        h(NumberFieldInput,{onBlur:() => {const next=String(clamp(formRef.current[key],key));formRef.current={...formRef.current,[key]:next};setForm(formRef.current);if(dirty.current)void saveNow()}}),
+        h(NumberFieldIncrementButton,{'aria-label':'增加'})))
+  }
+  /** 扁平 Switch：SwitchRoot 控制状态，SwitchContent/Control/Thumb 只负责外观。 */
+  const switchInput=key => h(SwitchRoot,{size:'sm',isSelected:Boolean(form[key]),isDisabled:!ready,'aria-label':key,onChange:value => update({[key]:value})},
+    h(SwitchContent,null,h(SwitchControl,null,h(SwitchThumb))))
   const ttlLabel=value => {
     const minutes=Math.round(Number(value)/60000)
     return !Number.isFinite(minutes)||minutes<=0 ? '—' : minutes>=1440 ? `${Math.round(minutes/1440)} 天` : minutes>=60 ? `${Math.round(minutes/60)} 小时` : `${minutes} 分钟`
@@ -294,36 +313,47 @@ export default function DshChatSettings() {
   let currentGroup=''
   for(const item of guiClasses) {
     if(item.group!==currentGroup){currentGroup=item.group;classRows.push(h('div',{className:'dsh-chat-settings__cls-group',key:`group:${currentGroup}`},currentGroup))}
-    classRows.push(h('div',{className:'dsh-chat-settings__cls-row',key:item.selector},h('code',{className:'dsh-chat-settings__cls-selector'},item.selector),h('span',{className:'dsh-chat-settings__cls-desc'},item.desc),button('插入',() => insertCss(item.selector),{size:'1',variant:'ghost',disabled:!ready})))
+    classRows.push(h('div',{className:'dsh-chat-settings__cls-row',key:item.selector},h('code',{className:'dsh-chat-settings__cls-selector'},item.selector),h('span',{className:'dsh-chat-settings__cls-desc'},item.desc),button('插入',() => insertCss(item.selector),{variant:'tertiary',isDisabled:!ready})))
   }
+  const appearanceButton = item => h(TooltipRoot,{key:item.key,delay:300},
+    h(ToggleButton,{size:'sm',variant:'default',className:'dsh-chat-settings__chip',isSelected:Boolean(form[item.key]),'aria-pressed':Boolean(form[item.key]),isDisabled:!ready,onChange:selected => update({[item.key]:Boolean(selected)})},item.label),
+    h(TooltipContent,null,`${item.label}：${item.tip}。点亮 = 在小窗里显示`))
+  const appearanceGroups = groups.filter(group => group.visible!==false).map((group,index) => h('div',{className:'dsh-chat-settings__group',key:index},
+    group.title ? h('div',{className:'dsh-chat-settings__group-title'},group.title) : null,
+    h('div',{className:'dsh-chat-settings__tags'},...group.items.map(appearanceButton))))
+  const classHelp = guiClasses.length
+    ? [h('div',{className:'dsh-chat-settings__cls-note',key:'cls-note'},'官方 class 带构建哈希前缀，用 [class*="_语义名"] 匹配；点「插入」添加规则骨架。'),...classRows]
+    : [alert('warning',`class 速查表没加载出来${guiClassesError ? `：${guiClassesError}` : ''}。请确认后台已运行当前代码。`,{action:smallButton('重试',() => void loadGuiClasses())})]
+  const customCssSection = h('details',{className:'dsh-chat-settings__fold'},
+    h('summary',null,'自定义样式（CSS）与 class 速查'),
+    h('div',{className:'dsh-chat-settings__fold-body'},
+      h('div',{className:'dsh-chat-settings__block'},
+        h('div',{className:'dsh-chat-settings__block-desc'},'追加注入到官方页面，排在内置规则之后。选择器用语义后缀，例如 [class*="_headerCorner"]。'),
+        h(TextArea,{value:form.customCss,rows:6,variant:'secondary',className:'dsh-chat-settings__css',disabled:!ready,placeholder:'例：\n[class*="_headerCorner"] { display: none !important; }',onChange:event => update({customCss:event.target.value}),onBlur:() => {if(dirty.current)void saveNow()}}),
+        h('div',{className:'dsh-chat-settings__block-actions'},
+          button('插入示例',() => update({customCss:`${formRef.current.customCss}${formRef.current.customCss ? '\n' : ''}[class*="_header"] { padding: 0 !important; }`}),{variant:'tertiary',isDisabled:!ready}),
+          button('清空',() => update({customCss:''}),{variant:'tertiary',isDisabled:!ready})),
+        ...classHelp)))
   return h('div',{className:'dsh-chat-settings'},
-    loadError ? h('div',{className:'dsh-chat-settings__cls-note is-warn',role:'alert'},`读取配置失败：${loadError}`,button('重试',() => void loadConfig())) : null,
-    feedback ? h('div',{className:`dsh-chat-settings__cls-note${feedback.error ? ' is-warn' : ''}`,role:feedback.error ? 'alert' : 'status'},feedback.text) : null,
-    status && Number(status.contract)!==CONTRACT_VERSION ? h('div',{className:'dsh-chat-settings__cls-note is-warn'},'插件侧车（runtime）的契约版本不一致：请关闭再开启插件以加载当前代码。') : null,
+    loadError ? alert('danger',`读取配置失败：${loadError}`,{role:'alert',action:button('重试',() => void loadConfig())}) : null,
+    feedback ? alert(feedback.error ? 'danger' : 'accent',feedback.text,{role:feedback.error ? 'alert' : 'status'}) : null,
+    status && Number(status.contract)!==CONTRACT_VERSION ? alert('warning','插件侧车（runtime）的契约版本不一致：请关闭再开启插件以加载当前代码。') : null,
     card('运行状态','插件在后台观察 DSH；这里的信息每几秒自动刷新。端口与目录一般不用改。',[
       field('状态卡端口',numberInput('httpPort'),`状态卡与插件后台的数据通道（不是网页）。${changedPort ? `原端口被占用，现在实际在用 ${actualPort}。` : '被占用时自动换一个。'}0 = 自动分配。`),
       field('小窗页面端口',numberInput('guiPort'),'官方页面挂在这个端口上。固定端口可以保留页面状态；0 = 每次随机分配（页面状态会重置）。'),
-      field('DSH 数据目录',[textInput('dshHome','留空 = 自动找 ~/.dsh','20rem'),button('选择',() => void pickFolder(),{disabled:!ready})],'会话日志和凭据都从这里读。'),
-      field('运行环境',[tag(`Node ${s.node || '—'}`),tag(s.zstd===false ? 'zstd 不可用' : 'zstd 正常',s.zstd===false ? 'red' : 'green'),s.gui?.cookieTtlMs ? tag(`小窗票据 ${ttlLabel(s.gui.cookieTtlMs)}`) : null,s.gui?.cookieRefreshes>0 ? tag(`小窗票据已自动续期 ${s.gui.cookieRefreshes} 次`) : null],s.zstd===false ? 'zstd 用来解压 DSH 会话日志，需要 Node ≥ 22.15。' : 'zstd 用来解压 DSH 的会话日志。'),
-      s.lastError ? h('div',{className:'dsh-chat-settings__cls-note is-warn',role:'alert'},`最近一次错误：${s.lastError}`) : null,
+      field('DSH 数据目录',[textInput('dshHome','留空 = 自动找 ~/.dsh'),button('选择',() => void pickFolder(),{isDisabled:!ready})],'会话日志和凭据都从这里读。'),
+      field('运行环境',[tag(`Node ${s.node || '—'}`),tag(s.zstd===false ? 'zstd 不可用' : 'zstd 正常',s.zstd===false ? 'danger' : 'success'),s.gui?.cookieTtlMs ? tag(`小窗票据 ${ttlLabel(s.gui.cookieTtlMs)}`) : null,s.gui?.cookieRefreshes>0 ? tag(`小窗票据已自动续期 ${s.gui.cookieRefreshes} 次`) : null],s.zstd===false ? 'zstd 用来解压 DSH 会话日志，需要 Node ≥ 22.15。' : 'zstd 用来解压 DSH 的会话日志。'),
+      s.lastError ? alert('danger',`最近一次错误：${s.lastError}`,{role:'alert'}) : null,
     ],[smallButton('刷新',() => {void loadStatus();void loadNoticeStatus();void loadGuiClasses()})]),
     card('状态通知','DSH 开始干活时弹可折叠状态卡；点正文原地展开官方界面，等你审批时自动展开。进行中、等你处理、已完成、处理失败均常驻，点 × 或下一轮开始时收场。',form.noticeEnabled ? [
       field('检查间隔(ms)',numberInput('noticePollMs'),`500–30000，当前 ${form.noticePollMs}`),
-      field('测试卡',[['running','进行中'],['done','已完成'],['waiting','等你处理'],['error','处理失败']].map(([kind,label]) => h(Button,{key:kind,size:'2',variant:'soft',onClick:() => void sendNoticeDemo(kind)},label)),'发一张测试卡到右下角，观察折叠和展开。'),
+      field('测试卡',[['running','进行中'],['done','已完成'],['waiting','等你处理'],['error','处理失败']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'secondary',onClick:() => void sendNoticeDemo(kind)},label)),'发一张测试卡到右下角，观察折叠和展开。'),
       h('div',{className:'dsh-chat-settings__muted'},summary),
     ] : [],[switchInput('noticeEnabled')]),
     card('小窗外观','点亮 = 在小窗里显示，灰掉 = 隐藏。悬停看说明；改动在下次展开状态卡时生效。',[
       field('紧凑留白',switchInput('compactSpacing'),'把官方滚动区、输入框和消息间距收到小窗尺度，每侧留白从 32px 收到 16px，消息间距从 16px 收到 10px。'),
-      ...groups.filter(group => group.visible!==false).map((group,index) => h('div',{className:'dsh-chat-settings__group',key:index},group.title ? h('div',{className:'dsh-chat-settings__group-title'},group.title) : null,
-        h('div',{className:'dsh-chat-settings__tags'},...group.items.map(item => h(Tooltip,{key:item.key,content:`${item.label}：${item.tip}。点亮 = 在小窗里显示`,style:{maxWidth:'17rem',whiteSpace:'normal',overflowWrap:'anywhere'}},
-          h(Button,{size:'1',variant:form[item.key] ? 'solid' : 'soft',className:`dsh-chat-settings__chip${form[item.key] ? ' is-on' : ''}`,'aria-pressed':Boolean(form[item.key]),disabled:!ready,onClick:() => update({[item.key]:!formRef.current[item.key]})},item.label)))))),
-      h('details',{className:'dsh-chat-settings__fold'},h('summary',null,'自定义样式（CSS）与 class 速查'),h('div',{className:'dsh-chat-settings__fold-body'},
-        h('div',{className:'dsh-chat-settings__block'},
-          h('div',{className:'dsh-chat-settings__block-desc'},'追加注入到官方页面，排在内置规则之后。选择器用语义后缀，例如 [class*="_headerCorner"]。'),
-          h(TextArea,{value:form.customCss,rows:6,resize:'vertical',disabled:!ready,placeholder:'例：\n[class*="_headerCorner"] { display: none !important; }',onChange:event => update({customCss:event.target.value}),onBlur:() => {if(dirty.current)void saveNow()}}),
-          h('div',{className:'dsh-chat-settings__block-actions'},button('插入示例',() => update({customCss:`${formRef.current.customCss}${formRef.current.customCss ? '\n' : ''}[class*="_header"] { padding: 0 !important; }`}),{size:'1',disabled:!ready}),button('清空',() => update({customCss:''}),{size:'1',disabled:!ready})),
-          guiClasses.length ? h('div',{className:'dsh-chat-settings__block'},h('div',{className:'dsh-chat-settings__cls-note'},'官方 class 带构建哈希前缀，用 [class*="_语义名"] 匹配；点「插入」添加规则骨架。'),...classRows)
-            : h('div',{className:'dsh-chat-settings__cls-note is-warn'},`class 速查表没加载出来${guiClassesError ? `：${guiClassesError}` : ''}。请确认后台已运行当前代码。`,smallButton('重试',() => void loadGuiClasses()))))),
-    ],[button('全部显示',() => appearance(false),{size:'1',variant:'ghost',disabled:!ready}),button('恢复推荐',() => appearance(true),{size:'1',variant:'ghost',disabled:!ready})]))
+      ...appearanceGroups,
+      customCssSection,
+    ],[button('全部显示',() => appearance(false),{variant:'tertiary',isDisabled:!ready}),button('恢复推荐',() => appearance(true),{variant:'tertiary',isDisabled:!ready})]))
 }
 export { DshChatSettings as Settings }

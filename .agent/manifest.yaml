@@ -1,4 +1,11 @@
 features:
+  shared-ui:
+    docs:
+      - .agent/features/shared-ui/hero-ui-settings.md
+    related:
+      - agent-notify
+      - dsh-chat
+      - timer
   dsh-chat:
     docs:
       - .agent/features/dsh-chat/README.md
@@ -37,6 +44,7 @@ bugs:
   - .agent/bugs/2026-09-20-codex-前往会话弹出透明窗.md
 
 devlog:
+  - .agent/devlog/2026-11-11-插件设置页统一迁到HeroUI.md
   - .agent/devlog/2026-10-09-dsh-chat状态卡四态常驻与删掉完成后停留.md
   - .agent/devlog/2026-10-08-dsh-chat状态卡在等你的三种来源.md
   - .agent/devlog/2026-10-05-紧凑留白开关与compose漏键与orb自绘外壳回退.md

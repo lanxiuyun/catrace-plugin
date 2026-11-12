@@ -15,18 +15,18 @@
 没装过的 agent 连配置文件都无从写入，**目录存在 = 检测到**，不做更聪明的探测（比如查进程）。
 
 - `listAgents` RPC 返回 `{ id, installed, detected }`；`installed` 是 hook 层面（配置文件里有没有 catrace 条目），`detected` 是机器层面（装没装过这个 agent），两者独立。
-- 设置页只渲染 `detected !== false` 的行为完整行（标签 + 安装/卸载按钮）；`detected === false` 的折叠为**底部一行 warning 橙色标签**（hover 提示「未检测到配置目录，无法写入 hook」），不提供安装。
+- 设置页只渲染 `detected !== false` 的行为完整行（标签 + 安装/卸载按钮）；`detected === false` 的折叠为**底部一行 warning 橙色标签**（HeroUI `Chip variant="soft" color="warning"`，hover 提示「未检测到配置目录，无法写入 hook」），不提供安装。
 - 全部未检测到时显示空态文案，列明五种配置目录要求。
 
 ## 按钮状态（用户多轮迭代后的定稿）
 
 | 状态 | 按钮 | 视觉 |
 |------|------|------|
-| 未安装（检测到） | 安装 Hook | **中性描边**（灰框深字），hover 边框文字变紫（`.install-btn` 自定义类 + 0.2s 过渡） |
-| 已安装 | 卸载 Hook | `type: error, secondary` 浅红底块 |
-| 未检测到 | 无按钮 | warning 标签 |
+| 未安装（检测到） | 安装 Hook | HeroUI `Button size="sm" variant="secondary"`（安静的中性灰底） |
+| 已安装 | 卸载 Hook | HeroUI `Button size="sm" variant="danger-soft"` 浅红底块 |
+| 未检测到 | 无按钮 | warning `Chip` |
 
-状态同时由绿/灰 `NTag` 双重编码，按钮保持安静。走过的弯路：实心 primary 太抢眼 → quaternary 太隐形 → ghost 紫框被接受过一版 → 最终回到中性描边 + hover 变紫。教训：**列表型设置页里，状态让标签承担，按钮只做安静的操作入口**。
+状态同时由绿/灰 `Chip` 双重编码，按钮保持安静。走过的弯路：实心 primary 太抢眼 → quaternary 太隐形 → ghost 紫框被接受过一版 → 最终回到中性描边 + hover 变紫。教训：**列表型设置页里，状态让标签承担，按钮只做安静的操作入口**。2026-11 控件整体迁到 HeroUI 后，这条设计不变：安装按钮继续用安静的 `secondary`，卸载用 `danger-soft`。
 
 ## 关键坑：UI 热更新 ≠ sidecar 更新
 

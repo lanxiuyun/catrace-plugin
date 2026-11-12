@@ -5,7 +5,7 @@
 ## 开发入口
 
 - 修改插件前读 [develop.md](develop.md) 的 React / Blob、配置、事件与 sidecar 合同；AI 操作流程见 [SKILL.md](SKILL.md)。
-- UI 使用宿主同一个 React 实例，普通配置保存不覆盖主开关；不要向宿主添加插件专用业务 API。
+- UI 使用宿主同一个 React 实例与 HeroUI 组件库（设置页控件统一 HeroUI，旧卡片仍可用 Radix），普通配置保存不覆盖主开关；不要向宿主添加插件专用业务 API。
 - 不修改用户 AppData 内已安装的插件来替代源码测试；不自动启动开发服务或做界面验证。
 
 ## 知识沉淀

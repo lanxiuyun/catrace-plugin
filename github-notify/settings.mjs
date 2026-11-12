@@ -2,6 +2,17 @@ const React = globalThis.__CATRACE_REACT__;
 if (!React?.createElement || !React?.useState)
     throw new Error('Catrace plugin React runtime missing');
 const { createElement: h, useState, useRef, useEffect } = React;
+const HeroUI = globalThis.__CATRACE_HEROUI__ || {};
+const {
+    AlertContent, AlertDescription, AlertIndicator, AlertRoot,
+    Button, Chip, Input,
+    NumberFieldDecrementButton, NumberFieldGroup, NumberFieldIncrementButton, NumberFieldInput, NumberFieldRoot,
+    SwitchContent, SwitchControl, SwitchRoot, SwitchThumb,
+} = HeroUI;
+if (!Button || !Chip || !Input || !SwitchRoot || !SwitchContent || !SwitchControl || !SwitchThumb
+    || !NumberFieldRoot || !NumberFieldGroup || !NumberFieldInput || !NumberFieldDecrementButton || !NumberFieldIncrementButton
+    || !AlertRoot || !AlertIndicator || !AlertContent || !AlertDescription)
+    throw new Error('Catrace React/HeroUI runtime missing');
 const PLUGIN_ID = 'github-notify';
 const MIN_POLL_SEC = 1;
 const MAX_POLL_SEC = 3600;
@@ -10,64 +21,44 @@ const MAX_CARD_SEC = 600;
 const DEFAULT_POLL_SEC = 60;
 const DEFAULT_CARD_SEC = 10;
 const STYLE_ID = 'catrace-plugin-github-notify-settings-css';
+// Layout only: HeroUI owns every control skin. Colours are --ct-* tokens, sizes are rem,
+// and all plugin class names carry the gh- prefix so they cannot collide with HeroUI roots.
 const CSS = `
-.gh-settings {
-  width: 100%; box-sizing: border-box;
+.gh-set { width: 100%; display: flex; flex-direction: column; gap: 0.75rem; color: var(--ct-text); }
+.gh-set *, .gh-set *::before, .gh-set *::after { box-sizing: border-box; }
+.gh-set .gh-card {
   display: flex; flex-direction: column; gap: 0.75rem;
-  color: #1f2328;
-}
-.gh-settings *, .gh-settings *::before, .gh-settings *::after { box-sizing: border-box; }
-.gh-settings .card {
   padding: 1rem 1.25rem;
-  border: 0.0625rem solid #d0d7de;
-  border-radius: 0.875rem;
-  background: #fff;
-  display: flex; flex-direction: column; gap: 0.75rem;
+  border: 0.0625rem solid var(--ct-border-card);
+  border-radius: 1rem;
+  background: var(--ct-surface);
+  box-shadow: var(--ct-shadow-card, none);
 }
-.gh-settings .head {
+.gh-set .gh-head {
   display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
 }
-.gh-settings h2 { margin: 0; font-size: 0.9375rem; font-weight: 700; color: #1f2328; }
-.gh-settings .desc { margin: 0; font-size: 0.8125rem; line-height: 1.55; color: #656d76; }
-.gh-settings .field { display: flex; flex-direction: column; gap: 0.375rem; min-width: 0; }
-.gh-settings .label { font-size: 0.75rem; font-weight: 600; color: #656d76; }
-.gh-settings .hint { margin: 0; font-size: 0.6875rem; color: #8b949e; line-height: 1.45; }
-.gh-settings .row {
+.gh-set .gh-title { margin: 0; font-size: 0.9375rem; font-weight: 700; color: var(--ct-text); }
+.gh-set .gh-desc { margin: 0; font-size: 0.8125rem; line-height: 1.55; color: var(--ct-text-muted); }
+.gh-set .gh-field { display: flex; flex-direction: column; gap: 0.375rem; min-width: 0; }
+.gh-set .gh-label { font-size: 0.75rem; font-weight: 600; color: var(--ct-text-muted); }
+.gh-set .gh-hint { margin: 0; font-size: 0.6875rem; color: var(--ct-text-subtle); line-height: 1.45; }
+.gh-set .gh-row {
   display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
 }
-.gh-settings .row-inline { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.gh-settings .num { width: 6.5rem; }
-.gh-settings .unit { font-size: 0.75rem; color: #656d76; font-weight: 600; }
-.gh-settings .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.gh-settings .status {
+.gh-set .gh-row-inline { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.gh-set .gh-num { width: 9rem; }
+.gh-set .gh-unit { font-size: 0.75rem; color: var(--ct-text-muted); font-weight: 600; }
+.gh-set .gh-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.gh-set .gh-status {
   display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem;
-  padding: 0.625rem 0.75rem; border-radius: 0.5rem; background: #f6f8fa;
-  font-size: 0.75rem; color: #424a53;
+  padding: 0.625rem 0.75rem; border-radius: 0.5rem; background: var(--ct-surface-2);
+  font-size: 0.75rem; color: var(--ct-text);
 }
-.gh-settings .status strong { color: #0969da; font-weight: 650; }
-.gh-settings .switch-pair {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  font-size: 0.8125rem; color: #424a53; font-weight: 500;
-}
-
-.gh-settings .plugin-input{font:inherit;color:inherit;box-sizing:border-box;min-width:0;width:100%;padding:.4375rem .625rem;border:1px solid #d0d7de;border-radius:.375rem;background:#fff;outline:none;}
-.gh-settings .plugin-input:focus{border-color:#007aff;box-shadow:0 0 0 2px #007aff22;}
-.gh-settings textarea.plugin-input{resize:vertical;line-height:1.5;}
-.gh-settings .row>.plugin-input{flex:1;}
-.gh-settings .plugin-button{font:inherit;font-size:.75rem;padding:.375rem .625rem;border:1px solid #d0d7de;border-radius:.375rem;background:#fff;cursor:pointer;color:inherit;}
-.gh-settings .plugin-button.is-primary{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
-.gh-settings .plugin-button:disabled{opacity:.55;cursor:wait;}
-.gh-settings .plugin-switch{accent-color:#007aff;width:1.125rem;height:1.125rem;cursor:pointer;}
-.gh-settings .plugin-tag{padding:.125rem .5rem;border-radius:999px;background:#f1f5f9;font-size:.75rem;}
-.gh-settings .plugin-tag[data-tone=success]{background:#ecfdf5;color:#047857;}
-.gh-settings .plugin-alert{padding:.75rem;border-radius:.5rem;background:#eff6ff;line-height:1.5;display:flex;flex-direction:column;gap:.25rem;}
-.gh-settings .plugin-secret{display:flex;align-items:center;gap:.375rem;min-width:0;width:100%;}
-.gh-settings .plugin-secret button{flex:none;border:0;background:transparent;color:#0969da;cursor:pointer;font:inherit;font-size:.75rem;}
-.plugin-feedback-github-notify{padding:.625rem .75rem;border-radius:.5rem;font-size:.8125rem;margin-bottom:.75rem;background:#eff6ff;color:#1e40af;}
-.plugin-feedback-github-notify[data-tone=error]{background:#fef2f2;color:#b91c1c;}
-.plugin-feedback-github-notify[data-tone=warning]{background:#fff7ed;color:#9a3412;}
-
-.gh-settings .plugin-input.num{width:6.5rem;}
+.gh-set .gh-status-label { color: var(--ct-text-muted); font-weight: 650; }
+.gh-set .gh-status-value { font-variant-numeric: tabular-nums; }
+.gh-set .gh-secret { display: flex; align-items: center; gap: 0.375rem; width: 100%; min-width: 0; }
+.gh-set .gh-secret-input { flex: 1 1 auto; min-width: 0; }
+.gh-set .gh-switch-label { font-size: 0.8125rem; font-weight: 500; color: var(--ct-text-muted); }
 `;
 function ensureStyles() {
     if (typeof document === 'undefined')
@@ -88,6 +79,13 @@ function clamp(n, min, max, fallback) {
 function errorText(error) {
     return error instanceof Error ? error.message : String(error);
 }
+function feedbackStatus(tone) {
+    if (tone === 'error')
+        return 'danger';
+    if (tone === 'warning')
+        return 'warning';
+    return 'success';
+}
 const DEFAULT_CONFIG = {
     token: '',
     pollIntervalSec: DEFAULT_POLL_SEC,
@@ -95,9 +93,41 @@ const DEFAULT_CONFIG = {
     onlyWhenActive: true,
     enabled: true,
 };
-function SecretInput({ className, type: _type, ...props }) {
+/** HeroUI 默认数字输入：−/+ 步进 + secondary 灰底；越界值等失焦夹回范围后再落盘。 */
+function NumberInputField({ value, min, max, step = 1, label, onChange }) {
+    return h(NumberFieldRoot, {
+        variant: 'secondary',
+        className: 'gh-num',
+        value,
+        minValue: min,
+        maxValue: max,
+        step,
+        formatOptions: { useGrouping: false },
+        'aria-label': label,
+        onChange: next => {
+            if (!Number.isFinite(next) || next < min || next > max)
+                return;
+            onChange(Math.round(next));
+        },
+    }, h(NumberFieldGroup, null, h(NumberFieldDecrementButton, { 'aria-label': '减少' }), h(NumberFieldInput, null), h(NumberFieldIncrementButton, { 'aria-label': '增加' })));
+}
+/** PAT field with its own show/hide affordance; the toggle stays a real, labelled button. */function SecretInput({ value, placeholder, onChange, ariaLabel }) {
     const [visible, setVisible] = useState(false);
-    return h('span', { className: 'plugin-secret' }, h('input', { className, type: visible ? 'text' : 'password', ...props }), h('button', { type: 'button', 'aria-label': visible ? '隐藏密钥' : '显示密钥', 'aria-pressed': visible, onClick: () => setVisible(!visible) }, visible ? '隐藏' : '显示'));
+    return h('div', { className: 'gh-secret' }, h(Input, {
+        variant: 'secondary',
+        className: 'gh-secret-input',
+        type: visible ? 'text' : 'password',
+        value,
+        placeholder,
+        onChange,
+        'aria-label': ariaLabel,
+    }), h(Button, {
+        size: 'sm',
+        variant: 'secondary',
+        'aria-label': visible ? '隐藏密钥' : '显示密钥',
+        'aria-pressed': visible,
+        onClick: () => setVisible(!visible),
+    }, visible ? '隐藏' : '显示'));
 }
 export default function GithubNotifySettings() {
     const [state, setState] = useState(() => ({
@@ -435,25 +465,28 @@ export default function GithubNotifySettings() {
                 ['错误', st.lastPollError || '无'],
             ];
         return h('div', {
-            className: 'gh-settings'
+            className: 'gh-set'
+        }, feedback ? h(AlertRoot, {
+            status: feedbackStatus(feedback.tone),
+            role: feedback.tone === 'error' ? 'alert' : 'status'
+        }, h(AlertIndicator), h(AlertContent, null, h(AlertDescription, null, feedback.text))) : null, h('div', {
+            className: 'gh-card'
         }, h('div', {
-            className: 'card'
-        }, h('div', {
-            className: 'head'
-        }, h('h2', null, 'GitHub 通知'), h("span", {
-            className: "plugin-tag " + "",
-            'data-tone': state.enabled
-                ? 'success' : 'default'
-        }, (() => (state.enabled
-            ? '已启用' : '已关闭'))())), h('p', {
-            className: 'desc'
+            className: 'gh-head'
+        }, h('h2', {
+            className: 'gh-title'
+        }, 'GitHub 通知'), h(Chip, {
+            size: 'sm',
+            variant: 'soft',
+            color: state.enabled ? 'success' : 'default'
+        }, state.enabled ? '已启用' : '已关闭')), h('p', {
+            className: 'gh-desc'
         }, '用 Personal Access Token 拉取 GitHub 未读通知。启动或拉取时，凡本机未见过的通知 id 一律推送（已通知 id 保存在本机）；之后按间隔轮询新变更。'), h('div', {
-            className: 'field'
+            className: 'gh-field'
         }, h('div', {
-            className: 'label'
+            className: 'gh-label'
         }, 'GitHub PAT'), h(SecretInput, {
             value: state.token,
-            type: 'password',
             placeholder: 'ghp_… 或 github_pat_…（notifications 读权限）',
             onChange: event => ((v) => {
                 updateState({
@@ -461,112 +494,116 @@ export default function GithubNotifySettings() {
                 });
                 scheduleSave();
             })(event.target.value),
-            className: "plugin-input " + "",
-            "aria-label": "GitHub PAT"
+            ariaLabel: 'GitHub PAT'
         }), h('p', {
-            className: 'hint'
+            className: 'gh-hint'
         }, '经典 Token 勾选 notifications；Fine-grained 需 Repository access + Notifications 读权限。Token 仅存本机 plugin_config。')), h('div', {
-            className: 'row'
+            className: 'gh-row'
         }, h('div', {
-            className: 'field'
+            className: 'gh-field'
         }, h('div', {
-            className: 'label'
+            className: 'gh-label'
         }, '轮询间隔'), h('div', {
-            className: 'row-inline'
-        }, h("input", {
-            value: String(state.pollIntervalSec),
-            onChange: event => ((v) => {
+            className: 'gh-row-inline'
+        }, h(NumberInputField, {
+            value: state.pollIntervalSec,
+            min: MIN_POLL_SEC,
+            max: MAX_POLL_SEC,
+            step: 1,
+            label: '轮询间隔秒数',
+            onChange: value => {
                 updateState({
-                    pollIntervalSec: clamp(v, MIN_POLL_SEC, MAX_POLL_SEC, DEFAULT_POLL_SEC)
+                    pollIntervalSec: clamp(value, MIN_POLL_SEC, MAX_POLL_SEC, DEFAULT_POLL_SEC)
                 });
                 scheduleSave();
-            })(event.target.value),
-            className: "plugin-input " + 'num',
-            "aria-label": "\u8F6E\u8BE2\u95F4\u9694\u79D2\u6570"
+            },
         }), h('span', {
-            className: 'unit'
+            className: 'gh-unit'
         }, '秒'))), h('div', {
-            className: 'field'
+            className: 'gh-field'
         }, h('div', {
-            className: 'label'
+            className: 'gh-label'
         }, '卡片停留'), h('div', {
-            className: 'row-inline'
-        }, h("input", {
-            value: String(state.cardDurationSec),
-            onChange: event => ((v) => {
+            className: 'gh-row-inline'
+        }, h(NumberInputField, {
+            value: state.cardDurationSec,
+            min: MIN_CARD_SEC,
+            max: MAX_CARD_SEC,
+            step: 1,
+            label: '卡片停留秒数',
+            onChange: value => {
                 updateState({
-                    cardDurationSec: clamp(v, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
+                    cardDurationSec: clamp(value, MIN_CARD_SEC, MAX_CARD_SEC, DEFAULT_CARD_SEC)
                 });
                 scheduleSave();
-            })(event.target.value),
-            className: "plugin-input " + 'num',
-            "aria-label": "\u5361\u7247\u505C\u7559\u79D2\u6570"
+            },
         }), h('span', {
-            className: 'unit'
+            className: 'gh-unit'
         }, '秒（0=常驻）')))), h('div', {
-            className: 'row'
-        }, h('span', {
-            className: 'switch-pair'
-        }, h("input", {
-            onChange: event => ((v) => {
+            className: 'gh-row'
+        }, h(SwitchRoot, {
+            size: 'sm',
+            isSelected: state.onlyWhenActive,
+            'aria-label': '仅在用户活跃时推送',
+            onChange: value => ((v) => {
                 updateState({
                     onlyWhenActive: !!v
                 });
                 scheduleSave();
-            })(event.target.checked),
-            type: "checkbox",
-            role: "switch",
-            checked: state.onlyWhenActive,
-            className: "plugin-switch " + "",
-            "aria-label": "\u4EC5\u5728\u7528\u6237\u6D3B\u8DC3\u65F6\u63A8\u9001"
-        }), '仅在用户活跃时推送')), h('div', {
-            className: 'actions'
-        }, h("button", {
+            })(value)
+        }, h(SwitchContent, null, h(SwitchControl, null, h(SwitchThumb)), h('span', {
+            className: 'gh-switch-label'
+        }, '仅在用户活跃时推送'))), h('div', {
+            className: 'gh-actions'
+        }, h(Button, {
+            size: 'sm',
+            variant: 'primary',
             onClick: pollNow,
-            type: "button",
-            disabled: !!state.busy && state.busy
+            isDisabled: !!state.busy && state.busy
                 !== 'poll' || state.busy
                 === 'poll',
             'aria-busy': state.busy
-                === 'poll',
-            className: "plugin-button is-primary " + ""
-        }, (() => '立即拉取')()), h("button", {
+                === 'poll'
+        }, '立即拉取'), h(Button, {
+            size: 'sm',
+            variant: 'secondary',
             onClick: sendTest,
-            type: "button",
-            disabled: !!state.busy && state.busy
+            isDisabled: !!state.busy && state.busy
                 !== 'test' || state.busy
                 === 'test',
             'aria-busy': state.busy
-                === 'test',
-            className: "plugin-button " + ""
-        }, (() => '测试卡片')()), h("button", {
+                === 'test'
+        }, '测试卡片'), h(Button, {
+            size: 'sm',
+            variant: 'tertiary',
             onClick: () => run('status', refreshStatus),
-            type: "button",
-            disabled: !!state.busy && state.busy
+            isDisabled: !!state.busy && state.busy
                 !== 'status' || state.busy
                 === 'status',
             'aria-busy': state.busy
-                === 'status',
-            className: "plugin-button " + ""
-        }, (() => '刷新状态')()), h("button", {
+                === 'status'
+        }, '刷新状态'), h(Button, {
+            size: 'sm',
+            variant: 'danger-soft',
             onClick: resetAndReseed,
-            type: "button",
-            disabled: !!state.busy && state.busy
+            isDisabled: !!state.busy && state.busy
                 !== 'reset' || state.busy
                 === 'reset',
             'aria-busy': state.busy
-                === 'reset',
-            className: "plugin-button " + ""
-        }, (() => '重置基线')()))), h('div', {
-            className: 'card'
+                === 'reset'
+        }, '重置基线')))), h('div', {
+            className: 'gh-card'
         }, h('div', {
-            className: 'head'
-        }, h('h2', null, '运行状态')), state.loading
+            className: 'gh-head'
+        }, h('h2', {
+            className: 'gh-title'
+        }, '运行状态')), state.loading
             ? h('p', {
-                className: 'desc'
+                className: 'gh-desc'
             }, '加载中…') : h('div', {
-            className: 'status'
-        }, statusRows.flatMap(([k, v]) => [h('strong', { key: `${k}:label` }, k), h('span', { key: `${k}:value` }, String(v))]))));
+            className: 'gh-status'
+        }, statusRows.flatMap(([k, v]) => [h('strong', { key: `${k}:label`, className: 'gh-status-label' }, k), h('span', { key: `${k}:value`, className: 'gh-status-value' }, String(v))]))));
     })();
-    return h(React.Fragment, null, feedback ? h('div', { className: 'plugin-feedback-github-notify', 'data-tone': feedback.tone, role: feedback.tone === 'error' ? 'alert' : 'status' }, feedback.text) : null, panel);
+    return panel;
 }
+export { GithubNotifySettings as Settings };
