@@ -47,3 +47,14 @@ pastedrop/
 ```
 
 > `runtime/` 下运行时产物 `shutdown.signal` / `last-saved.txt` 已被忽略，不会提交。
+
+## 改 main.ps1 必须保留 UTF-8 BOM
+
+`main.ps1` 必须存成 **UTF-8 with BOM**。它是用 `powershell.exe -File`（Windows PowerShell 5.1）跑的，5.1 只在有 BOM 时才按 UTF-8 读文件，否则按系统 ANSI 代码页（中文机器是 GBK）解码：里面的中文注释会变成乱码，而且 GBK 解码器在「行尾是个残缺的前导字节」时会把后面的换行一起吃掉，把下一行代码并进上一行的 `//` 注释里。典型症状是 `Add-Type` 报 `类、结构或接口成员声明中的标记"{"无效`，worker 每 2 秒退出重启一次。
+
+编辑器另存时容易悄悄丢掉 BOM，改完请确认：
+
+```powershell
+$b = [System.IO.File]::ReadAllBytes('C:\work_sapce\catrace-plugin\pastedrop\runtime\main.ps1')
+($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)   # True = 有 BOM
+```

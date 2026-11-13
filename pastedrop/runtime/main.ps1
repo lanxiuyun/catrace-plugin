@@ -1,4 +1,4 @@
-# PasteDrop worker — Windows PowerShell 常驻进程（内含 Add-Type C# 全局键盘钩子）。
+﻿# PasteDrop worker — Windows PowerShell 常驻进程（内含 Add-Type C# 全局键盘钩子）。
 #
 # 为什么 PowerShell：全局低级键盘钩子（WH_KEYBOARD_LL）需要 Win32 消息循环，
 # Node 纯 JS 做不到；而 PowerShell 是 Windows 标配，无需安装任何额外依赖
