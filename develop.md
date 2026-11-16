@@ -31,7 +31,7 @@
 {
   "id": "my-plugin",
   "name": "我的插件",
-  "version": "2026.11.09",
+  "version": "26.11.9",
   "description": "一句话说明",
   "uiFramework": "react",
   "main": "ui.mjs",
@@ -42,7 +42,7 @@
 }
 ```
 
-只声明实际存在的入口。保留 kind：`rest`、`agent`、`permission`、`update`、`rest-timer`、`sdk`。`events` 覆盖发布的 type / kind。插件改动时将版本改为当天 `YYYY.MM.DD`，同日多次发布使用第四段递增。
+只声明实际存在的入口。保留 kind：`rest`、`agent`、`permission`、`update`、`rest-timer`、`sdk`。`events` 覆盖发布的 type / kind。插件改动时将版本改为当天 `YY.M.D`（如 `26.11.9`，与 Catrace 版本号同形、不补零），同日多次发布使用第四段递增。
 
 宿主不执行 npm install；发布包要包含运行必需文件，不能依赖源码仓库之外的本地路径。Node 命令解析优先使用系统安装，其次托管便携目录。
 

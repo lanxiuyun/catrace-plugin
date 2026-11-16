@@ -1,7 +1,7 @@
 {
   "id": "dota2-typewriter",
   "name": "Dota2 暗黑狂欢打字机",
-  "version": "2026.11.09",
+  "version": "26.11.9",
   "uiFramework": "react",
   "description": "循环往前台打 a→z（给暗黑狂欢打字机用）",
   "main": "ui.mjs",

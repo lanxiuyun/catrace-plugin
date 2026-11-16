@@ -17,5 +17,5 @@
 
 - PR 标题和描述使用中文。
 - 改动先留工作区，用户明确要求提交或 push 后才执行；按功能合并同类修改。
-- 修改插件时更新 `manifest.version` 为当天 `YYYY.MM.DD`，同日多次发布增加第四段；UI 清单标记 `uiFramework: "react"`。
+- 修改插件时更新 `manifest.version` 为当天 `YY.M.D`（如 `26.11.9`，与 Catrace 版本号同形、不补零），同日多次发布增加第四段；UI 清单标记 `uiFramework: "react"`。
 - 宿主与插件分别在各自仓库提交；发布后由插件中心按固定仓库 commit 安装。

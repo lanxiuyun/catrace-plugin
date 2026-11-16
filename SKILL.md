@@ -16,7 +16,7 @@ description: >
 3. 先读目标插件现有实现、清单和 `.agent/features/<id>/`；修改保持配置字段、动作 id、RPC 与持久化数据合同。按功能做最小改动。
 4. UI 导出真正 React 函数组件，使用宿主 `__CATRACE_REACT__` / `__CATRACE_HEROUI__` 与注入的 `plugin`。设置页控件一律 HeroUI（扁平导出、`variant="secondary"` 输入、`size="sm"` 按钮），规范见 [HeroUI 设置页约定](.agent/features/shared-ui/hero-ui-settings.md)；`__CATRACE_RADIX__` 只留给旧 UI。Blob 入口必须单文件自包含；Card 动作为 `onClose` / `onAction`。
 5. effects 清理所有监听 / 定时器；异步操作检查当前请求与卸载状态。普通配置保存不写顶层 enabled，启停走 `plugin.setEnabled`。
-6. 插件版本使用改动当天 `YYYY.MM.DD`，同日再次发布增加第四段。自检清单 JSON、入口、语法与 React 导出，再跑目标插件 Node 回归。
+6. 插件版本使用改动当天 `YY.M.D`（如 `26.11.9`，与 Catrace 版本号同形、不补零），同日再次发布增加第四段。自检清单 JSON、入口、语法与 React 导出，再跑目标插件 Node 回归。
 7. 更新本插件现行知识，确认差异中无个人路径、密钥、运行数据和未要求的后台业务改动。实机验证、提交、push 均按用户授权执行。
 
 ## 按任务查阅

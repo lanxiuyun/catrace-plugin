@@ -74,7 +74,7 @@ test('manifest：声明的脚本都在插件目录内且存在', () => {
 
 test('ui/settings: React namespaces only, self-contained ESM and function exports', () => {
   assert.equal(manifest.uiFramework, 'react')
-  assert.equal(manifest.version, '2026.11.12')
+  assert.equal(manifest.version, '26.11.12')
   for (const file of ['ui.mjs', 'settings.mjs']) {
     const source = read(file)
     assert.doesNotMatch(source, /^\s*import\s|\bimport\s*\(/m, `${file} must not import sibling or bare modules`)
