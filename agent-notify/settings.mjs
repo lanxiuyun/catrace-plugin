@@ -12,20 +12,30 @@ if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGro
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
 const CSS = `
-.an-set { width:100%; display:flex; flex-direction:column; gap:1.25rem; }
+.an-set { width:100%; display:flex; flex-direction:column; gap:1.25rem; --an-card-bg:#fbfbfb; }
+/* 浅色卡片底固定 #fbfbfb；深色回到主题表面色，否则整页会亮出一块白卡。 */
+[data-theme='dark'] .an-set { --an-card-bg:var(--ct-surface); }
 .an-set .plugin-section { display:flex; flex-direction:column; gap:.75rem; }
-.an-set .section-title { margin:0; font-size:.8125rem; font-weight:700; color:var(--ct-text-muted,#475569); letter-spacing:.02rem; }
-.an-set .section-card { background:var(--ct-surface,#fff); border:1px solid var(--ct-border-card,var(--ct-border,#e2e8f0)); border-radius:1rem; padding:.75rem 1rem; box-shadow:0 .0625rem .125rem rgba(15,23,42,.03); }
-.an-set .section-desc { margin:0 0 .5rem; font-size:.75rem; color:var(--ct-text-muted,#94a3b8); line-height:1.4; }
+.an-set .section-head { display:flex; flex-direction:column; gap:.25rem; min-width:0; }
+/* 组标题在卡片外，删掉 color 后继承正文黑；不要再落回 --ct-text-muted。 */
+.an-set .section-title { margin:0; font-size:.8125rem; font-weight:700; letter-spacing:.02rem; }
+/* 组说明是 description 字体：比标题小一档、灰色，位置在标题下方、卡片外。 */
+.an-set .section-desc { margin:0; font-size:.75rem; color:var(--ct-text-muted); line-height:1.5; }
+.an-set .section-card { background:var(--an-card-bg); border:1px solid var(--ct-border-card,var(--ct-border)); border-radius:1rem; padding:0 1rem; box-shadow:0 .0625rem .125rem rgba(15,23,42,.03); }
+.an-set .section-card > .preview-row { padding:.75rem 0; }
+.an-set .section-note { margin:0; padding:.25rem 0; font-size:.75rem; color:var(--ct-text-muted); line-height:1.5; }
 .an-set .event-row { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.5rem 0; flex-wrap:wrap; }
-.an-set .event-row + .event-row { border-top:1px solid var(--ct-border,#f1f5f9); }
-.an-set .event-name { font-size:.8125rem; font-weight:400; color:var(--ct-text,#334155); }
+.an-set .event-row + .event-row { border-top:1px solid var(--ct-border); }
+.an-set .event-copy { display:flex; flex-direction:column; gap:.1875rem; min-width:0; }
+/* 设置项标题：和组标题同为 13px，但用常规字重，读起来比 700 的组标题轻一档。 */
+.an-set .event-title { font-size:.8125rem; font-weight:400; line-height:1.35; color:var(--ct-text); }
+.an-set .event-desc { font-size:.75rem; line-height:1.5; color:var(--ct-text-muted); }
 .an-set .agent-label { display:flex; align-items:center; gap:.5rem; min-width:0; }
 .an-set .preview-row { display:flex; flex-wrap:wrap; gap:.5rem; }
 .an-set .sound-path { display:flex; align-items:center; gap:.5rem; max-width:100%; justify-content:flex-end; }
 .an-set .an-sound-input { width:12rem; max-width:100%; }
 .an-set .sound-volume { display:flex; align-items:center; gap:.5rem; }
-.an-set .ed-unit { font-size:.75rem; color:var(--ct-text-muted,#94a3b8); min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
+.an-set .ed-unit { font-size:.75rem; color:var(--ct-text-muted); min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 .an-set .an-num { width:9rem; }
 .an-set .an-slider { width:8rem; }
 .an-set .an-alert { margin-bottom:.25rem; }
@@ -47,11 +57,19 @@ function ensureStyles() {
   if (el.textContent !== CSS) el.textContent = plugin.theme.css(CSS)
 }
 function section(title, desc, children) {
-  return h('section', { className:'plugin-section', key:title }, h('h3',{className:'section-title'},title),
-    h('div',{className:'section-card'},desc ? h('p',{className:'section-desc'},desc) : null,...children))
+  return h('section', { className:'plugin-section', key:title },
+    h('div',{className:'section-head'},
+      h('h3',{className:'section-title'},title),
+      desc ? h('p',{className:'section-desc'},desc) : null),
+    h('div',{className:'section-card'},...children))
 }
-function row(label, control) {
-  return h('div',{className:'event-row',key:label},h('span',{className:'event-name'},label),control)
+/** 设置标题 + 右侧控件；说明文字走 description 字体，放在标题下方。 */
+function row(title, control, desc) {
+  return h('div',{className:'event-row',key:title},
+    h('div',{className:'event-copy'},
+      h('span',{className:'event-title'},title),
+      desc ? h('span',{className:'event-desc'},desc) : null),
+    control)
 }
 /** HeroUI 默认数字输入：−/+ 步进 + secondary 灰底，取值透传给调用方的 update。 */
 function numberField({ value, min, max, step = 1, label, isDisabled, onChange }) {
@@ -218,11 +236,11 @@ export default function AgentNotifySettings() {
       h(AlertContent,null,h(AlertDescription,null,feedback.text)),
       !ready && feedback.error ? h(Button,{size:'sm',variant:'secondary',onClick:() => setLoadAttempt(value => value+1)},'重试') : null) : null,
     section('Agent 联动','检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',[
-      sidecarStale ? h('p',{className:'section-desc'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
+      sidecarStale ? h('p',{className:'section-note'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
       ...detected.map(agent => h('div',{className:'event-row',key:agent.id},
-        h('div',{className:'agent-label'},h('span',{className:'event-name'},NAMES[agent.id] || agent.id),statusChip(agent.installed)),
+        h('div',{className:'agent-label'},h('span',{className:'event-title'},NAMES[agent.id] || agent.id),statusChip(agent.installed)),
         h(Button,{size:'sm',variant:agent.installed ? 'danger-soft' : 'secondary',isDisabled:!!busy,onClick:() => void toggle(agent)},agent.installed ? '卸载 Hook' : '安装 Hook'))),
-      !detected.length ? h('p',{className:'section-desc'},'未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。') : null,
+      !detected.length ? h('p',{className:'section-note'},'未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。') : null,
       undetected.length ? row('未检测到',h('div',{className:'preview-row'},...undetected.map(a => h(Chip,{key:a.id,size:'sm',variant:'soft',color:'warning',title:'未检测到配置目录，无法写入 hook'},NAMES[a.id] || a.id)))) : null,
     ]),
     section('调试','卡片底部可看 hook stdin。常用为去重后的字段，原始保留对方传来的全文。',[
