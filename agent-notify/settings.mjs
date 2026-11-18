@@ -3,12 +3,11 @@ const HeroUI = globalThis.__CATRACE_HEROUI__ || {}
 const { createElement: h, useEffect, useRef, useState } = React
 const {
   AlertContent, AlertDescription, AlertIndicator, AlertRoot,
-  Button, Chip, Input,
-  NumberFieldDecrementButton, NumberFieldGroup, NumberFieldIncrementButton, NumberFieldInput, NumberFieldRoot,
+  Button, Input, NumberField,
   SliderFill, SliderRoot, SliderThumb, SliderTrack,
   ToggleButton, ToggleButtonGroup, ToggleButtonGroupSeparator,
 } = HeroUI
-if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGroupSeparator || !NumberFieldRoot) throw new Error('Catrace React/HeroUI runtime missing')
+if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGroupSeparator || !NumberField) throw new Error('Catrace React/HeroUI runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
 const CSS = `
@@ -31,6 +30,7 @@ const CSS = `
 .an-set .event-title { font-size:.8125rem; font-weight:400; line-height:1.35; color:var(--ct-text); }
 .an-set .event-desc { font-size:.75rem; line-height:1.5; color:var(--ct-text-muted); }
 .an-set .agent-label { display:flex; align-items:center; gap:.5rem; min-width:0; }
+.an-set .agent-undetected { padding:.125rem .4375rem; border-radius:999rem; background:var(--ct-warning-soft); color:var(--ct-warning-strong); font-size:.75rem; line-height:1.5; }
 .an-set .preview-row { display:flex; flex-wrap:wrap; gap:.5rem; }
 .an-set .sound-path { display:flex; align-items:center; gap:.5rem; max-width:100%; justify-content:flex-end; }
 .an-set .an-sound-input { width:12rem; max-width:100%; }
@@ -71,9 +71,9 @@ function row(title, control, desc) {
       desc ? h('span',{className:'event-desc'},desc) : null),
     control)
 }
-/** HeroUI 默认数字输入：−/+ 步进 + secondary 灰底，取值透传给调用方的 update。 */
+/** HeroUI NumberField 复合组件：−/+ 步进与 secondary 灰底由组件 anatomy/variant 提供。 */
 function numberField({ value, min, max, step = 1, label, isDisabled, onChange }) {
-  return h(NumberFieldRoot, {
+  return h(NumberField, {
     variant:'secondary', className:'an-num',
     value, minValue:min, maxValue:max, step,
     formatOptions:{ useGrouping:false },
@@ -85,10 +85,10 @@ function numberField({ value, min, max, step = 1, label, isDisabled, onChange })
       onChange(Math.round(next))
     },
   },
-    h(NumberFieldGroup, null,
-      h(NumberFieldDecrementButton, { 'aria-label':'减少' }),
-      h(NumberFieldInput, null),
-      h(NumberFieldIncrementButton, { 'aria-label':'增加' })))
+    h(NumberField.Group, null,
+      h(NumberField.DecrementButton, { 'aria-label':'减少' }),
+      h(NumberField.Input, null),
+      h(NumberField.IncrementButton, { 'aria-label':'增加' })))
 }
 /** Single-select segmented control; Selection from react-aria is a Set of keys.
  *  HeroUI 的分隔线要放进除第一项外的每个 ToggleButton 里（官方 anatomy），否则会少掉中间的细线。 */
@@ -105,9 +105,6 @@ function segments(value, options, onValueChange, disabled) {
     },
   },...options.map(([id,label], index) => h(ToggleButton,{id,key:id},
     index > 0 ? h(ToggleButtonGroupSeparator,{key:'separator'}) : null, label)))
-}
-function statusChip(installed) {
-  return h(Chip,{size:'sm',variant:'soft',color:installed ? 'success' : 'default'},installed ? '已安装' : '未安装')
 }
 
 export default function AgentNotifySettings() {
@@ -238,10 +235,10 @@ export default function AgentNotifySettings() {
     section('Agent 联动','检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',[
       sidecarStale ? h('p',{className:'section-note'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
       ...detected.map(agent => h('div',{className:'event-row',key:agent.id},
-        h('div',{className:'agent-label'},h('span',{className:'event-title'},NAMES[agent.id] || agent.id),statusChip(agent.installed)),
+        h('div',{className:'agent-label'},h('span',{className:'event-title'},NAMES[agent.id] || agent.id)),
         h(Button,{size:'sm',variant:agent.installed ? 'danger-soft' : 'secondary',isDisabled:!!busy,onClick:() => void toggle(agent)},agent.installed ? '卸载 Hook' : '安装 Hook'))),
       !detected.length ? h('p',{className:'section-note'},'未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。') : null,
-      undetected.length ? row('未检测到',h('div',{className:'preview-row'},...undetected.map(a => h(Chip,{key:a.id,size:'sm',variant:'soft',color:'warning',title:'未检测到配置目录，无法写入 hook'},NAMES[a.id] || a.id)))) : null,
+      undetected.length ? row('未检测到',h('div',{className:'preview-row'},...undetected.map(a => h('span',{key:a.id,className:'agent-undetected',title:'未检测到配置目录，无法写入 hook'},NAMES[a.id] || a.id)))) : null,
     ]),
     section('调试','卡片底部可看 hook stdin。常用为去重后的字段，原始保留对方传来的全文。',[
       row('调试显示',segments(config.debugView,[['off','关闭'],['common','常用'],['raw','原始']],debugView => update({debugView,showDebug:debugView !== 'off'}),!ready)),
