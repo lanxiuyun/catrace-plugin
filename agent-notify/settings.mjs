@@ -74,7 +74,7 @@ function row(title, control, desc) {
 /** HeroUI NumberField 复合组件：−/+ 步进与 secondary 灰底由组件 anatomy/variant 提供。 */
 function numberField({ value, min, max, step = 1, label, isDisabled, onChange }) {
   return h(NumberField, {
-    variant:'secondary', className:'an-num',
+    className:'an-num',
     value, minValue:min, maxValue:max, step,
     formatOptions:{ useGrouping:false },
     isDisabled, 'aria-label':label,
