@@ -145,7 +145,7 @@ test('Agent settings use shared cards and rows without wrapping native notes or 
   assert.deepEqual(rows(cards[0]).map(row => row.props.title),['Claude Code','未检测到'])
   assert.deepEqual(rows(cards[1]).map(row => row.props.title),['调试显示','默认状态'])
   assert.equal(rows(cards[2]).length,10)
-  assert.deepEqual(rows(cards[3]).map(row => row.props.title),['提示音模式','提示音音量','试听'])
+  assert.deepEqual(rows(cards[3]).map(row => row.props.title),['提示音模式','提示音音量'])
   assert.ok(rows(tree).every(row => row.props.control))
   assert.equal(rows(cards[4]).length,0)
   assert.equal(controls(cards[4],'HeroButton').length,5)
@@ -163,9 +163,8 @@ test('Agent settings keep native empty-detection notes outside shared rows',asyn
   assert.equal(card.props.children.filter(Boolean)[0].type,'p')
 })
 
-test('Agent settings label controls and keep custom audio input disabled semantics and saving',async t => {
-  const saved=[]
-  const h=harness({config:{get:async () => ({soundMode:'custom',soundPath:'old.wav',customMarker:'keep'}),set:async value => saved.push(value)}})
+test('Agent settings label controls and keep the custom audio path read-only',async t => {
+  const h=harness({config:{get:async () => ({soundMode:'custom',soundPath:'old.wav',customMarker:'keep'}),set:async () => {}}})
   t.after(() => h.dispose())
   const mod=await h.load('settings.mjs')
   const initial=h.render(mod.default)
@@ -180,13 +179,12 @@ test('Agent settings label controls and keep custom audio input disabled semanti
   assert.equal(input.props['aria-label'],'音频文件路径')
   assert.equal(input.props.disabled,false)
   assert.equal(Object.hasOwn(input.props,'isDisabled'),false)
+  assert.equal(input.props.readOnly,true)
+  assert.equal(Object.hasOwn(input.props,'onChange'),false)
+  assert.equal(input.props.value,'old.wav')
   assert.ok(controls(ready,'HeroToggleButtonGroup').every(node => node.props.isDisabled===false))
-  input.props.onChange({target:{value:'new.wav'}})
-  assert.equal(saved.length,0,'file path still uses debounced saving')
-  input.props.onBlur();await flush()
-  assert.equal(saved.at(-1).soundPath,'new.wav')
-  assert.equal(saved.at(-1).soundMode,'custom')
-  assert.equal(saved.at(-1).customMarker,'keep')
+  const audioRow=controls(ready,'HostSettingsCardRow').find(node => node.props.title==='音频文件路径')
+  assert.deepEqual(controls(audioRow,'HeroButton').map(node => [node.props.children].flat().join('')),['选择文件','试听'])
 })
 
 test('Agent settings require the latest shared settings UI runtime',async t => {
