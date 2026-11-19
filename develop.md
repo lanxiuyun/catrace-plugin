@@ -52,18 +52,20 @@
 
 ```js
 const { createElement: h, useState } = globalThis.__CATRACE_REACT__
-const { Button, Input } = globalThis.__CATRACE_HEROUI__
+const { Input } = globalThis.__CATRACE_HEROUI__
+const { SettingsCard, SettingsCardRow } = globalThis.__CATRACE_SETTINGS_UI__
 
 export default function Settings() {
   const [token,setToken] = useState('')
-  return h('section',{className:'my-plugin-card'},
-    h(Input,{variant:'secondary',value:token,onChange:event => setToken(event.target.value),'aria-label':'Token'}),
-    h(Button,{size:'sm',variant:'primary',onClick:() => save(token)},'保存'))
+  return h(SettingsCard,{title:'连接设置',description:'配置服务访问凭证。'},
+    h(SettingsCardRow,{title:'Token',control:
+      h(Input,{variant:'secondary',value:token,onChange:event => setToken(event.target.value),'aria-label':'Token'})}))
 }
 ```
 
 - Card 导出 `default` / `Card` / `card`；设置面板导出 `default` / `Settings` / `settings`，使用普通 React 函数组件与 hooks。
 - `__CATRACE_REACT__` 是 React 命名空间；`__CATRACE_HEROUI__` 是 HeroUI v3 命名空间，组件样式与深浅色由宿主页面提供，插件不用自带控件皮肤。用扁平导出（`SwitchRoot` / `SwitchContent` / `SelectRoot` / `SelectTrigger` …），不用 `Switch.Content` 这类复合静态属性。
+- `__CATRACE_SETTINGS_UI__` 提供宿主公共设置组件 `{ SettingsCard, SettingsCardRow }`。`SettingsCard` props：`title: string`、`description?: string`、`children`；`SettingsCardRow` props：`title: string`、`description?: string`、`control: ReactNode`、`stack?: boolean`、`children?: ReactNode`。卡片标题、说明、背景、行布局由宿主管理，不依赖宿主 CSS 类名。Card 只在连续的 SettingsCardRow 之间插入 Separator，原生备注与预览按钮组不参与分隔。使用该接口的插件要求最新版宿主，缺失时显式抛错，不提供旧宿主兼容。
 - `__CATRACE_RADIX__` 是 Radix Themes 命名空间，只为尚未迁移的旧卡片 / 旧设置页保留；新代码不要再用。宿主没有 `__CATRACE_HEROUI__` 时设置页应显式抛错，不要静默退回原生控件。
 - Card props 为 `event`、`isHovered`、`remainingMs`、`totalMs`，动作通过 `onClose()` / `onAction(actionId)` 回调。业务动作在后台 / sidecar 中处理。
 - Blob 模块必须自包含：不能 bare import 包，也不能相对 import 兄弟文件。需要拆分源码时，先构建为单文件 ESM，再交付清单入口。

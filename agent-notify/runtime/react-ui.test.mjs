@@ -10,7 +10,7 @@ const flush=async () => {for(let i=0;i<40;i++)await Promise.resolve()}
 const read=file => readFileSync(join(ROOT,file),'utf8').replace(/\r\n/g,'\n')
 
 function harness(api={}) {
-  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_HEROUI__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
+  const globals=['__CATRACE_REACT__','__CATRACE_RADIX__','__CATRACE_HEROUI__','__CATRACE_SETTINGS_UI__','__CATRACE_CREATE_PLUGIN_API__','document','window','fetch','setTimeout','clearTimeout','setInterval','clearInterval']
   const before=new Map(globals.map(key => [key,{present:Object.hasOwn(globalThis,key),value:globalThis[key]}]))
   const instances=new Map()
   const timeouts=new Map()
@@ -37,6 +37,10 @@ function harness(api={}) {
   globalThis.__CATRACE_RADIX__={Button:'RadixButton',Badge:'RadixBadge',Switch:'RadixSwitch',TextField:{Root:'RadixTextField'},TextArea:'RadixTextArea',Tooltip:'RadixTooltip',Slider:'RadixSlider',SegmentedControl:{Root:'RadixSegments',Item:'RadixSegment'}}
   const HeroNumberField=Object.assign('HeroNumberField',{Group:'HeroNumberFieldGroup',Input:'HeroNumberFieldInput',IncrementButton:'HeroNumberFieldIncrement',DecrementButton:'HeroNumberFieldDecrement'})
   globalThis.__CATRACE_HEROUI__={AlertRoot:'HeroAlert',AlertIndicator:'HeroAlertIndicator',AlertContent:'HeroAlertContent',AlertDescription:'HeroAlertDescription',Button:'HeroButton',Chip:'HeroChip',Input:'HeroInput',NumberField:HeroNumberField,SliderRoot:'HeroSlider',SliderTrack:'HeroSliderTrack',SliderFill:'HeroSliderFill',SliderThumb:'HeroSliderThumb',ToggleButton:'HeroToggleButton',ToggleButtonGroup:'HeroToggleButtonGroup',ToggleButtonGroupSeparator:'HeroToggleButtonGroupSeparator'}
+  globalThis.__CATRACE_SETTINGS_UI__={
+    SettingsCard:'HostSettingsCard',
+    SettingsCardRow:props => globalThis.__CATRACE_REACT__.createElement('HostSettingsCardRow',props,props.control,...props.children),
+  }
   globalThis.__CATRACE_CREATE_PLUGIN_API__=() => ({
     config:{get:async () => ({}),set:async () => {}},sidecar:{request:async () => ({contract:7,config:{},flat:[]})},
     dialog:{pickFolder:async () => null},shell:{openExternal:async () => {}},theme:{css:css => css},...api,
@@ -126,6 +130,69 @@ test('Agent React surfaces are self-contained functions, with reactive settings 
     assert.match(read(file),/export default function/)
     assert.doesNotMatch(read(file),/__CATRACE_VUE__|__CATRACE_NAIVE__|^import\s/m)
   }
+})
+
+test('Agent settings use shared cards and rows without wrapping native notes or previews',async t => {
+  const h=harness({sidecar:{request:async () => [{id:'claude',detected:true,installed:false},{id:'kimi',detected:false,installed:false}]}})
+  t.after(() => h.dispose())
+  const mod=await h.load('settings.mjs')
+  h.render(mod.default);await flush()
+  const tree=h.render(mod.default)
+  const cards=controls(tree,'HostSettingsCard')
+  assert.deepEqual(cards.map(card => card.props.title),['Agent 联动','调试','事件通知策略','提示音','调试卡片'])
+  assert.ok(cards.every(card => typeof card.props.description==='string' && card.props.description.length>0))
+  const rows=card => controls(card,'HostSettingsCardRow')
+  assert.deepEqual(rows(cards[0]).map(row => row.props.title),['Claude Code','未检测到'])
+  assert.deepEqual(rows(cards[1]).map(row => row.props.title),['调试显示','默认状态'])
+  assert.equal(rows(cards[2]).length,10)
+  assert.deepEqual(rows(cards[3]).map(row => row.props.title),['提示音模式','提示音音量','试听'])
+  assert.ok(rows(tree).every(row => row.props.control))
+  assert.equal(rows(cards[4]).length,0)
+  assert.equal(controls(cards[4],'HeroButton').length,5)
+  assert.equal(cards[4].props.children.filter(Boolean)[0].type,'div')
+  assert.doesNotMatch(read('settings.mjs'),/section-card|section-head|section-title|section-desc|event-row|event-copy|event-title|event-desc|--an-card-bg/)
+})
+
+test('Agent settings keep native empty-detection notes outside shared rows',async t => {
+  const h=harness({sidecar:{request:async () => []}});t.after(() => h.dispose())
+  const mod=await h.load('settings.mjs')
+  h.render(mod.default);await flush()
+  const card=controls(h.render(mod.default),'HostSettingsCard')[0]
+  assert.equal(controls(card,'HostSettingsCardRow').length,0)
+  assert.match(text(card),/未检测到 AI Agent/)
+  assert.equal(card.props.children.filter(Boolean)[0].type,'p')
+})
+
+test('Agent settings label controls and keep custom audio input disabled semantics and saving',async t => {
+  const saved=[]
+  const h=harness({config:{get:async () => ({soundMode:'custom',soundPath:'old.wav',customMarker:'keep'}),set:async value => saved.push(value)}})
+  t.after(() => h.dispose())
+  const mod=await h.load('settings.mjs')
+  const initial=h.render(mod.default)
+  const groups=controls(initial,'HeroToggleButtonGroup')
+  assert.deepEqual(groups.map(node => node.props['aria-label']),['调试显示','默认状态',...['会话开始','开始思考','调用工具中','工具调用完成','工具调用失败','任务完成','任务出错 / 异常','等待交互','权限请求'],'提示音模式'])
+  assert.ok(groups.every(node => node.props.isDisabled===true))
+  assert.equal(controls(initial,'HeroSlider')[0].props['aria-label'],'提示音音量')
+  assert.equal(controls(initial,'HeroSlider')[0].props.isDisabled,true)
+  await flush()
+  const ready=h.render(mod.default)
+  const input=controls(ready,'HeroInput')[0]
+  assert.equal(input.props['aria-label'],'音频文件路径')
+  assert.equal(input.props.disabled,false)
+  assert.equal(Object.hasOwn(input.props,'isDisabled'),false)
+  assert.ok(controls(ready,'HeroToggleButtonGroup').every(node => node.props.isDisabled===false))
+  input.props.onChange({target:{value:'new.wav'}})
+  assert.equal(saved.length,0,'file path still uses debounced saving')
+  input.props.onBlur();await flush()
+  assert.equal(saved.at(-1).soundPath,'new.wav')
+  assert.equal(saved.at(-1).soundMode,'custom')
+  assert.equal(saved.at(-1).customMarker,'keep')
+})
+
+test('Agent settings require the latest shared settings UI runtime',async t => {
+  const h=harness();t.after(() => h.dispose())
+  delete globalThis.__CATRACE_SETTINGS_UI__
+  await assert.rejects(h.load('settings.mjs'),/Catrace settings UI runtime missing/)
 })
 
 test('Agent React Card preserves multi-question answers, custom text and HTTP permission decision',async t => {
