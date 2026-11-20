@@ -3,18 +3,18 @@ const HeroUI = globalThis.__CATRACE_HEROUI__ || {}
 const { SettingsCard, SettingsCardRow } = globalThis.__CATRACE_SETTINGS_UI__ || {}
 const { createElement: h, useEffect, useRef, useState } = React
 const {
-  AlertContent, AlertDescription, AlertIndicator, AlertRoot,
+  Toast, ToastQueue,
   Button, Input, NumberField,
   SliderFill, SliderRoot, SliderThumb, SliderTrack,
   ToggleButton, ToggleButtonGroup, ToggleButtonGroupSeparator,
 } = HeroUI
-if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGroupSeparator || !NumberField) throw new Error('Catrace React/HeroUI runtime missing')
+if (typeof h !== 'function' || !Button || !ToggleButtonGroup || !ToggleButtonGroupSeparator || !NumberField || !Toast?.Provider || !ToastQueue) throw new Error('Catrace React/HeroUI runtime missing')
 if (!SettingsCard || !SettingsCardRow) throw new Error('Catrace settings UI runtime missing')
 
 const STYLE_ID = 'catrace-plugin-agent-notify-settings-css'
+const feedbackQueue = new ToastQueue({ maxVisibleToasts: 3 })
 const CSS = `
 .an-set { width:100%; display:flex; flex-direction:column; gap:1.25rem; }
-.an-set .an-card-preview { padding:.75rem 0; }
 .an-set .section-note { margin:0; padding:.25rem 0; font-size:.75rem; color:var(--ct-text-muted); line-height:1.5; }
 
 .an-set .agent-undetected { padding:.125rem .4375rem; border-radius:999rem; background:var(--ct-warning-soft); color:var(--ct-warning-strong); font-size:.75rem; line-height:1.5; }
@@ -25,7 +25,6 @@ const CSS = `
 .an-set .ed-unit { font-size:.75rem; color:var(--ct-text-muted); min-width:2.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 .an-set .an-num { width:9rem; }
 .an-set .an-slider { width:8rem; }
-.an-set .an-alert { margin-bottom:.25rem; }
 `
 const EVENTS = [
   ['SessionStart', '会话开始'], ['UserPromptSubmit', '开始思考'], ['PreToolUse', '调用工具中'],
@@ -128,13 +127,19 @@ export default function AgentNotifySettings() {
   const [sidecarStale,setSidecarStale] = useState(false)
   const [ready,setReady] = useState(false)
   const [loadAttempt,setLoadAttempt] = useState(0)
-  const [feedback,setFeedback] = useState(null)
   const alive = useRef(true)
   const saveTimer = useRef(null)
   const dirty = useRef(false)
   const saveQueue = useRef(Promise.resolve())
   const hookOperation = useRef(null)
-  const notify = (text,error=false) => { if (alive.current) setFeedback({text,error}) }
+  const notify = (text,error=false) => {
+    if (!alive.current) return
+    feedbackQueue.add({
+      title: error ? '操作失败' : '操作完成',
+      description: text,
+      variant: error ? 'danger' : 'default',
+    })
+  }
   const errorText = error => error instanceof Error ? error.message : String(error)
 
   async function loadAgents(signal) {
@@ -228,7 +233,7 @@ export default function AgentNotifySettings() {
   }
   async function preview(kind) {
     setPreviewBusy(kind)
-    try { await plugin.sidecar.request('testCard',{kind}); notify('已弹出测试卡片') }
+    try { await plugin.sidecar.request('testCard',{kind}) }
     catch (error) { notify(errorText(error),true) }
     finally { if (alive.current) setPreviewBusy('') }
   }
@@ -252,10 +257,7 @@ export default function AgentNotifySettings() {
   const undetected = agents.filter(a => a.detected === false)
   const strategy = [['off','不通知'],['auto','自动消失'],['sticky','常驻']]
   return h('div',{className:'an-set'},
-    feedback ? h(AlertRoot,{status:feedback.error ? 'danger' : 'accent',className:'an-alert',role:feedback.error ? 'alert' : 'status'},
-      h(AlertIndicator),
-      h(AlertContent,null,h(AlertDescription,null,feedback.text)),
-      !ready && feedback.error ? h(Button,{size:'sm',variant:'secondary',onClick:() => setLoadAttempt(value => value+1)},'重试') : null) : null,
+    h(Toast.Provider,{placement:'top',queue:feedbackQueue}),
     section('Agent 联动','检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',[
       sidecarStale ? h('p',{className:'section-note'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
       ...detected.map(agent => row(NAMES[agent.id] || agent.id,
@@ -278,8 +280,8 @@ export default function AgentNotifySettings() {
       config.soundMode !== 'muted' ? row('提示音音量',h('div',{className:'sound-volume'},h(SliderRoot,{'aria-label':'提示音音量',className:'an-slider',value:config.soundVolume,minValue:0,maxValue:1,step:.05,isDisabled:!ready,onChange:value => { if (typeof value === 'number') update({soundVolume:value},200) }},h(SliderTrack,null,h(SliderFill),h(SliderThumb))),h('span',{className:'ed-unit'},`${Math.round(config.soundVolume*100)}%`))) : null,
       config.soundMode === 'custom' ? row('音频文件路径',h('div',{className:'sound-path'},h(Input,{className:'an-sound-input','aria-label':'音频文件路径',value:config.soundPath,placeholder:'选择本地音频文件',disabled:!ready,readOnly:true}),h(Button,{size:'sm',variant:'secondary',isDisabled:!ready,onClick:() => void pickSoundFile()},'选择文件'),h(Button,{size:'sm',variant:'tertiary',isDisabled:!ready,onClick:() => void playPreview()},'试听'))) : null,
     ]),
-    section('调试卡片','弹出真实 Toast，方便看会话卡、工具批准和问答卡。问答卡可以点选项并提交。',[
-      h('div',{className:'preview-row an-card-preview'},...[['stop','任务完成'],['working','调用工具中'],['tool','批准工具'],['ask','回答问题'],['ask-multi','多题问答']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'tertiary',isDisabled:!!previewBusy,onClick:() => void preview(kind)},label))),
+    section('调试卡片','弹出测试 Toast，方便预览会话卡、工具批准和问答卡。问答卡可以点选项并提交。',[
+      h('div',{className:'preview-row'},...[['stop','任务完成'],['working','调用工具中'],['tool','批准工具'],['ask','回答问题'],['ask-multi','多题问答']].map(([kind,label]) => h(Button,{key:kind,size:'sm',variant:'tertiary',isDisabled:!!previewBusy,onClick:() => void preview(kind)},label))),
     ]))
 }
 export { AgentNotifySettings as Settings }

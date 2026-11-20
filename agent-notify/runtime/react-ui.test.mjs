@@ -7,6 +7,7 @@ import test from 'node:test'
 
 const ROOT=join(dirname(fileURLToPath(import.meta.url)),'..')
 const flush=async () => {for(let i=0;i<40;i++)await Promise.resolve()}
+const toastQueues=[]
 const read=file => readFileSync(join(ROOT,file),'utf8').replace(/\r\n/g,'\n')
 
 function harness(api={}) {
@@ -36,7 +37,9 @@ function harness(api={}) {
   }
   globalThis.__CATRACE_RADIX__={Button:'RadixButton',Badge:'RadixBadge',Switch:'RadixSwitch',TextField:{Root:'RadixTextField'},TextArea:'RadixTextArea',Tooltip:'RadixTooltip',Slider:'RadixSlider',SegmentedControl:{Root:'RadixSegments',Item:'RadixSegment'}}
   const HeroNumberField=Object.assign('HeroNumberField',{Group:'HeroNumberFieldGroup',Input:'HeroNumberFieldInput',IncrementButton:'HeroNumberFieldIncrement',DecrementButton:'HeroNumberFieldDecrement'})
-  globalThis.__CATRACE_HEROUI__={AlertRoot:'HeroAlert',AlertIndicator:'HeroAlertIndicator',AlertContent:'HeroAlertContent',AlertDescription:'HeroAlertDescription',Button:'HeroButton',Chip:'HeroChip',Input:'HeroInput',NumberField:HeroNumberField,SliderRoot:'HeroSlider',SliderTrack:'HeroSliderTrack',SliderFill:'HeroSliderFill',SliderThumb:'HeroSliderThumb',ToggleButton:'HeroToggleButton',ToggleButtonGroup:'HeroToggleButtonGroup',ToggleButtonGroupSeparator:'HeroToggleButtonGroupSeparator'}
+  const toastQueue={items:[],add(item){this.items.push(item)}}
+  toastQueues.push(toastQueue)
+  globalThis.__CATRACE_HEROUI__={AlertRoot:'HeroAlert',AlertIndicator:'HeroAlertIndicator',AlertContent:'HeroAlertContent',AlertDescription:'HeroAlertDescription',Button:'HeroButton',Chip:'HeroChip',Input:'HeroInput',NumberField:HeroNumberField,SliderRoot:'HeroSlider',SliderTrack:'HeroSliderTrack',SliderFill:'HeroSliderFill',SliderThumb:'HeroSliderThumb',ToggleButton:'HeroToggleButton',ToggleButtonGroup:'HeroToggleButtonGroup',ToggleButtonGroupSeparator:'HeroToggleButtonGroupSeparator',Toast:{Provider:'HeroToastProvider'},ToastQueue:class {add(item){toastQueue.add(item)}}}
   globalThis.__CATRACE_SETTINGS_UI__={
     SettingsCard:'HostSettingsCard',
     SettingsCardRow:props => globalThis.__CATRACE_REACT__.createElement('HostSettingsCardRow',props,props.control,...props.children),
@@ -78,6 +81,7 @@ function harness(api={}) {
     },
     async timers() {const pending=[...timeouts.values()];timeouts.clear();for(const fn of pending)fn();await flush()},
     pendingTimers:() => timeouts.size,
+    toasts:() => toastQueue.items,
     async dispose() {
       if(disposed)return
       disposed=true
@@ -125,8 +129,9 @@ test('Agent React surfaces are self-contained functions, with reactive settings 
   assert.equal(saved.at(-1).customMarker,'keep')
   assert.equal(Object.keys(saved.at(-1).eventModes).length,9)
   assert.ok(rpc.some(call => call.method==='setConfig'))
-  click(button(tree,'安装 Hook'));await flush();assert.ok(rpc.some(call => call.method==='install'&&call.params.agent==='claude'))
-  click(button(tree,'多题问答'));await flush();assert.ok(rpc.some(call => call.method==='testCard'&&call.params.kind==='ask-multi'))
+  click(button(tree,'多题问答'));await flush()
+  assert.ok(rpc.some(call => call.method==='testCard'&&call.params.kind==='ask-multi'))
+  assert.equal(h.toasts().length,0,'preview success should not emit a toast')
   for(const file of ['settings.mjs','ui.mjs']) {
     assert.match(read(file),/export default function/)
     assert.doesNotMatch(read(file),/__CATRACE_VUE__|__CATRACE_NAIVE__|^import\s/m)
@@ -151,7 +156,7 @@ test('Agent settings use shared cards and rows without wrapping native notes or 
   assert.equal(rows(cards[4]).length,0)
   assert.equal(controls(cards[4],'HeroButton').length,5)
   assert.equal(cards[4].props.children.filter(Boolean)[0].type,'div')
-  assert.doesNotMatch(read('settings.mjs'),/section-card|section-head|section-title|section-desc|event-row|event-copy|event-title|event-desc|--an-card-bg/)
+  assert.doesNotMatch(read('settings.mjs'),/section-card|section-head|section-title|section-desc|event-row|event-copy|event-title|event-desc|--an-card-bg|an-card-preview/)
 })
 
 test('Agent settings keep native empty-detection notes outside shared rows',async t => {
@@ -194,6 +199,12 @@ test('Agent settings require the latest shared settings UI runtime',async t => {
   await assert.rejects(h.load('settings.mjs'),/Catrace settings UI runtime missing/)
 })
 
+test('Agent settings require HeroUI toast support',async t => {
+  const h=harness();t.after(() => h.dispose())
+  delete globalThis.__CATRACE_HEROUI__.Toast
+  await assert.rejects(h.load('settings.mjs'),/Catrace React\/HeroUI runtime missing/)
+})
+
 test('Agent React settings poll Pi installation, report configured and uninstall',async t => {
   const rpc=[]
   let installed=false,polls=0
@@ -219,12 +230,12 @@ test('Agent React settings poll Pi installation, report configured and uninstall
   assert.ok(button(h.render(Settings),'正在安装…'))
   await h.timers()
   let tree=h.render(Settings)
-  assert.match(text(tree),/Pi Hook 已配置/)
-  assert.match(text(tree),/重启 Pi 或 pi-web/)
+  assert.equal(h.toasts().some(item => item.description==='Pi Hook 已配置，请重启 Pi 或 pi-web 生效'),true)
+  assert.match(text(tree),/卸载 Hook/)
   click(button(tree,'卸载 Hook'));await flush()
   tree=h.render(Settings)
   assert.ok(button(tree,'安装 Hook'))
-  assert.match(text(tree),/\/webhook reload/)
+  assert.match(h.toasts().at(-1).description,/\/webhook reload/)
   assert.deepEqual(rpc.map(({method}) => method),['listAgents','install','piInstallStatus','piInstallStatus','listAgents','uninstall','listAgents'])
   assert.deepEqual(rpc[1].params,{agent:'pi'})
   assert.deepEqual(rpc[5].params,{agent:'pi'})
@@ -241,9 +252,9 @@ test('Agent React settings show Pi install errors and stop polling when unmounte
   const {default:Settings}=await h.load('settings.mjs')
   h.render(Settings);await flush()
   click(button(h.render(Settings),'安装 Hook'));await flush();await h.timers()
-  const tree=h.render(Settings)
-  assert.match(text(tree),/未检测到 npm/)
-  click(button(tree,'安装 Hook'));await flush()
+  h.render(Settings)
+  assert.equal(h.toasts().some(item => item.variant==='danger' && item.description==='未检测到 npm'),true)
+  click(button(h.render(Settings),'安装 Hook'));await flush()
   assert.equal(h.pendingTimers(),1)
   await h.dispose()
   assert.equal(h.pendingTimers(),0)
