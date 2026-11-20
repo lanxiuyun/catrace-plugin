@@ -16,6 +16,7 @@ const CSS = `
 .an-set { width:100%; display:flex; flex-direction:column; gap:1.25rem; }
 .an-set .an-card-preview { padding:.75rem 0; }
 .an-set .section-note { margin:0; padding:.25rem 0; font-size:.75rem; color:var(--ct-text-muted); line-height:1.5; }
+
 .an-set .agent-undetected { padding:.125rem .4375rem; border-radius:999rem; background:var(--ct-warning-soft); color:var(--ct-warning-strong); font-size:.75rem; line-height:1.5; }
 .an-set .preview-row { display:flex; flex-wrap:wrap; gap:.5rem; }
 .an-set .sound-path { display:flex; align-items:center; gap:.5rem; max-width:100%; justify-content:flex-end; }
@@ -31,7 +32,7 @@ const EVENTS = [
   ['PostToolUse', '工具调用完成'], ['PostToolUseFailure', '工具调用失败'], ['Stop', '任务完成'],
   ['StopFailure', '任务出错 / 异常'], ['Notification', '等待交互'], ['PermissionRequest', '权限请求'],
 ]
-const NAMES = { claude:'Claude Code', zcode:'ZCode', codex:'Codex', gemini:'Gemini CLI', kimi:'Kimi' }
+const NAMES = { claude:'Claude Code', zcode:'ZCode', codex:'Codex', gemini:'Gemini CLI', kimi:'Kimi', pi:'Pi' }
 const DEFAULTS = {
   showDebug:false, debugView:'off', debugExpanded:false, autoHideSeconds:8,
   eventModes:{ SessionStart:'auto', UserPromptSubmit:'auto', PreToolUse:'off', PostToolUse:'off', PostToolUseFailure:'off', Stop:'sticky', StopFailure:'sticky', Notification:'sticky', PermissionRequest:'sticky' },
@@ -86,6 +87,38 @@ function segments(label, value, options, onValueChange, disabled) {
     index > 0 ? h(ToggleButtonGroupSeparator,{key:'separator'}) : null, label)))
 }
 
+async function requestSidecar(method, params = {}) {
+  const reply = await plugin.sidecar.request(method, params)
+  if (reply?.ok === false) throw new Error(reply.error || '后台操作失败')
+  return reply?.result ?? reply
+}
+
+function waitForPiPoll(signal) {
+  return new Promise(resolve => {
+    if (signal.aborted) { resolve(); return }
+    const timer = setTimeout(finish, 500)
+    function finish() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    signal.addEventListener('abort', finish, { once:true })
+  })
+}
+
+async function installPiHook(signal) {
+  await requestSidecar('install', { agent:'pi' })
+  const deadline = Date.now() + 120_000
+  while (!signal.aborted && Date.now() < deadline) {
+    await waitForPiPoll(signal)
+    if (signal.aborted) return
+    const task = await requestSidecar('piInstallStatus')
+    if (task.error) throw new Error(task.error)
+    if (!task.running) return
+  }
+  if (!signal.aborted) throw new Error('安装仍在后台进行，请稍后重新打开设置')
+}
+
 export default function AgentNotifySettings() {
   const [config,setConfig] = useState(() => ({...DEFAULTS,eventModes:{...DEFAULTS.eventModes}}))
   const configRef = useRef(config)
@@ -100,22 +133,18 @@ export default function AgentNotifySettings() {
   const saveTimer = useRef(null)
   const dirty = useRef(false)
   const saveQueue = useRef(Promise.resolve())
-  const hookOperation = useRef(false)
+  const hookOperation = useRef(null)
   const notify = (text,error=false) => { if (alive.current) setFeedback({text,error}) }
   const errorText = error => error instanceof Error ? error.message : String(error)
 
-  async function loadAgents() {
-    try {
-      const list = await plugin.sidecar.request('listAgents',{})
-      const result = list?.result ?? list
-      const rows = Array.isArray(result) ? result : []
-      if (alive.current) { setAgents(rows); setSidecarStale(rows.some(a => a.detected === undefined)) }
-      return rows
-    } catch {
-      const rows = Object.keys(NAMES).map(id => ({id,installed:false,detected:true}))
-      if (alive.current) setAgents(rows)
-      return rows
+  async function loadAgents(signal) {
+    const rows = await requestSidecar('listAgents')
+    if (!Array.isArray(rows)) throw new Error('插件后台未返回 Agent 列表')
+    if (alive.current && !signal.aborted) {
+      setAgents(rows)
+      setSidecarStale(rows.some(a => a.detected === undefined))
     }
+    return rows
   }
   function persist() {
     if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -141,6 +170,7 @@ export default function AgentNotifySettings() {
   }
   useEffect(() => {
     alive.current = true
+    const load = new AbortController()
     ensureStyles()
     void (async () => {
       try {
@@ -155,31 +185,46 @@ export default function AgentNotifySettings() {
           soundMode:['builtin','custom','muted'].includes(raw.soundMode) ? raw.soundMode : 'builtin',
           soundPath:String(raw.soundPath || ''),soundVolume:Number.isFinite(volume) ? Math.min(1,Math.max(0,volume)) : 1,
         }
-        if (!alive.current) return
+        if (load.signal.aborted) return
         configRef.current = loaded
         setConfig(loaded)
-      } catch (error) { notify(`读取配置失败：${errorText(error)}`,true); return }
-      if (alive.current) setReady(true)
-      await loadAgents()
+      } catch (error) {
+        if (!load.signal.aborted) notify(`读取配置失败：${errorText(error)}`,true)
+        return
+      }
+      setReady(true)
+      try { await loadAgents(load.signal) }
+      catch (error) {
+        if (!load.signal.aborted) { setSidecarStale(true); notify(`读取 Agent 联动失败：${errorText(error)}`,true) }
+      }
     })()
     return () => {
       alive.current = false
+      load.abort()
+      hookOperation.current?.abort()
       if (saveTimer.current) clearTimeout(saveTimer.current)
       if (dirty.current) void persist()
     }
   },[loadAttempt])
   async function toggle(agent) {
     if (hookOperation.current) return
-    hookOperation.current = true
+    const operation = new AbortController()
+    hookOperation.current = operation
     setBusy(agent.id)
     const installing = !agent.installed
+    const isPi = agent.id === 'pi'
     try {
-      await plugin.sidecar.request(installing ? 'install' : 'uninstall',{agent:agent.id})
-      const rows = await loadAgents()
-      if (installing && !rows.find(a => a.id === agent.id)?.installed) notify('没有写入成功（该 Agent 的配置目录可能不存在）',true)
+      if (isPi && installing) await installPiHook(operation.signal)
+      else await requestSidecar(installing ? 'install' : 'uninstall',{agent:agent.id})
+      if (operation.signal.aborted) return
+      const rows = await loadAgents(operation.signal)
+      if (operation.signal.aborted) return
+      const updated = rows.find(a => a.id === agent.id)
+      if (!updated || updated.installed !== installing) notify('未能确认 Hook 配置已更新',true)
+      else if (isPi) notify(installing ? 'Pi Hook 已配置，请重启 Pi 或 pi-web 生效' : 'Pi Hook 已卸载，请在 Pi 中执行 /webhook reload')
       else notify(installing ? 'Hook 已安装' : 'Hook 已卸载')
-    } catch (error) { notify(errorText(error),true) }
-    finally { hookOperation.current = false; if (alive.current) setBusy('') }
+    } catch (error) { if (!operation.signal.aborted) notify(errorText(error),true) }
+    finally { hookOperation.current = null; if (!operation.signal.aborted && alive.current) setBusy('') }
   }
   async function preview(kind) {
     setPreviewBusy(kind)
@@ -213,9 +258,11 @@ export default function AgentNotifySettings() {
       !ready && feedback.error ? h(Button,{size:'sm',variant:'secondary',onClick:() => setLoadAttempt(value => value+1)},'重试') : null) : null,
     section('Agent 联动','检测到配置目录的 Agent 可一键写入 hook 配置；未检测到的只作标记，不提供安装。',[
       sidecarStale ? h('p',{className:'section-note'},'插件进程的检测信息不完整，请关闭再开启本插件。') : null,
-      ...detected.map(agent => h(SettingsCardRow,{key:agent.id,title:NAMES[agent.id] || agent.id,
-        control:h(Button,{size:'sm',variant:agent.installed ? 'danger-soft' : 'secondary',isDisabled:!!busy,onClick:() => void toggle(agent)},agent.installed ? '卸载 Hook' : '安装 Hook')})),
-      !detected.length ? h('p',{className:'section-note'},'未检测到 AI Agent。需要存在 ~/.claude、~/.zcode/cli、~/.codex、~/.gemini 或 ~/.kimi 其中一个配置目录。') : null,
+      ...detected.map(agent => row(NAMES[agent.id] || agent.id,
+        h(Button,{size:'sm',variant:agent.installed ? 'danger-soft' : 'secondary',isDisabled:!!busy,onClick:() => void toggle(agent)},
+          busy === agent.id ? (agent.installed ? '正在卸载…' : '正在安装…') : agent.installed ? '卸载 Hook' : '安装 Hook'),
+        agent.id === 'pi' ? (agent.installed ? '已配置 · Webhook 仅用于状态提醒' : '通过 Webhook 接收 Pi / pi-web 状态提醒') : undefined)),
+      !detected.length && ready && !sidecarStale ? h('p',{className:'section-note'},'未检测到 AI Agent。请先安装对应 Agent 并初始化其配置目录。') : null,
       undetected.length ? row('未检测到',h('div',{className:'preview-row'},...undetected.map(a => h('span',{key:a.id,className:'agent-undetected',title:'未检测到配置目录，无法写入 hook'},NAMES[a.id] || a.id)))) : null,
     ]),
     section('调试','卡片底部可看 hook stdin。常用为去重后的字段，原始保留对方传来的全文。',[

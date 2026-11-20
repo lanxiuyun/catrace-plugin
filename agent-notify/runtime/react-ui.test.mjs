@@ -77,6 +77,7 @@ function harness(api={}) {
       return tree
     },
     async timers() {const pending=[...timeouts.values()];timeouts.clear();for(const fn of pending)fn();await flush()},
+    pendingTimers:() => timeouts.size,
     async dispose() {
       if(disposed)return
       disposed=true
@@ -191,6 +192,102 @@ test('Agent settings require the latest shared settings UI runtime',async t => {
   const h=harness();t.after(() => h.dispose())
   delete globalThis.__CATRACE_SETTINGS_UI__
   await assert.rejects(h.load('settings.mjs'),/Catrace settings UI runtime missing/)
+})
+
+test('Agent React settings poll Pi installation, report configured and uninstall',async t => {
+  const rpc=[]
+  let installed=false,polls=0
+  const h=harness({sidecar:{request:async (method,params) => {
+    rpc.push({method,params})
+    if(method==='listAgents') return [{id:'pi',detected:true,installed}]
+    if(method==='install') return {running:true}
+    if(method==='piInstallStatus') {
+      if(++polls===1) return {running:true}
+      installed=true
+      return {running:false}
+    }
+    if(method==='uninstall') {installed=false;return {}}
+    throw new Error(`Unexpected RPC: ${method}`)
+  }}});t.after(() => h.dispose())
+  const {default:Settings}=await h.load('settings.mjs')
+  h.render(Settings);await flush()
+  click(button(h.render(Settings),'安装 Hook'));await flush()
+  assert.equal(h.pendingTimers(),1)
+  assert.equal(button(h.render(Settings),'正在安装…').props.isDisabled,true)
+  await h.timers()
+  assert.equal(polls,1)
+  assert.ok(button(h.render(Settings),'正在安装…'))
+  await h.timers()
+  let tree=h.render(Settings)
+  assert.match(text(tree),/Pi Hook 已配置/)
+  assert.match(text(tree),/重启 Pi 或 pi-web/)
+  click(button(tree,'卸载 Hook'));await flush()
+  tree=h.render(Settings)
+  assert.ok(button(tree,'安装 Hook'))
+  assert.match(text(tree),/\/webhook reload/)
+  assert.deepEqual(rpc.map(({method}) => method),['listAgents','install','piInstallStatus','piInstallStatus','listAgents','uninstall','listAgents'])
+  assert.deepEqual(rpc[1].params,{agent:'pi'})
+  assert.deepEqual(rpc[5].params,{agent:'pi'})
+})
+
+test('Agent React settings show Pi install errors and stop polling when unmounted',async t => {
+  let polls=0
+  const h=harness({sidecar:{request:async method => {
+    if(method==='listAgents') return [{id:'pi',detected:true,installed:false}]
+    if(method==='install') return {running:true}
+    if(method==='piInstallStatus') {polls++;return {running:false,error:'未检测到 npm'}}
+    throw new Error(`Unexpected RPC: ${method}`)
+  }}});t.after(() => h.dispose())
+  const {default:Settings}=await h.load('settings.mjs')
+  h.render(Settings);await flush()
+  click(button(h.render(Settings),'安装 Hook'));await flush();await h.timers()
+  const tree=h.render(Settings)
+  assert.match(text(tree),/未检测到 npm/)
+  click(button(tree,'安装 Hook'));await flush()
+  assert.equal(h.pendingTimers(),1)
+  await h.dispose()
+  assert.equal(h.pendingTimers(),0)
+  assert.equal(polls,1)
+})
+
+test('Agent React Toast opens Pi web sessions, rejects unsafe links and focuses terminal Pi',async t => {
+  const opened=[],focused=[],unexpected=[]
+  let closed=0, failOpen=false
+  const h=harness({
+    shell:{openExternal:async url => {opened.push(url);if(failOpen)throw new Error('unavailable')}},
+    http:{get:async url => {focused.push(url);return {status:200,body:'{"ok":true}'}}},
+    sidecar:{request:async method => {unexpected.push(method);throw new Error('Toast cannot use sidecar RPC')}},
+  });t.after(() => h.dispose())
+  const {default:Card}=await h.load('ui.mjs')
+  const entry={agentId:'pi',sessionId:'pi:a',sessionTitle:'Pi · 测试会话',event:'Stop'}
+  const web='http://localhost:3000/?session=a'
+  const render=(extra,focusPort) => h.render(Card,{event:{payload:{entry:{...entry,...extra},focusPort}},onClose:() => closed++})
+  let tree=render({sessionUrl:web})
+  assert.match(text(tree),/Pi · 测试会话/)
+  assert.match(text(tree),/π/)
+  click(button(tree,'前往会话'));await flush()
+  assert.deepEqual(opened,[web]);assert.equal(closed,1)
+  tree=render({sessionUrl:'file:///C:/nope',pidChain:[1]})
+  click(button(tree,'前往会话'));await flush()
+  tree=render({sessionUrl:'file:///C:/nope',pidChain:[1]})
+  assert.ok(button(tree,'未能打开会话'))
+  assert.deepEqual(opened,[web]);assert.equal(closed,1)
+  failOpen=true
+  tree=render({sessionUrl:web,pidChain:[1]})
+  click(button(tree,'未能打开会话'));await flush()
+  assert.deepEqual(opened,[web,web]);assert.deepEqual(focused,[]);assert.equal(closed,1)
+  const terminal={sessionId:'pi:terminal',pidChain:[42,36]}
+  tree=render(terminal,33456)
+  click(button(tree,'前往会话'));await flush()
+  assert.deepEqual(focused,['http://127.0.0.1:33456/focus?pids=42%2C36'])
+  assert.equal(closed,2)
+  tree=render(terminal,'33456@other.example')
+  click(button(tree,'前往会话'));await flush()
+  tree=render(terminal,'33456@other.example')
+  assert.ok(button(tree,'未能定位窗口'))
+  assert.equal(focused.length,1)
+  assert.equal(closed,2)
+  assert.deepEqual(unexpected,[])
 })
 
 test('Agent React Card preserves multi-question answers, custom text and HTTP permission decision',async t => {

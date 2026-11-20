@@ -11,7 +11,7 @@
 | 本机进程、系统监听、HTTP 服务 | `sidecar` → `runtime/main.mjs` | bt-music、smsforwarder-notify |
 | 需要页面环境的后台调度 | `background` → 普通 ESM 副作用 | timer、notify-demo |
 
-后台逻辑优先放 sidecar；background 为每个启用插件创建独立隐藏 WebView。不要向宿主添加插件专用业务 API。
+后台逻辑优先放 sidecar；background 为每个启用插件创建独立隐藏 WebView。不要向宿主添加插件专用业务 API。`agent-notify/` 可作为 React 卡片、设置页和本地鉴权 Webhook 共用 sidecar 的例子。
 
 ## 2. 插件包
 
