@@ -1,11 +1,4 @@
 features:
-  shared-ui:
-    docs:
-      - .agent/features/shared-ui/hero-ui-settings.md
-    related:
-      - agent-notify
-      - dsh-chat
-      - timer
   dsh-chat:
     docs:
       - .agent/features/dsh-chat/README.md

@@ -3,7 +3,7 @@
 Catrace 的插件仓库。这里每个插件都能给 Catrace 加一种新本事——大多数是「往桌面弹一张提醒卡片」的本事。
 
 - 宿主仓库：https://github.com/lanxiuyun/Catrace
-- UI 合同：React 函数组件，设置页控件用宿主注入的 React / HeroUI（旧卡片仍可用 Radix）；开发说明见 [develop.md](develop.md)。
+- UI 合同：React 函数组件，设置页控件用宿主注入的 React / HeroUI（旧卡片仍可用 Radix）；开发说明见 [SKILL.md](SKILL.md)。
 - 安装：Catrace **插件中心 → 发现插件 → 安装**，按仓库固定 commit 下载到 AppData，安装后默认停用，按需启用。
 
 > **启用 = 信任**：启用一个插件，等于信任它目录里的全部本地代码（有些插件还会跑一个 Node 小子进程来干活）。所以别从网上乱拷插件，使用前请先用 Ai 检查一遍安全性。
@@ -102,7 +102,7 @@ LinuxDO 论坛（linux.do）有新的回复 / @我 / 点赞时，弹卡片提醒
 
 ## 想自己写一个插件？
 
-开发文档见 [`develop.md`](develop.md)。里面讲了完整的开发流程、文件怎么写、有哪些红线，以及一份「常见问题」速查表。
+开发约定、运行时合同与验证流程见 [`SKILL.md`](SKILL.md)。
 
 ---
 

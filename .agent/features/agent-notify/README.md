@@ -40,6 +40,10 @@
 - [sidecar按职责拆文件-ui仍必须单文件blob.md](sidecar按职责拆文件-ui仍必须单文件blob.md) — **sidecar 可拆 ESM；Toast UI 不能 import 兄弟文件**
 - [提示音-内置自定义静音与toast播放.md](提示音-内置自定义静音与toast播放.md) — **迁移时漏掉的提示音：设置 + `soundNonce` 播放**
 
+## 设置页共享布局
+
+设置入口使用最新版宿主的 `__CATRACE_SETTINGS_UI__`（`SettingsCard` / `SettingsCardRow`），控件继续使用宿主 HeroUI；没有旧宿主兼容。五组顺序为「Agent 联动 → 调试 → 事件通知策略 → 提示音 → 调试卡片」，检测到的 Agent 也使用共享 Row。卡片标题、说明、背景和相邻 Row 分隔线由宿主管理；检测备注与底部五个预览按钮保持原生节点，不参与行分隔。插件只保留提示音路径、音量、未检测标记与预览等业务局部样式，配置保存、Hook RPC 与音频行为不变。公共 props 见 [HeroUI 设置页约定](../shared-ui/hero-ui-settings.md)。
+
 ## 开发流程
 
 修改 React 卡片与设置 → 语法与 Node 回归 → 用户要求时做实机验证 → 用户确认后在本仓库按功能提交。发布后通过插件中心安装仓库快照。
