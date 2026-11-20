@@ -20,7 +20,7 @@ DSH（DeepSeek Harness）干活时，右下角弹一张**可折叠状态卡**；
 - 需要本机 Node.js ≥ 22.15；展开官方界面还要求 DSH Desktop 正在运行、并在 DSH 里打开「允许在浏览器中打开」。默认关闭。
 
 ### 🤖 Agent 通知（agent-notify）
-Claude / Codex / Gemini / Kimi 的 hook 通知和权限审批，落在桌面小窗。sidecar 监听 `127.0.0.1:23456`。需要本机 Node.js。默认关闭。
+Claude / ZCode / Codex / Gemini / Kimi 的 hook 通知和权限审批，以及 Pi / pi-web 的 Webhook 状态提醒，落在桌面小窗。Hook 和 Pi 复用 `127.0.0.1:23456`，Pi 通过独立鉴权的 `/pi` 路由接收（仅提醒，无远程审批），不新增监听端口。Pi 扩展仅使用 npm 安装，未检测到 npm 则提示错误，不提供备用下载。需要本机 Node.js。默认关闭。
 
 ### ✅ 企业微信待办（wecom-todo）
 用本机 `wecom-cli todo list` 轮询工作台待办，新待办弹桌面小窗，卡片可标完成。需要已扫码的 wecom-cli 与 Node.js。默认关闭。

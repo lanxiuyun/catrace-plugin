@@ -1,8 +1,8 @@
 {
   "id": "agent-notify",
   "name": "Agent 通知",
-  "version": "26.11.17",
-  "description": "Claude / ZCode / Codex / Gemini / Kimi 的 hook 通知与权限审批，落在桌面小窗",
+  "version": "26.11.20",
+  "description": "Claude / ZCode / Codex / Gemini / Kimi 的 Hook 通知与权限审批，以及 Pi / pi-web 的状态提醒",
   "main": "ui.mjs",
   "settings": "settings.mjs",
   "uiFramework": "react",
