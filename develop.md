@@ -65,7 +65,8 @@ export default function Settings() {
 
 - Card 导出 `default` / `Card` / `card`；设置面板导出 `default` / `Settings` / `settings`，使用普通 React 函数组件与 hooks。
 - `__CATRACE_REACT__` 是 React 命名空间；`__CATRACE_HEROUI__` 是 HeroUI v3 命名空间，组件样式与深浅色由宿主页面提供，插件不用自带控件皮肤。用扁平导出（`SwitchRoot` / `SwitchContent` / `SelectRoot` / `SelectTrigger` …），不用 `Switch.Content` 这类复合静态属性。
-- `__CATRACE_SETTINGS_UI__` 提供宿主公共设置组件 `{ SettingsCard, SettingsCardRow }`。`SettingsCard` props：`title: string`、`description?: string`、`children`；`SettingsCardRow` props：`title: string`、`description?: string`、`control: ReactNode`、`stack?: boolean`、`children?: ReactNode`。卡片标题、说明、背景、行布局由宿主管理，不依赖宿主 CSS 类名。Card 只在连续的 SettingsCardRow 之间插入 Separator，原生备注与预览按钮组不参与分隔。使用该接口的插件要求最新版宿主，缺失时显式抛错，不提供旧宿主兼容。
+- `__CATRACE_SETTINGS_UI__` 提供宿主公共设置组件 `{ SettingsCard, SettingsCardRow }`。`SettingsCard` props：`title: string`、`description?: string`、`children`；`SettingsCardRow` props：`title: string`、`description?: string`、`control: ReactNode`、`stack?: boolean`、`children?: ReactNode`。卡片标题、说明、背景、行布局由宿主管理，不依赖宿主 CSS 类名。Card 只在连续的 SettingsCardRow 之间插入 Separator，原生备注与预览按钮组不参与分隔。简单设置页优先采用这种宿主 Card + 行内 control 的紧凑布局；直接放在 Card 中的按钮组沿用内容区默认间距，不另加行内 padding。使用该接口的插件要求最新版宿主，缺失时显式抛错，不提供旧宿主兼容。
+- 操作反馈使用宿主注入的 HeroUI `Toast` / `ToastQueue`：在设置页渲染 `Toast.Provider` 并通过队列添加成功或失败消息；简单设置操作成功时避免重复提示，主要对需要确认的操作结果和错误使用 Toast。
 - `__CATRACE_RADIX__` 是 Radix Themes 命名空间，只为尚未迁移的旧卡片 / 旧设置页保留；新代码不要再用。宿主没有 `__CATRACE_HEROUI__` 时设置页应显式抛错，不要静默退回原生控件。
 - Card props 为 `event`、`isHovered`、`remainingMs`、`totalMs`，动作通过 `onClose()` / `onAction(actionId)` 回调。业务动作在后台 / sidecar 中处理。
 - Blob 模块必须自包含：不能 bare import 包，也不能相对 import 兄弟文件。需要拆分源码时，先构建为单文件 ESM，再交付清单入口。
@@ -75,7 +76,7 @@ export default function Settings() {
 ## 4. 布局与状态
 
 - settings 根只提供业务内容，页面边距、最大宽度、详情导航和主开关由宿主管理。
-- 控件统一 HeroUI：输入 / 多行输入 / 下拉默认 `variant="secondary"`，按钮 `size="sm"`（主操作 `primary`、次操作 `secondary` / `tertiary`、危险 `danger-soft`），开关 / 复选框用 `isSelected` + `onChange`，分段选择用 `ToggleButtonGroup` + `ToggleButton`。详见 [HeroUI 设置页约定](.agent/features/shared-ui/hero-ui-settings.md)。
+- 控件统一 HeroUI：Input / TextArea / NumberField / Select 沿用组件当前默认外观，不显式覆写 `variant`；按钮 `size="sm"`（主操作 `primary`、次操作 `secondary` / `tertiary`、危险 `danger-soft`），开关 / 复选框用 `isSelected` + `onChange`，分段选择用 `ToggleButtonGroup` + `ToggleButton`。详见 [HeroUI 设置页约定](.agent/features/shared-ui/hero-ui-settings.md)。
 - 不要用 Tailwind utility class（`flex` / `gap-2` / `w-full` 等）：宿主的 Tailwind 只扫描宿主源码，插件里写的工具类不会生成。
 - 不要用 `.card` / `.badge` / `.header` / `.progress-bar` 这类 HeroUI 全局裸类名贴在原生 div 上；插件自有 class 一律加插件前缀。
 - class / style id 使用插件前缀；尺寸用 rem（1px 边框、blur、SVG viewBox 除外）。样式注入要支持同 document 的内容更新。
