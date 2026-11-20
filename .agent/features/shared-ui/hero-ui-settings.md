@@ -29,15 +29,15 @@ HeroUI 既有 `Switch`（带 `.Content` / `.Control` / `.Thumb` 静态属性）�
 
 | 旧写法 | 现在用 HeroUI | 说明 |
 | --- | --- | --- |
-| Radix `TextField.Root` / 原生 `input` | `Input` | 使用 HeroUI 当前默认外观，不显式设 `variant="secondary"`；宽度交给插件 CSS class；独立 Input 用原生 `disabled`，不是 `isDisabled`；提供 `aria-label` 或关联标签 |
-| Radix `TextArea` / 原生 `textarea` | `TextArea` | 使用 HeroUI 当前默认外观，不显式设 `variant="secondary"`；按需设置 `rows` |
-| 原生 `input[type="number"]` / Radix 数字输入 | `NumberFieldRoot` + `NumberFieldGroup` + `NumberFieldInput` + `NumberFieldDecrementButton` + `NumberFieldIncrementButton` | 使用 HeroUI 当前默认外观，不显式设 `variant="secondary"`；`value` 是数字（`null` 表示空），`onChange` 先判 `Number.isFinite`；左右 −/+ 图标自带，按钮补 `aria-label`；`formatOptions={{useGrouping:false}}` 关掉千分位；宽度至少 9rem，别把中间输入区挤没 |
+| Radix `TextField.Root` / 原生 `input` | `Input` | 使用 HeroUI 当前默认外观，宽度交给插件 CSS class；独立 Input 用原生 `disabled`，不是 `isDisabled`；提供 `aria-label` 或关联标签 |
+| Radix `TextArea` / 原生 `textarea` | `TextArea` | 使用 HeroUI 当前默认外观，按需设置 `rows` |
+| 原生 `input[type="number"]` / Radix 数字输入 | `NumberFieldRoot` + `NumberFieldGroup` + `NumberFieldInput` + `NumberFieldDecrementButton` + `NumberFieldIncrementButton` | 使用 HeroUI 当前默认外观，`value` 是数字（`null` 表示空），`onChange` 先判 `Number.isFinite`；左右 −/+ 图标自带，按钮补 `aria-label`；`formatOptions={{useGrouping:false}}` 关掉千分位；宽度至少 9rem，别把中间输入区挤没 |
 | 自绘 tab / 旧分段 tab | `TabsRoot` + `TabListContainer` + `TabList` + `Tab`（`TabIndicator` 放 `Tab` 内）+ `TabPanel` | **不能省 `TabListContainer`**：HeroUI 默认的灰色底轨画在它上面，漏了会变成一条铺满的白底 tab；选中态、`aria-label` 与 `role=tab/tabpanel` 由组件自带，不要自绘 tab 皮肤 |
 | Radix `Button` / 原生 `button` | `Button` | `size="sm"`；`onClick`、`isDisabled`（不是 `disabled`） |
 | Radix `Switch` / 原生 checkbox 开关 | `SwitchRoot` + `SwitchContent` + `SwitchControl` + `SwitchThumb` | `isSelected` / `onChange`，标签用 `Label` 放进 `SwitchContent` |
 | Radix `SegmentedControl` | `ToggleButtonGroup` + `ToggleButton`（+ `ToggleButtonGroupSeparator`） | `selectionMode="single"`、`selectedKeys={[value]}`、`onSelectionChange` 收到 `Set`，取第一个 key；**分隔线要放进除第一项外的每个 `ToggleButton` 里**（官方 anatomy），不写的话按钮会糊成一块、和 HeroUI 文档里的样式不一样 |
 | 多选开关组 / 可点亮标签 | `ToggleButtonGroup`（`selectionMode="multiple"`）+ `ToggleButton`（+ `ToggleButtonGroupSeparator`） | 一组独立开关不要渲染成一排裸 `ToggleButton`：它们和旁边的操作按钮外观一样，用户分不清「开关」和「按钮」；用组容器 + 分隔线，选中态交给组的 `selectedKeys` 受控 |
-| Radix `Select` / 原生 `select` | `SelectRoot` + `SelectTrigger` + `SelectValue` + `SelectIndicator` + `SelectPopover` + `ListBox` + `ListBoxItem` | 使用 HeroUI 当前默认外观，不显式设 `variant="secondary"`；每个 item 给 `id` 与 `textValue` |
+| Radix `Select` / 原生 `select` | `SelectRoot` + `SelectTrigger` + `SelectValue` + `SelectIndicator` + `SelectPopover` + `ListBox` + `ListBoxItem` | 使用 HeroUI 当前默认外观，每个 item 给 `id` 与 `textValue` |
 | Radix `Slider` | `SliderRoot` + `SliderTrack` + `SliderFill` + `SliderThumb` | `value` 是数字，`onChange` 先判断 `typeof value === 'number'` |
 | Radix `Badge` / 原生小胶囊 | `Chip` | `size="sm" variant="soft"`，`color` 取 `default` / `accent` / `success` / `warning` / `danger` |
 | 短暂操作反馈 / Toast | `Toast.Provider` + `ToastQueue` | 队列通过 `add({ title?, description?, variant })` 入队；Provider 选择 placement。成功反馈仅在有确认价值时显示，预览成功不重复提示；错误使用 Toast，不用占据设置布局的内嵌 Alert |
