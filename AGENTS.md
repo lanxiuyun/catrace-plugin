@@ -1,21 +1,10 @@
 # catrace-plugin — Agent Guide
 
-每个插件一个目录，React 卡片和设置、自包含 ESM、Node sidecar 与插件知识均在本仓库维护。
-
-## 开发入口
-
-- 修改插件前读 [develop.md](develop.md) 的 React / Blob、配置、事件与 sidecar 合同；AI 操作流程见 [SKILL.md](SKILL.md)。
-- UI 使用宿主同一个 React 实例与 HeroUI 组件库（设置页控件统一 HeroUI，旧卡片仍可用 Radix），普通配置保存不覆盖主开关；不要向宿主添加插件专用业务 API。
+- 插件源码、开发约定与 AI 操作流程以 [SKILL.md](SKILL.md) 为准；开始任务先读取它，并遵守其中的最小改动、验证及提交授权要求。AI agent 从此文件发现并引入 `SKILL.md`。
+- 本仓库通用规范只保留 AGENTS.md 与 SKILL.md；开发约定统一维护于 SKILL.md，禁止另建重复的通用指南。
+- 插件功能知识按需读取 `.agent/features/<插件id>/` 对应 README；修改既有行为时再查该功能的专项说明。
 - 不修改用户 AppData 内已安装的插件来替代源码测试；不自动启动开发服务或做界面验证。
-
-## 知识沉淀
-
-- 插件相关知识写本仓库 `.agent/features/<插件id>/`，入口为 README；增删时同步 [.agent/manifest.yaml](.agent/manifest.yaml)。
-- 宿主多模块协作知识放 Catrace 主仓 `.agent/`；文档写现行行为，直接删除失效机制说明。
-
-## 提交约定
-
-- PR 标题和描述使用中文。
-- 改动先留工作区，用户明确要求提交或 push 后才执行；按功能合并同类修改。
-- 修改插件时更新 `manifest.version` 为当天 `YY.M.D`（如 `26.11.9`，与 Catrace 版本号同形、不补零），同日多次发布增加第四段；UI 清单标记 `uiFramework: "react"`。
-- 宿主与插件分别在各自仓库提交；发布后由插件中心按固定仓库 commit 安装。
+- PR 标题和描述使用中文。修改先留工作区；用户明确要求提交或 push 后才执行。宿主与插件分别在各自仓库提交。
+- 修改插件时更新 `manifest.version` 为当天 `YY.M.D`（如 `26.11.9`，不补零；同日多次发布增加第四段）；React UI 清单标记 `uiFramework: "react"`。
+- 知识沉淀在本仓库 `.agent/features/<插件id>/`，增删时同步 `.agent/manifest.yaml`；宿主多模块协作知识放 Catrace 主仓 `.agent/`。文档记录现行行为，直接删除失效机制说明。
+- 发布后由插件中心按固定仓库 commit 安装。
